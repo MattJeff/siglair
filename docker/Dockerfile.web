@@ -37,7 +37,7 @@ RUN printf '%s\n' \
     '  gzip_types text/css application/javascript application/json image/svg+xml;' \
     '  location /assets/ { expires 1y; add_header Cache-Control "public, immutable"; }' \
     '  location = /index.html { add_header Cache-Control "no-cache"; }' \
-    '  location / { try_files \$uri /index.html; }' \
+    '  location / { try_files $uri /index.html; }' \
     '}' > /etc/nginx/conf.d/default.conf
 
 HEALTHCHECK --interval=15s --timeout=5s --retries=3 \
