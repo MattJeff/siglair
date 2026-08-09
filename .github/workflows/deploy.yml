@@ -18,7 +18,10 @@ concurrency:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/siglair
+  # En minuscules, forcément : le propriétaire GitHub s'écrit « MattJeff », or un nom
+  # de dépôt Docker n'accepte que des minuscules. `github.repository_owner` tel quel
+  # fait échouer buildx sur « repository name must be lowercase ».
+  IMAGE_REPO: ghcr.io/mattjeff/siglair
 
 jobs:
   # Les tests tournent avant tout build : inutile de fabriquer 1,5 Go d'image
