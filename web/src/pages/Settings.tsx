@@ -9,15 +9,7 @@ import { useToast } from '../components/Toast';
 import { AppShell } from '../components/app/AppShell';
 import { ConfirmDialog } from '../components/app/ConfirmDialog';
 import { apiMessage, formatDate } from '../components/app/helpers';
-import {
-  ApiError,
-  deleteAccount,
-  listMembers,
-  listSignatures,
-  logout,
-  updateMemberProfile,
-  updateSignature,
-} from '../lib/api';
+import { deleteAccount, listMembers, logout, updateOwnProfile } from '../lib/api';
 import { useSession } from '../lib/session';
 import { PROFILE_KEYS } from '../lib/types';
 import type { Profile, ProfileKey } from '../lib/types';
@@ -49,26 +41,12 @@ const FIELDS: { key: ProfileKey; label: string; type: string; placeholder: strin
   { key: 'company', label: 'Entreprise', type: 'text', placeholder: 'Exemple SAS' },
 ];
 
-/**
- * Écriture de `org_members.profile` en meilleur effort : la route n'est pas encore au
- * contrat §5.3. Renvoie false si elle n'est pas servie — les signatures de l'utilisateur
- * ont alors quand même été mises à jour, et c'est elles qui portent le rendu (§3.1).
- */
-async function putMemberProfile(orgId: string, userId: string, profile: Profile): Promise<boolean> {
-  try {
-    await updateMemberProfile(orgId, userId, profile);
-    return true;
-  } catch (e) {
-    if (e instanceof ApiError && (e.status === 404 || e.status === 405)) return false;
-    throw e;
-  }
-}
-
 export default function Settings() {
   const { user, currentOrg, plan } = useSession();
   const toast = useToast();
 
   const [values, setValues] = useState<Values>(EMPTY);
+  const [savedValues, setSavedValues] = useState<Values>(EMPTY);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -77,10 +55,17 @@ export default function Settings() {
 
   const orgId = currentOrg?.id ?? '';
   const userId = user?.id ?? '';
+  const dirty = PROFILE_KEYS.some((key) => values[key] !== savedValues[key]);
 
   useEffect(() => {
-    if (!orgId || !userId) return;
+    if (!orgId || !userId) {
+      setLoading(false);
+      setError('Votre session n’a pas d’organisation active. Reconnectez-vous pour continuer.');
+      return;
+    }
     let alive = true;
+    setLoading(true);
+    setError('');
     listMembers(orgId)
       .then((members) => {
         if (!alive) return;
@@ -91,6 +76,7 @@ export default function Settings() {
         if (!next.name) next.name = user?.name ?? '';
         if (!next.email) next.email = user?.email ?? '';
         setValues(next);
+        setSavedValues(next);
       })
       .catch((e: unknown) => {
         if (alive) setError(apiMessage(e));
@@ -105,32 +91,25 @@ export default function Settings() {
 
   const save = async (e: FormEvent) => {
     e.preventDefault();
+    if (saving || !dirty || !orgId || !userId) return;
     setSaving(true);
     setError('');
     try {
+      const normalized = { ...EMPTY };
       const profile: Profile = {};
       for (const key of PROFILE_KEYS) {
         const v = values[key].trim();
+        normalized[key] = v;
         if (v) profile[key] = v;
       }
 
-      // Les signatures portent leur propre copie du profil (§3.1) : on les met à jour,
-      // sinon le formulaire ne changerait rien au rendu.
-      const mine = (await listSignatures()).filter((sig) => sig.owner_user_id === userId);
-      await Promise.all(mine.map((sig) => updateSignature(sig.id, { profile })));
-
-      const stored = await putMemberProfile(orgId, userId, profile);
-      if (!stored && mine.length === 0) {
-        throw new ApiError(
-          'internal',
-          'Créez d’abord une signature : votre profil y sera enregistré.',
-          404,
-        );
-      }
+      const { updated_signatures: count } = await updateOwnProfile(profile);
+      setValues(normalized);
+      setSavedValues(normalized);
 
       toast(
-        mine.length > 0
-          ? `Profil enregistré sur ${mine.length} signature${mine.length > 1 ? 's' : ''}. Republiez-les pour que vos destinataires voient le changement.`
+        count > 0
+          ? `Profil enregistré sur ${count} signature${count > 1 ? 's' : ''}. Republiez-les pour que vos destinataires voient le changement.`
           : 'Profil enregistré.',
         'success',
       );
@@ -180,9 +159,11 @@ export default function Settings() {
                       value={values[f.key]}
                       placeholder={f.placeholder}
                       autoComplete="off"
-                      onChange={(e) =>
-                        setValues((prev) => ({ ...prev, [f.key]: e.currentTarget.value }))
-                      }
+                      disabled={saving}
+                      onChange={(e) => {
+                        const value = e.currentTarget.value;
+                        setValues((prev) => ({ ...prev, [f.key]: value }));
+                      }}
                     />
                   </Field>
                 ))}
@@ -202,7 +183,7 @@ export default function Settings() {
               )}
 
               <div className={s.actions}>
-                <Button type="submit" loading={saving}>
+                <Button type="submit" loading={saving} disabled={!dirty || !orgId || !userId}>
                   Enregistrer le profil
                 </Button>
               </div>

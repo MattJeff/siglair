@@ -10,24 +10,72 @@ use axum::{
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, patch},
     Json, Router,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use uuid::Uuid;
 
 use crate::{
-    auth::{self, load_org, session, CurrentUser},
+    auth::{self, load_org, session, CurrentUser, OrgAccess},
+    doc::Profile,
     error::{AppError, Result},
     AppState,
 };
 
 pub fn router() -> Router<AppState> {
-    Router::new().route(
-        "/me",
-        get(auth::me).patch(switch_org).delete(delete_account),
+    Router::new()
+        .route(
+            "/me",
+            get(auth::me).patch(switch_org).delete(delete_account),
+        )
+        .route("/me/profile", patch(update_profile))
+}
+
+// ------------------------------------------------------------------ profil personnel
+
+#[derive(Deserialize)]
+struct ProfilePatch {
+    profile: Profile,
+}
+
+#[derive(Serialize)]
+struct ProfilePatchResult {
+    updated_signatures: u64,
+}
+
+/// `PATCH /api/me/profile` met à jour le profil membre et toutes ses signatures dans une
+/// seule transaction. L'écran Réglages ne peut donc plus laisser les deux copies divergentes
+/// si l'une des requêtes échoue au milieu de la sauvegarde.
+async fn update_profile(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Json(req): Json<ProfilePatch>,
+) -> Result<Json<ProfilePatchResult>> {
+    let profile = serde_json::to_value(req.profile)?;
+    let mut tx = st.db.begin().await?;
+
+    sqlx::query("UPDATE org_members SET profile = $3 WHERE org_id = $1 AND user_id = $2")
+        .bind(access.org_id)
+        .bind(access.user_id)
+        .bind(&profile)
+        .execute(&mut *tx)
+        .await?;
+
+    let updated_signatures = sqlx::query(
+        "UPDATE signatures SET profile = $3, updated_at = now() \
+         WHERE org_id = $1 AND owner_user_id = $2 AND deleted_at IS NULL",
     )
+    .bind(access.org_id)
+    .bind(access.user_id)
+    .bind(&profile)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+
+    tx.commit().await?;
+    Ok(Json(ProfilePatchResult { updated_signatures }))
 }
 
 // ------------------------------------------------------------------ organisation active

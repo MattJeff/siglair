@@ -113,6 +113,15 @@ export const logout = (): Promise<void> => api<void>('/api/auth/logout', { metho
 /** Hors contrat §5.3, exigé par l'écran Réglages (RGPD). Signalé dans le rapport. */
 export const deleteAccount = (): Promise<void> => api<void>('/api/me', { method: 'DELETE' });
 
+/** Enregistre le profil membre et toutes ses signatures dans une transaction serveur. */
+export const updateOwnProfile = (
+  profile: Profile,
+): Promise<{ updated_signatures: number }> =>
+  api<{ updated_signatures: number }>('/api/me/profile', {
+    method: 'PATCH',
+    body: json({ profile }),
+  });
+
 /** URL de départ OAuth — navigation pleine page, pas de fetch (302 vers le fournisseur). */
 export const oauthStartUrl = (provider: 'google' | 'apple'): string =>
   `/api/auth/${provider}/start`;
@@ -225,11 +234,6 @@ export const listMembers = (orgId: string): Promise<Member[]> =>
 export const inviteMember = (orgId: string, email: string, role: Role): Promise<void> =>
   api<void>(`/api/orgs/${orgId}/invites`, { method: 'POST', body: json({ email, role }) });
 
-/**
- * Hors contrat §5.3, mais indispensable : `org_members.profile` alimente le rollout d'équipe
- * et aucune route ne permet aujourd'hui de l'écrire. L'appelant traite un 404/405 comme
- * « route pas encore servie ». Signalé dans le rapport.
- */
 export const updateMemberProfile = (
   orgId: string,
   userId: string,

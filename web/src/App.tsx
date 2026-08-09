@@ -1,24 +1,26 @@
-import { Suspense, lazy } from 'react';
+import { Suspense } from 'react';
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
+import { AppErrorBoundary } from './components/AppErrorBoundary';
 import { Spinner } from './components/Spinner';
+import { lazyPage } from './lib/lazyPage';
 import { useSession } from './lib/session';
 
 /*
  * Chaque page exporte un composant PAR DÉFAUT (contrainte de React.lazy).
  * Le chargement paresseux évite d'embarquer l'éditeur dans le bundle de la landing.
  */
-const Landing = lazy(() => import('./pages/Landing'));
-const Pricing = lazy(() => import('./pages/Pricing'));
-const Legal = lazy(() => import('./pages/Legal'));
-const Login = lazy(() => import('./pages/Login'));
-const Invite = lazy(() => import('./pages/Invite'));
-const Onboarding = lazy(() => import('./pages/Onboarding'));
-const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Editor = lazy(() => import('./pages/Editor'));
-const Analytics = lazy(() => import('./pages/Analytics'));
-const Team = lazy(() => import('./pages/Team'));
-const Billing = lazy(() => import('./pages/Billing'));
-const Settings = lazy(() => import('./pages/Settings'));
+const Landing = lazyPage(() => import('./pages/Landing'));
+const Pricing = lazyPage(() => import('./pages/Pricing'));
+const Legal = lazyPage(() => import('./pages/Legal'));
+const Login = lazyPage(() => import('./pages/Login'));
+const Invite = lazyPage(() => import('./pages/Invite'));
+const Onboarding = lazyPage(() => import('./pages/Onboarding'));
+const Dashboard = lazyPage(() => import('./pages/Dashboard'));
+const Editor = lazyPage(() => import('./pages/Editor'));
+const Analytics = lazyPage(() => import('./pages/Analytics'));
+const Team = lazyPage(() => import('./pages/Team'));
+const Billing = lazyPage(() => import('./pages/Billing'));
+const Settings = lazyPage(() => import('./pages/Settings'));
 
 function PageLoader() {
   return (
@@ -54,31 +56,33 @@ function NotFound() {
 
 export default function App() {
   return (
-    <Suspense fallback={<PageLoader />}>
-      <Routes>
-        <Route path="/" element={<Landing />} />
-        <Route path="/pricing" element={<Pricing />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/invite/:token" element={<Invite />} />
-        {/* Legal gère ses sous-pages (CGU, confidentialité, mentions) via useParams()['*']. */}
-        <Route path="/legal/*" element={<Legal />} />
+    <AppErrorBoundary>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/" element={<Landing />} />
+          <Route path="/pricing" element={<Pricing />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/invite/:token" element={<Invite />} />
+          {/* Legal gère ses sous-pages (CGU, confidentialité, mentions) via useParams()['*']. */}
+          <Route path="/legal/*" element={<Legal />} />
 
-        <Route element={<RequireAuth />}>
-          {/* §6bis.6 : `analyze` est publique, `generate` exige un compte. L'écran est donc
+          <Route element={<RequireAuth />}>
+            {/* §6bis.6 : `analyze` est publique, `generate` exige un compte. L'écran est donc
               derrière la session — la marque analysée avant l'inscription le traverse par
               sessionStorage (`rememberBrand`). Hors /app : c'est l'accueil d'un nouveau
               compte, pas un onglet du tableau de bord. */}
-          <Route path="/onboarding" element={<Onboarding />} />
-          <Route path="/app" element={<Dashboard />} />
-          <Route path="/app/editor/:id" element={<Editor />} />
-          <Route path="/app/analytics/:id" element={<Analytics />} />
-          <Route path="/app/team" element={<Team />} />
-          <Route path="/app/billing" element={<Billing />} />
-          <Route path="/app/settings" element={<Settings />} />
-        </Route>
+            <Route path="/onboarding" element={<Onboarding />} />
+            <Route path="/app" element={<Dashboard />} />
+            <Route path="/app/editor/:id" element={<Editor />} />
+            <Route path="/app/analytics/:id" element={<Analytics />} />
+            <Route path="/app/team" element={<Team />} />
+            <Route path="/app/billing" element={<Billing />} />
+            <Route path="/app/settings" element={<Settings />} />
+          </Route>
 
-        <Route path="*" element={<NotFound />} />
-      </Routes>
-    </Suspense>
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </Suspense>
+    </AppErrorBoundary>
   );
 }
