@@ -7,6 +7,7 @@
  */
 import { Link } from 'react-router-dom';
 import { BrandHero } from '../components/marketing/BrandHero';
+import { CampaignDemo } from '../components/marketing/CampaignDemo';
 import { Faq } from '../components/marketing/Faq';
 import type { QA } from '../components/marketing/Faq';
 import { START_HREF, SiteFooter, SiteHeader, usePageMeta } from '../components/marketing/Chrome';
@@ -16,12 +17,22 @@ import s from './marketing.module.css';
 
 /**
  * Domaine public du produit (contrat §0), illustratif dans les exemples de code.
- * Lu depuis l'environnement Vite (DESIGN.md §9) : le domaine n'est pas encore acheté,
- * l'écrire en dur garantirait de l'oublier le jour où il change.
+ * Lu depuis l'environnement Vite (DESIGN.md §9), avec le domaine public de production
+ * comme valeur de repli pour les builds sans fichier d'environnement.
  */
-const PUBLIC_HOST = import.meta.env.VITE_PUBLIC_HOST ?? 'siglair.app';
+const PUBLIC_HOST = import.meta.env.VITE_PUBLIC_HOST ?? 'siglair.com';
 
 const FEATURES: { icon: string; title: string; text: string }[] = [
+  {
+    icon: '◷',
+    title: 'Campagnes de signature et CTA',
+    text: 'Préparez un lancement, un événement, une offre ou un contenu. Appliquez la campagne, republiez, et la même URL hébergée diffuse le nouveau message sans nouvelle installation.',
+  },
+  {
+    icon: '↗',
+    title: 'Clics mesurés par bouton',
+    text: 'Comparez l’intérêt pour une bannière, une prise de rendez-vous, votre site ou LinkedIn. Chaque CTA est compté séparément, sans adresse IP conservée en clair.',
+  },
   {
     icon: '◉',
     title: 'Signature email animée, rendue côté serveur',
@@ -33,19 +44,9 @@ const FEATURES: { icon: string; title: string; text: string }[] = [
     text: 'La même URL sert l’animation quand le client mail l’accepte, et une première image lisible quand il la bloque. Votre signature reste propre, même dans Outlook Windows.',
   },
   {
-    icon: '↗',
-    title: 'Clics et ouvertures par bouton',
-    text: 'Vous voyez les ouvertures et les clics, élément par élément. Le lien “Prendre rendez-vous”, le site et LinkedIn sont comptés séparément, sans adresse IP conservée en clair.',
-  },
-  {
     icon: '⬒',
     title: 'Signatures d’équipe centralisées',
     text: 'Un modèle d’organisation, un profil par membre, et chacun garde une signature email cohérente. Le jour où la marque change, vous republiez : l’équipe n’a rien à recoller.',
-  },
-  {
-    icon: '◷',
-    title: 'Campagnes et bannières datées',
-    text: 'Ajoutez un lancement, un événement, une offre ou un lien de prise de rendez-vous sous chaque email. La campagne commence et s’arrête dans Siglair, pas dans les réglages mail.',
   },
 ];
 
@@ -58,20 +59,20 @@ const CLIENTS: { name: string; note: string; warn?: boolean }[] = [
 
 const STORY_STEPS: { title: string; text: string }[] = [
   {
-    title: 'Votre marque paraît cohérente.',
-    text: 'Logo, couleurs, rôle, liens et mentions restent alignés d’une personne à l’autre, même quand l’équipe grandit.',
+    title: 'Planifiez vos temps forts.',
+    text: 'Préparez un lancement, un événement, un cas client ou une offre sans modifier les réglages mail de toute l’équipe.',
   },
   {
-    title: 'Vos informations restent à jour.',
-    text: 'Changement de poste, nouveau logo, campagne terminée : vous republiez la signature au lieu de renvoyer du HTML à tout le monde.',
+    title: 'Republiez sans faire recoller l’équipe.',
+    text: 'Le message change dans Siglair, mais l’URL hébergée reste la même. Une publication suffit pour diffuser la nouvelle version.',
   },
   {
-    title: 'Chaque email devient plus utile.',
-    text: 'Un CTA clair peut guider vers votre site, votre calendrier, une démo, un contenu ou une page de contact sans surcharger le message.',
+    title: 'Mesurez chaque appel à l’action.',
+    text: 'Suivez séparément la bannière, la prise de rendez-vous, le site et les réseaux pour identifier le message qui attire les clics.',
   },
   {
-    title: 'Vous gardez le contrôle.',
-    text: 'Vous savez ce qui est cliqué, vous gardez un repli Outlook lisible, et vous évitez les signatures bricolées dans chaque client mail.',
+    title: 'Gardez la marque au premier plan.',
+    text: 'Logo, rôle, campagne et première image Outlook restent cohérents, même quand la campagne ou l’équipe évolue.',
   },
 ];
 
@@ -79,6 +80,10 @@ const FAQ_ITEMS: QA[] = [
   {
     q: 'Pourquoi utiliser une signature email professionnelle hébergée ?',
     a: 'Parce qu’une signature copiée-collée dans Gmail ou Outlook vieillit mal : logo périmé, mauvais poste, lien cassé, bannière oubliée. Avec une signature hébergée, vous collez une URL une fois, puis vous mettez à jour le design, les liens et les campagnes depuis Siglair.',
+  },
+  {
+    q: 'Comment utiliser ma signature comme canal marketing ?',
+    a: 'Ajoutez une bannière et un CTA vers un lancement, un événement, un contenu ou une prise de rendez-vous. Les dates vous aident à préparer le temps fort ; vous appliquez ensuite la campagne et republiez. L’URL hébergée ne change pas, et les clics de chaque bouton sont mesurés séparément.',
   },
   {
     q: 'Est-ce que ça marche dans Outlook ?',
@@ -106,8 +111,8 @@ const FAQ_ITEMS: QA[] = [
 
 export default function Landing() {
   usePageMeta(
-    'Siglair — générateur de signature email professionnelle animée',
-    'Créez une signature email professionnelle, animée et hébergée. Siglair centralise vos signatures Gmail, Outlook et Apple Mail avec mise à jour sans copier-coller, repli Outlook et analytics.',
+    'Siglair — générateur de signature email marketing animée',
+    'Transformez chaque email en canal marketing : signature animée, campagnes et CTA, mise à jour sans copier-coller, analytics, Gmail et Outlook.',
   );
 
   return (
@@ -124,23 +129,23 @@ export default function Landing() {
         */}
         <section className={`${s.wrap} ${s.hero}`}>
           <div className={s.heroCenter}>
-            <p className={s.eyebrow}>Votre première signature est gratuite</p>
+            <p className={s.eyebrow}>Créez gratuitement votre première signature marketing</p>
             {/* Le dégradé porte sur un segment sans jambage : `.gradientText` découpe le
                 fond sur la boîte de la ligne, et un « g » y perdrait sa descendante. */}
             <h1>
-              Collez votre site.
+              Votre signature email.
               <br />
-              <span className={s.gradientText}>Votre signature email apparaît.</span>
+              <span className={s.gradientText}>Un canal marketing à part entière.</span>
             </h1>
             <p className={s.heroCopy}>
-              <strong>Vos emails finissent. Votre marque, non.</strong> Siglair analyse votre
-              identité visuelle, compose une signature email professionnelle et animée, puis vous
-              laisse tout modifier dans l’éditeur.
+              <strong>Collez votre site, Siglair compose la signature.</strong> Ajoutez ensuite
+              campagnes, CTA, lancements et contenus, puis republiez sans demander à personne de
+              recoller quoi que ce soit.
             </p>
             <BrandHero />
             <ul className={`${s.micro} ${s.microList} ${s.microCenter}`}>
-              <li>Sans compte pour voir votre marque</li>
-              <li>Sans carte bancaire</li>
+              <li>Campagnes et CTA</li>
+              <li>Clics mesurés par bouton</li>
               <li>Gmail, Outlook et Apple Mail</li>
             </ul>
             <p className={`${s.note} ${s.heroNote}`}>
@@ -224,18 +229,57 @@ export default function Landing() {
           </div>
         </section>
 
+        {/* ---------------------------------------------- canal marketing */}
+        <section id="campagnes" className={`${s.wrap} ${s.section} ${s.campaignSection}`}>
+          <div className={s.campaignIntro}>
+            <div className={s.sectionHead}>
+              <span className={s.kicker}>Canal marketing</span>
+              <h2>Votre équipe envoie déjà le média. Pilotez enfin le message.</h2>
+              <p className={s.lead}>
+                Chaque réponse commerciale, suivi client ou prise de contact porte un espace de
+                confiance. Utilisez-le pour diffuser un lancement, un événement, une offre, un
+                contenu ou une prise de rendez-vous.
+              </p>
+            </div>
+            <ol className={s.campaignBenefits}>
+              <li>
+                <span>01</span>
+                <div>
+                  <h3>Préparez le temps fort</h3>
+                  <p>Créez la bannière, le CTA et sa période depuis le même éditeur.</p>
+                </div>
+              </li>
+              <li>
+                <span>02</span>
+                <div>
+                  <h3>Republiez, sans réinstaller</h3>
+                  <p>La signature hébergée change ; son URL dans le client mail reste identique.</p>
+                </div>
+              </li>
+              <li>
+                <span>03</span>
+                <div>
+                  <h3>Mesurez l’intérêt</h3>
+                  <p>Les clics de la bannière et des autres boutons sont distingués.</p>
+                </div>
+              </li>
+            </ol>
+          </div>
+          <CampaignDemo />
+        </section>
+
         {/* -------------------------------------------------- bénéfices SEO */}
         <section className={`${s.wrap} ${s.section} ${s.story}`}>
           <div className={s.storyCopy}>
-            <span className={s.kicker}>Confiance et crédibilité</span>
+            <span className={s.kicker}>Un actif marketing de proximité</span>
             <h2>
-              Donnez confiance en votre marque à chaque email.
-              <span className={s.gradientText}> Même avant le premier clic.</span>
+              Faites travailler vos emails après le point final.
+              <span className={s.gradientText}> Sans ajouter un nouvel envoi.</span>
             </h2>
             <p>
-              Une signature email professionnelle rassure un prospect, clarifie qui écrit et
-              donne un accès direct aux bonnes actions. Siglair transforme ce petit bloc en support
-              de marque cohérent, compatible et mesurable.
+              La signature apparaît dans des conversations déjà ouvertes avec prospects, clients
+              et partenaires. Siglair transforme cet espace en support de campagne cohérent,
+              compatible et mesurable, sans alourdir le corps du message.
             </p>
           </div>
           <ol className={s.storySteps}>
@@ -323,8 +367,8 @@ export default function Landing() {
         {/* ---------------------------------------------- fonctionnalités */}
         <section id="fonctionnalites" className={`${s.wrap} ${s.section}`}>
           <div className={s.sectionHead}>
-            <span className={s.kicker}>Ce qui compte vraiment</span>
-            <h2>Les bénéfices d’une signature email professionnelle, sans usine à gaz.</h2>
+            <span className={s.kicker}>Un canal, pas un gadget</span>
+            <h2>Tout ce qu’il faut pour transformer une signature en actif marketing.</h2>
           </div>
           <div className={s.grid3}>
             {FEATURES.map((f) => (
@@ -374,7 +418,7 @@ export default function Landing() {
         <section id="tarifs" className={`${s.wrap} ${s.section}`}>
           <div className={s.sectionHead}>
             <span className={s.kicker}>Tarifs</span>
-            <h2>Commencez gratuitement. Payez quand la signature travaille.</h2>
+            <h2>Commencez gratuitement. Passez au Pro quand vous activez le canal.</h2>
             <p className={s.lead}>
               Le plan gratuit crée une signature complète, animée dans l’éditeur, exportable en
               HTML. Ce qui se paie, c’est l’URL hébergée.
@@ -398,15 +442,15 @@ export default function Landing() {
         {/* -------------------------------------------------- CTA final */}
         <section className={`${s.wrap} ${s.section}`}>
           <div className={s.final}>
-            <p className={s.eyebrow}>1 email. Puis 10. Puis 1 000.</p>
-            <h2>Votre prochaine preuve de sérieux est en bas de votre prochain email.</h2>
+            <p className={s.eyebrow}>Votre prochain canal est déjà dans vos emails</p>
+            <h2>Votre prochaine campagne peut vivre sous chaque conversation.</h2>
             <p>
-              Créez une signature email professionnelle, collez-la une fois dans Gmail, Outlook ou
-              Apple Mail, puis mettez-la à jour depuis Siglair quand votre marque évolue.
+              Créez la signature, ajoutez votre campagne et son CTA, puis republiez sur la même URL
+              quand le message change. Gmail, Outlook et Apple Mail restent en place.
             </p>
             <div className={s.actions}>
               <Link className={`${s.btn} ${s.btnPrimary} ${s.btnBig}`} to={START_HREF}>
-                Créer ma signature — gratuit
+                Créer ma signature marketing
               </Link>
               <Link className={`${s.btn} ${s.btnBig}`} to="/pricing">
                 Voir les tarifs

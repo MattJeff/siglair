@@ -583,6 +583,58 @@
   margin: 12px 0;
 }
 
+/* ---------------------------------------------------- canal marketing */
+
+.campaignSection {
+  position: relative;
+}
+
+.campaignIntro {
+  display: grid;
+  grid-template-columns: minmax(0, 0.92fr) minmax(420px, 1.08fr);
+  gap: clamp(32px, 6vw, 72px);
+  align-items: end;
+}
+
+.campaignIntro .sectionHead {
+  margin-bottom: 0;
+}
+
+.campaignBenefits {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--line);
+}
+
+.campaignBenefits li {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 16px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.campaignBenefits li > span {
+  color: var(--cyan);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.campaignBenefits h3 {
+  margin: 0 0 5px;
+  font-size: 16px;
+}
+
+.campaignBenefits p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
 /* --------------------------------------------------------- moment wow */
 
 .story {
@@ -1055,9 +1107,14 @@
 @media (max-width: 980px) {
   .heroGrid,
   .problem,
+  .campaignIntro,
   .story,
   .grid3 {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .campaignIntro {
+    gap: 34px;
   }
 
   .grid4 {

@@ -38,6 +38,9 @@ export function SiteHeader() {
         <div className={s.inner}>
           <Brand />
           <nav className={s.nav} aria-label="Navigation principale">
+            <Link to="/#campagnes" className={s.navWide}>
+              Campagnes
+            </Link>
             <Link to="/#fonctionnalites" className={s.navWide}>
               Fonctionnalités
             </Link>
@@ -66,14 +69,17 @@ export function SiteFooter() {
         <div>
           <Brand />
           <p className={s.tagline}>
-            Des signatures email animées, hébergées sur une URL stable. Vous collez une fois, vous
-            changez quand vous voulez.
+            Des signatures email animées qui deviennent un canal marketing : campagnes, CTA et
+            mesure sur une URL stable.
           </p>
         </div>
 
         <div className={s.footerCol}>
           <h2>Produit</h2>
           <ul>
+            <li>
+              <Link to="/#campagnes">Campagnes</Link>
+            </li>
             <li>
               <Link to="/#fonctionnalites">Fonctionnalités</Link>
             </li>
@@ -124,8 +130,8 @@ export function SiteFooter() {
       </div>
 
       <p className={s.legalLine}>
-        Siglair — signatures email animées et hébergées. Les prix affichés sont ceux servis par
-        l’API ; le régime de TVA applicable est précisé au moment du paiement.
+        Siglair — signatures email marketing animées et hébergées. Les prix affichés sont ceux
+        servis par l’API ; le régime de TVA applicable est précisé au moment du paiement.
       </p>
     </footer>
   );
