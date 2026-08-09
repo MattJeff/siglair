@@ -38,8 +38,8 @@ const BILLING_FAQ: QA[] = [
 
 export default function Pricing() {
   usePageMeta(
-    'Tarifs des signatures email animées | Siglair',
-    'Trois plans : gratuit pour composer et exporter, Pro pour héberger votre GIF animé sur une URL stable, Team pour déployer une signature sur toute une équipe.',
+    'Tarifs des signatures et campagnes email | Siglair',
+    'Free pour composer, Pro pour piloter les campagnes et mesurer les CTA, Team pour transformer les emails de toute votre équipe en canal marketing.',
   );
 
   return (
@@ -50,11 +50,11 @@ export default function Pricing() {
         <section className={`${s.wrap} ${s.section}`}>
           <div className={s.sectionHead}>
             <span className={s.kicker}>Tarifs</span>
-            <h1>Ce que vous payez, c’est l’URL hébergée.</h1>
+            <h1>Activez le canal. Étendez‑le à toute l’équipe.</h1>
             <p className={s.lead}>
-              Composer une signature est gratuit, sans limite de temps ni carte bancaire. Ce qui se
-              facture, c’est le rendu du GIF par nos serveurs, son hébergement sur une URL stable
-              et la mesure des ouvertures et des clics.
+              Composer une signature reste gratuit. Pro ajoute l’URL hébergée, les campagnes et la
+              mesure des CTA. Team applique le même pilotage marketing aux signatures de toute
+              votre équipe.
             </p>
           </div>
 

@@ -49,13 +49,16 @@ describe('planFeatures', () => {
     const off = planFeatures(FREE)
       .filter((f) => !f.on)
       .map((f) => f.label);
-    expect(off).toHaveLength(4); // GIF hébergé, analytics, modèle d'équipe, sans marque
+    expect(off).toContain('Campagnes datées et CTA republiables');
+    expect(off).toHaveLength(5); // GIF, campagnes, analytics, modèle d'équipe, sans marque
     expect(planFeatures(TEAM).every((f) => f.on)).toBe(true);
   });
 
   it('dérive ses libellés des limites servies par l’API', () => {
     expect(planFeatures(FREE)[0].label).toBe('1 signature');
     expect(planFeatures(TEAM)[0].label).toBe('Signatures illimitées');
-    expect(planFeatures(TEAM)[2].label).toContain('12 mois');
+    expect(planFeatures(TEAM).find((f) => f.label.startsWith('Ouvertures'))?.label).toContain(
+      '12 mois',
+    );
   });
 });

@@ -80,6 +80,9 @@ export function planFeatures(l: Limits): PlanFeature[] {
       on: true,
     },
     { label: 'GIF animé hébergé sur une URL stable', on: l.hosted_gif },
+    // L'API des campagnes utilise exactement ce verrou : sans URL hébergée, une bannière
+    // programmée ne pourrait pas changer dans les signatures déjà installées.
+    { label: 'Campagnes datées et CTA republiables', on: l.hosted_gif },
     {
       label:
         l.analytics_days > 0

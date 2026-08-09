@@ -37,8 +37,8 @@ const formatSignatures = (n: number | null): string =>
 /** Argumentaire par plan. Aucun quota ici : seulement à qui il s'adresse. */
 const PITCH: Record<string, string> = {
   free: 'Pour composer votre première signature et l’exporter en HTML statique.',
-  pro: 'Pour une signature hébergée, animée, que vous changez sans recoller quoi que ce soit.',
-  team: 'Pour déployer une signature cohérente sur toute une équipe, en un clic.',
+  pro: 'Pour piloter les campagnes de votre signature et mesurer chaque CTA.',
+  team: 'Pour transformer les emails de toute votre équipe en canal marketing piloté.',
 };
 
 function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
@@ -214,6 +214,7 @@ export function PlanComparison() {
     { label: 'Membres minimum facturés', cell: (p) => (p.per_seat ? `${p.min_seats}` : '1') },
     { label: 'Signatures', cell: (p) => formatSignatures(p.limits.signatures) },
     { label: 'GIF animé hébergé sur une URL', cell: (p) => (p.limits.hosted_gif ? yes : no) },
+    { label: 'Campagnes datées et CTA republiables', cell: (p) => (p.limits.hosted_gif ? yes : no) },
     { label: 'Historique des ouvertures et des clics', cell: (p) => cap(formatRetention(p.limits.analytics_days)) },
     { label: 'Espace pour les images et les GIF', cell: (p) => formatBytes(p.limits.assets_bytes) },
     { label: 'Modèles d’organisation et déploiement en masse', cell: (p) => (p.limits.org_templates ? yes : no) },
