@@ -203,13 +203,50 @@ ip_leak=$(sql "SELECT count(*) FROM events WHERE signature_id = '$SIG_ID' AND (o
 ((ip_leak == 0)) || die "$ip_leak événement(s) hors contrat §4.1 (ip_hash 16 octets, ua_family fermée)"
 ok "vie privée — ip_hash 16 octets, ua_family normalisée"
 
+# ------------------------------------------------- 7. suppression du compte (RGPD)
+
+# Ce script tourne à CHAQUE déploiement. Sans cette étape, il laisse derrière lui un
+# compte, une organisation, une signature, un rendu et des événements — à chaque fois.
+# Au bout d'un an, le nombre d'utilisateurs affiché est faux et le disque se remplit de
+# GIF fantômes.
+#
+# Le ménage passe par la VRAIE route de suppression plutôt que par un DELETE en base :
+# ainsi il nettoie ET il teste le chemin RGPD du contrat §4.1, qui est autrement le
+# seul parcours critique que personne n'exerce jamais avant qu'un utilisateur le demande.
+step "Suppression du compte"
+
+code=$(curl -sS -o "$TMP/del" -w '%{http_code}' -X DELETE \
+       -H "Cookie: $COOKIE" "$API/api/me")
+[[ "$code" == "204" || "$code" == "200" ]] || die "DELETE /api/me → $code : $(cat "$TMP/del")"
+ok "compte supprimé ($code)"
+
+# La cascade doit avoir tout emporté. Une signature orpheline, c'est une donnée
+# personnelle conservée après une demande de suppression.
+left=$(sql "SELECT (SELECT count(*) FROM users WHERE email = '$EMAIL')
+                 + (SELECT count(*) FROM signatures WHERE id = '$SIG_ID')
+                 + (SELECT count(*) FROM events WHERE signature_id = '$SIG_ID');")
+((left == 0)) || die "$left ligne(s) survivent à la suppression du compte (contrat §4.1)"
+ok "purge vérifiée — compte, signature et événements"
+
+# La session doit être morte immédiatement, pas à l'expiration du cookie.
+code=$(curl -sS -o /dev/null -w '%{http_code}' -H "Cookie: $COOKIE" "$API/api/me")
+[[ "$code" == "401" ]] || die "la session survit à la suppression du compte (HTTP $code)"
+ok "session révoquée"
+
+# Le GIF publié ne doit plus être servi : il vivait dans un email déjà envoyé, mais
+# c'est le prix d'une suppression de compte, et l'utilisateur en est averti.
+code=$(curl -sS -o /dev/null -w '%{http_code}' "$API/s/$SLUG.gif")
+[[ "$code" == "404" || "$code" == "402" || "$code" == "410" ]] \
+    || die "le GIF est encore servi après suppression du compte (HTTP $code)"
+ok "GIF public retiré ($code)"
+
 # ---------------------------------------------------------------- résumé
 
 printf '
 \033[32m══════════════════════════════════════════════════\033[0m
  Parcours complet réussi.
 
-   compte        %s
+   compte        %s  (supprimé, rien ne reste)
    signature     %s
    URL publique  %s/s/%s.gif
    GIF           %s Ko  (%s octets)
