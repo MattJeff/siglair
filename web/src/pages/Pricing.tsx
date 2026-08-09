@@ -38,7 +38,7 @@ const BILLING_FAQ: QA[] = [
 
 export default function Pricing() {
   usePageMeta(
-    'Tarifs — Siglair',
+    'Tarifs des signatures email animées | Siglair',
     'Trois plans : gratuit pour composer et exporter, Pro pour héberger votre GIF animé sur une URL stable, Team pour déployer une signature sur toute une équipe.',
   );
 

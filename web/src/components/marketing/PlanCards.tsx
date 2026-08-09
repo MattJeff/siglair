@@ -90,7 +90,7 @@ function PlanCard({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
 
   return (
     <div className={`${s.card} ${featured ? s.featured : ''}`}>
-      {featured && <span className={s.badge}>Le plus choisi</span>}
+      {featured && <span className={s.badge}>Recommandé</span>}
       <h3 className={s.name}>{plan.name}</h3>
       <PlanPrice plan={plan} cycle={cycle} />
       <p className={s.pitch}>{PITCH[plan.plan] ?? ''}</p>

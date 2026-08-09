@@ -20,7 +20,7 @@ import s from './marketing.module.css';
  * Lu depuis l'environnement Vite (DESIGN.md §9), avec le domaine public de production
  * comme valeur de repli pour les builds sans fichier d'environnement.
  */
-const PUBLIC_HOST = import.meta.env.VITE_PUBLIC_HOST ?? 'siglair.com';
+const PUBLIC_HOST = import.meta.env.VITE_PUBLIC_HOST || 'siglair.com';
 
 const FEATURES: { icon: string; title: string; text: string }[] = [
   {
@@ -111,7 +111,7 @@ const FAQ_ITEMS: QA[] = [
 
 export default function Landing() {
   usePageMeta(
-    'Siglair — générateur de signature email marketing animée',
+    'Siglair | Signature email marketing animée',
     'Transformez chaque email en canal marketing : signature animée, campagnes et CTA, mise à jour sans copier-coller, analytics, Gmail et Outlook.',
   );
 

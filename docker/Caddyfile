@@ -12,6 +12,7 @@
 	# (/s, /c) et les fichiers du stockage (/f). Le reste est le SPA.
 	@api path /api/* /s/* /c/* /f/* /health /ready
 	handle @api {
+		header X-Robots-Tag "noindex, nofollow"
 		reverse_proxy api:8080
 	}
 

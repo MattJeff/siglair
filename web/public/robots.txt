@@ -1,0 +1,34 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /onboarding
+Disallow: /login
+Disallow: /invite/
+Disallow: /api/
+Disallow: /s/
+Disallow: /c/
+Disallow: /f/
+
+User-agent: OAI-SearchBot
+Allow: /
+Disallow: /app
+Disallow: /onboarding
+Disallow: /login
+Disallow: /invite/
+Disallow: /api/
+Disallow: /s/
+Disallow: /c/
+Disallow: /f/
+
+User-agent: PerplexityBot
+Allow: /
+Disallow: /app
+Disallow: /onboarding
+Disallow: /login
+Disallow: /invite/
+Disallow: /api/
+Disallow: /s/
+Disallow: /c/
+Disallow: /f/
+
+Sitemap: https://siglair.com/sitemap.xml

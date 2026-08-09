@@ -3,7 +3,7 @@
  * Rien d'authentifié ici — ces pages doivent s'afficher même si l'API est morte.
  */
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import s from './chrome.module.css';
 
 /** Destination unique du CTA « commencer » : un seul endroit à changer. */
@@ -38,7 +38,7 @@ export function SiteHeader() {
         <div className={s.inner}>
           <Brand />
           <nav className={s.nav} aria-label="Navigation principale">
-            <Link to="/#campagnes" className={s.navWide}>
+            <Link to="/campagnes-signature-email" className={s.navWide}>
               Campagnes
             </Link>
             <Link to="/#fonctionnalites" className={s.navWide}>
@@ -78,13 +78,16 @@ export function SiteFooter() {
           <h2>Produit</h2>
           <ul>
             <li>
-              <Link to="/#campagnes">Campagnes</Link>
+              <Link to="/campagnes-signature-email">Campagnes</Link>
             </li>
             <li>
-              <Link to="/#fonctionnalites">Fonctionnalités</Link>
+              <Link to="/signature-email-animee">Signature animée</Link>
             </li>
             <li>
-              <Link to="/#compatibilite">Compatibilité</Link>
+              <Link to="/signature-email-outlook">Signature Outlook</Link>
+            </li>
+            <li>
+              <Link to="/signature-email-gmail">Signature Gmail</Link>
             </li>
             <li>
               <Link to="/pricing">Tarifs</Link>
@@ -142,12 +145,47 @@ export function SiteFooter() {
  * index.html porte les balises statiques lues par les robots sociaux ;
  * ici on ne corrige que ce qui dépend de la route.
  */
+function upsertMeta(selector: string, attributes: Record<string, string>): HTMLMetaElement {
+  const existing = document.querySelector<HTMLMetaElement>(selector);
+  const tag = existing ?? document.head.appendChild(document.createElement('meta'));
+  Object.entries(attributes).forEach(([name, value]) => tag.setAttribute(name, value));
+  return tag;
+}
+
+/**
+ * Maintient les métadonnées synchronisées lors d'une navigation côté client.
+ * Le build pré-rend les mêmes informations pour les robots qui n'exécutent pas JavaScript.
+ */
 export function usePageMeta(title: string, description: string): void {
+  const { pathname } = useLocation();
+
   useEffect(() => {
     document.title = title;
-    const tag =
-      document.querySelector<HTMLMetaElement>('meta[name="description"]') ??
-      document.head.appendChild(Object.assign(document.createElement('meta'), { name: 'description' }));
-    tag.content = description;
-  }, [title, description]);
+    const canonicalUrl = new URL(pathname, 'https://siglair.com').toString();
+    const robots = pathname.startsWith('/legal/')
+      ? 'noindex, nofollow'
+      : 'index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1';
+
+    upsertMeta('meta[name="description"]', { name: 'description', content: description });
+    upsertMeta('meta[name="robots"]', {
+      name: 'robots',
+      content: robots,
+    });
+    upsertMeta('meta[property="og:title"]', { property: 'og:title', content: title });
+    upsertMeta('meta[property="og:description"]', {
+      property: 'og:description',
+      content: description,
+    });
+    upsertMeta('meta[property="og:url"]', { property: 'og:url', content: canonicalUrl });
+    upsertMeta('meta[name="twitter:title"]', { name: 'twitter:title', content: title });
+    upsertMeta('meta[name="twitter:description"]', {
+      name: 'twitter:description',
+      content: description,
+    });
+
+    const canonical =
+      document.querySelector<HTMLLinkElement>('link[rel="canonical"]') ??
+      document.head.appendChild(Object.assign(document.createElement('link'), { rel: 'canonical' }));
+    canonical.href = canonicalUrl;
+  }, [title, description, pathname]);
 }

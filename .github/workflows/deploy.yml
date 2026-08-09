@@ -52,6 +52,12 @@ jobs:
         working-directory: web
       - run: npm run build
         working-directory: web
+      - run: npm test
+        working-directory: web
+      - run: npm run lint
+        working-directory: web
+      - run: npm run test:seo
+        working-directory: web
 
   build:
     needs: tests

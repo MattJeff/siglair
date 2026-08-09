@@ -18,7 +18,7 @@ export function SignatureDemo() {
           <span className={s.bubble} />
           <span className={s.bubble} />
           <span className={s.bubble} />
-          <span className={s.url}>siglair.app/app/editor/atelier-nord</span>
+          <span className={s.url}>siglair.com/app/editor/atelier-nord</span>
           <span className={s.live}>Live preview</span>
         </div>
 

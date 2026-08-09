@@ -5,11 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run typecheck && vite build",
+    "build": "npm run typecheck && vite build && node scripts/prerender.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:seo": "node scripts/seo-smoke.mjs"
   },
   "dependencies": {
     "lucide-react": "^1.30.0",

@@ -3,7 +3,7 @@
  * Typées ici plutôt que lues via l'index signature de `vite/client`, qui renvoie `any`.
  */
 interface ImportMetaEnv {
-  /** Domaine public servant les GIF, ex. `siglair.app`. Absent = valeur de repli. */
+  /** Domaine public servant les GIF, ex. `siglair.com`. Absent = valeur de repli. */
   readonly VITE_PUBLIC_HOST?: string;
 }
 
