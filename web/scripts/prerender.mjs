@@ -35,16 +35,16 @@ const pages = [
   },
   {
     path: '/pricing',
-    title: 'Tarifs des signatures email animées | Siglair',
+    title: 'Tarifs des signatures et campagnes email | Siglair',
     description:
-      'Trois plans : gratuit pour composer et exporter, Pro pour héberger votre GIF animé sur une URL stable, Team pour déployer une signature sur toute une équipe.',
-    heading: 'Ce que vous payez, c\u2019est l\u2019URL hébergée.',
+      'Free pour composer, Pro pour piloter les campagnes et mesurer les CTA, Team pour transformer les emails de toute votre équipe en canal marketing.',
+    heading: 'Activez le canal. Étendez\u2011le à toute l\u2019équipe.',
     intro:
-      'Composer une signature est gratuit. Les plans payants couvrent le rendu du GIF, son hébergement sur une URL stable et la mesure des interactions.',
+      'Composer une signature reste gratuit. Pro ajoute l\u2019URL hébergée, les campagnes et la mesure des CTA. Team applique le même pilotage marketing aux signatures de toute votre équipe.',
     points: [
-      'Créez et personnalisez votre signature depuis l\u2019éditeur visuel.',
-      'Publiez une version hébergée et mettez-la à jour depuis Siglair.',
-      'Ajoutez des campagnes et suivez les interactions selon la formule choisie.',
+      'Free permet de composer une signature et de l\u2019exporter en HTML statique.',
+      'Pro ajoute les campagnes datées, la republication et la mesure de chaque CTA.',
+      'Team déploie un modèle cohérent sur les signatures de toute l\u2019équipe.',
     ],
     links: [['/', 'Découvrir Siglair'], ...sharedProductLinks.slice(0, 4)],
     schema: 'webpage',

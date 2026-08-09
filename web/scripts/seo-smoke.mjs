@@ -71,4 +71,9 @@ const llms = await readFile(new URL('llms.txt', dist), 'utf8');
 assert.match(llms, /résumé factuel/i);
 assert.match(llms, /restent sous leur contrôle/i);
 
+const pricing = await readFile(htmlPath('/pricing'), 'utf8');
+assert.match(pricing, /<title>Tarifs des signatures et campagnes email \| Siglair<\/title>/);
+assert.match(pricing, /<h1>Activez le canal\. Étendez‑le à toute l’équipe\.<\/h1>/);
+assert.match(pricing, /Pro ajoute les campagnes datées/);
+
 console.log(`SEO smoke: ${indexablePages.length} pages indexables et ${legalPages.length} pages noindex validées.`);
