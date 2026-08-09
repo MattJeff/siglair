@@ -30,7 +30,7 @@ info() { printf '     ..   %s\n' "$1"; }
 die()  { printf '\n\033[31mÉCHEC — %s\033[0m\n\n' "$1" >&2; exit 1; }
 
 for bin in curl jq openssl; do
-    command -v "$bin" >/dev/null || die "$bin est requis (brew install $bin)"
+    command -v "$bin" >/dev/null || die "$bin est requis — Debian/Ubuntu : apt install $bin · macOS : brew install $bin"
 done
 
 # Requêtes SQL : par défaut on passe par le conteneur, aucune installation locale.
@@ -94,7 +94,7 @@ COOKIE=$(grep -i '^set-cookie:' "$TMP/hdr" | grep -i 'sig_session' | head -1 \
 ok "session ouverte (${COOKIE%%=*})"
 
 curl -fsS -H "Cookie: $COOKIE" "$API/api/me" -o "$TMP/me" || die "/api/me refuse la session"
-ok "/api/me — plan $(jq -r '.plan.id // .plan // "?"' "$TMP/me")"
+ok "/api/me — plan $(jq -r '.plan // "?"' "$TMP/me")"
 
 # Le GIF hébergé est réservé aux plans payants (contrat §6). Pas de Stripe dans
 # un smoke test : on bascule l'org en pro directement en base.

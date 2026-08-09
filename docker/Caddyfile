@@ -1,6 +1,11 @@
-# SITE_ADDRESS vide → ":80" (HTTP local). SITE_ADDRESS=siglair.app → TLS
-# automatique via Let's Encrypt, sans autre réglage.
-{$SITE_ADDRESS::80} {
+# SITE_ADDRESS=:80 → HTTP local. SITE_ADDRESS=siglair.com → TLS
+# automatique via Let's Encrypt. SITE_WWW_ADDRESS couvre www en HTTPS
+# avant de rediriger vers l'apex.
+{$SITE_WWW_ADDRESS} {
+	redir {$SITE_CANONICAL_URL}{uri} permanent
+}
+
+{$SITE_ADDRESS} {
 	encode zstd gzip
 
 	# Tout ce que l'API sert : l'app, les URL publiques collées dans les mails

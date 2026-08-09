@@ -32,8 +32,15 @@ FROM debian:bookworm-slim
 
 # fonts-noto-color-emoji n'est pas optionnel : les signatures sont pleines
 # d'emoji et sans cette police Chromium les rasterise en carrés vides.
+#
+# chromium-sandbox non plus : sans lui, Chromium refuse de démarrer dans un conteneur
+# (« No usable sandbox! ») et la seule issue serait --no-sandbox. Or on rasterise du
+# HTML fourni par l'utilisateur et des images distantes : une faille Chromium sans bac
+# à sable donnerait un accès direct à DATABASE_URL, que ce conteneur porte. Le paquet
+# fournit le bac à sable SUID, qui fonctionne pour un utilisateur non-root.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         chromium \
+        chromium-sandbox \
         ffmpeg \
         ca-certificates \
         curl \

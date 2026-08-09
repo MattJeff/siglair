@@ -3,16 +3,26 @@ name: siglair
 # `.env` est lu automatiquement par docker compose : c'est lui qui porte les
 # secrets et les clés tierces. Les valeurs ci-dessous ne surchargent que ce qui
 # est spécifique au réseau des conteneurs (hôte `db`, chemins internes).
+# En production Supabase, renseigner SIGLAIR_DATABASE_URL fait pointer l'API et
+# le renderer vers la base externe sans changer DATABASE_URL pour le dev natif.
 
 services:
   db:
     image: postgres:16-alpine
     environment:
       POSTGRES_USER: siglair
-      POSTGRES_PASSWORD: siglair
+      # Mot de passe défini dans .env. Le défaut ne sert qu'au développement local :
+      # en production, POSTGRES_PASSWORD doit être aléatoire. Attention, il n'est lu
+      # qu'à la CRÉATION du volume — le changer ensuite ne change rien à la base.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siglair}
       POSTGRES_DB: siglair
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # 127.0.0.1 par défaut, et ce n'est pas de la prudence excessive : Docker publie
+      # ses ports via des règles DNAT insérées AVANT celles d'ufw. Un « ufw deny 5432 »
+      # ne protège pas un port publié ici. Sur une machine publique, un 0.0.0.0 sur
+      # Postgres, c'est une base ouverte sur Internet — avec le mot de passe du .env.
+      # Surchargez BIND_ADDR uniquement si vous savez pourquoi.
+      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -29,11 +39,13 @@ services:
     image: siglair:latest
     env_file: [.env]
     environment:
-      DATABASE_URL: postgres://siglair:siglair@db:5432/siglair
+      DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://siglair:${POSTGRES_PASSWORD:-siglair}@db:5432/siglair}
       STORAGE_DIR: /data/storage
       PORT: "8080"
     ports:
-      - "${API_PORT:-8080}:8080"
+      # En production, seul Caddy est public : il termine le TLS et relaie vers l'API.
+      # Publier l'API en clair à côté offrirait un chemin sans HTTPS vers les sessions.
+      - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
     volumes:
       - storage:/data/storage
     depends_on:
@@ -50,7 +62,7 @@ services:
     command: ["renderer"]
     env_file: [.env]
     environment:
-      DATABASE_URL: postgres://siglair:siglair@db:5432/siglair
+      DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://siglair:${POSTGRES_PASSWORD:-siglair}@db:5432/siglair}
       STORAGE_DIR: /data/storage
     volumes:
       # Volume partagé : le renderer écrit les GIF, l'API les sert sur /s/{slug}.gif.
@@ -65,6 +77,29 @@ services:
     # Chromium alloue ses buffers de rendu en mémoire partagée. Les 64 Mo par
     # défaut de Docker le font planter au milieu d'une capture, sans message clair.
     shm_size: 1gb
+    # Le bac à sable de Chromium a besoin de créer un espace de noms utilisateur.
+    # Le profil seccomp par défaut de Docker bloque cet appel : Chromium meurt au
+    # démarrage sur « Failed to move to new namespace ». Deux issues seulement :
+    #
+    #   a) --no-sandbox              → le moteur de rendu tourne SANS isolation.
+    #                                  Une faille Chromium donne alors accès au
+    #                                  conteneur, donc à DATABASE_URL.
+    #   b) seccomp=unconfined        → on retire le filtre générique de Docker, mais
+    #                                  le bac à sable de Chromium fonctionne — et il
+    #                                  applique lui-même un seccomp-bpf beaucoup plus
+    #                                  strict à ses processus de rendu.
+    #
+    # On rasterise du HTML fourni par l'utilisateur et des images distantes : c'est
+    # exactement la menace que le bac à sable de Chromium est fait pour contenir.
+    # (b) est donc le bon compromis, à condition de compenser — d'où cap_drop.
+    #
+    # Durcissement possible plus tard : un profil seccomp dédié (celui de Docker plus
+    # clone/unshare/setns), qui garderait les deux couches. ~900 lignes de JSON à
+    # maintenir, ça n'en vaut pas la peine avant d'avoir des clients.
+    security_opt:
+      - seccomp=unconfined
+    cap_drop:
+      - ALL
     mem_limit: 2g
     cpus: 2.0
     healthcheck:
@@ -78,9 +113,11 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.web
+      args:
+        VITE_PUBLIC_HOST: ${VITE_PUBLIC_HOST:-}
     image: siglair-web:latest
     ports:
-      - "${WEB_PORT:-3000}:80"
+      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:80"
     depends_on:
       - api
     restart: unless-stopped
@@ -96,8 +133,10 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      # Un nom de domaine ici (ex. siglair.app) déclenche Let's Encrypt.
-      SITE_ADDRESS: ${SITE_ADDRESS:-}
+      # SITE_ADDRESS=siglair.com déclenche Let's Encrypt. Vide = HTTP local sur :80.
+      SITE_ADDRESS: ${SITE_ADDRESS:-:80}
+      SITE_WWW_ADDRESS: ${SITE_WWW_ADDRESS:-www.${SITE_ADDRESS:-localhost}}
+      SITE_CANONICAL_URL: ${SITE_CANONICAL_URL:-https://${SITE_ADDRESS:-localhost}}
     volumes:
       - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
@@ -106,7 +145,7 @@ services:
       - api
       - web
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:2019/config/ || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3

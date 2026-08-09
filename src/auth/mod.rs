@@ -74,9 +74,12 @@ pub async fn me(State(st): State<AppState>, user: CurrentUser) -> Result<Json<Va
 
     let current = middleware::current_org(&st.db, user.id).await?;
 
-    let (signatures, asset_bytes): (i64, i64) = sqlx::query_as(
+    // `members` sert au plan Team : l'écran Équipe compare les sièges utilisés aux sièges
+    // facturés. Sans ce compte, il affiche « — / 3 » et l'utilisateur ne sait pas où il en est.
+    let (signatures, assets_bytes, members): (i64, i64, i64) = sqlx::query_as(
         "SELECT (SELECT count(*) FROM signatures WHERE org_id = $1 AND deleted_at IS NULL),
-                (SELECT coalesce(sum(bytes), 0)::bigint FROM assets WHERE org_id = $1)",
+                (SELECT coalesce(sum(bytes), 0)::bigint FROM assets WHERE org_id = $1),
+                (SELECT count(*) FROM org_members WHERE org_id = $1)",
     )
     .bind(current.org_id)
     .fetch_one(&st.db)
@@ -99,8 +102,17 @@ pub async fn me(State(st): State<AppState>, user: CurrentUser) -> Result<Json<Va
             "analytics_enabled": current.analytics_enabled,
         },
         "plan": current.plan.id,
-        "limits": current.plan,
-        "usage": { "signatures": signatures, "asset_bytes": asset_bytes },
+        // `plan.limits`, pas `plan` : depuis que Plan porte les prix, il CONTIENT un champ
+        // `limits`. Renvoyer l'objet entier ici obligeait le front à lire
+        // `limits.limits.signatures` — il lisait donc `undefined`, et le bandeau de quota
+        // restait vide. Les noms suivent `interface Limits` / `interface Usage` de
+        // web/src/lib/types.ts : cette frontière n'est typée nulle part, c'est à la main.
+        "limits": current.plan.limits,
+        "usage": {
+            "signatures": signatures,
+            "assets_bytes": assets_bytes,
+            "members": members,
+        },
     })))
 }
 

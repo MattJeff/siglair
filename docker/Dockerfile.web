@@ -20,6 +20,8 @@ RUN cd web && npm ci
 
 COPY src/render/anim.css ./src/render/anim.css
 COPY web/ ./web/
+ARG VITE_PUBLIC_HOST
+ENV VITE_PUBLIC_HOST=${VITE_PUBLIC_HOST}
 RUN cd web && npm run build
 
 FROM nginx:1.27-alpine

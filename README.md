@@ -87,6 +87,8 @@ SIGLAIR_IP_SALT=<openssl rand -hex 16>
 APP_URL=https://siglair.app
 PUBLIC_URL=https://siglair.app
 SITE_ADDRESS=siglair.app
+# si la base est Supabase au lieu du conteneur local `db` :
+SIGLAIR_DATABASE_URL=postgres://postgres.jxyxysoknqbsnbjyyttz:<mot-de-passe>@<hote-supabase>:5432/postgres?sslmode=require
 ```
 
 Faites pointer l'enregistrement DNS `A` du domaine vers l'IP de la VM, ouvrez 80 et 443,
@@ -104,6 +106,10 @@ l'API, et tout le reste vers le SPA.
 Ensuite seulement, revenez brancher les clés tierces (`.env`, puis
 `docker compose up -d`), y compris l'URL du webhook Stripe qui doit pointer vers
 `https://siglair.app/api/stripe/webhook`.
+
+Pour Supabase, prenez la connexion directe si la VM supporte IPv6, ou le pooler partagé en
+mode session si elle est IPv4-only. N'utilisez pas le pooler transactionnel : SQLx prépare
+ses requêtes, et ce mode ne supporte pas les prepared statements.
 
 Sauvegardes : le volume `siglair_pgdata` (la base) et `siglair_storage` (les GIF rendus).
 Le second est reconstructible en republiant, le premier ne l'est pas.
