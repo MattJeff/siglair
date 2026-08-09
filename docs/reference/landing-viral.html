@@ -1,0 +1,654 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+
+  <title>Siglair — Créez une signature email animée qui se remarque</title>
+  <meta name="description" content="Créez une signature email premium, libre et animée en quelques minutes. Éditeur visuel, templates, GIFs, CTA, Gmail, Outlook, Apple Mail et fallback automatique." />
+  <meta name="keywords" content="signature email, signature email animée, générateur signature email, email signature generator, animated email signature, Gmail signature, Outlook signature, Apple Mail signature, signature professionnelle" />
+  <meta name="robots" content="index,follow" />
+  <meta name="theme-color" content="#070B14" />
+  <link rel="canonical" href="https://siglair.com/" />
+
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="Siglair — Your signature. Your motion." />
+  <meta property="og:description" content="Design anything. Animate anything. Make every email feel branded." />
+  <meta property="og:url" content="https://siglair.com/" />
+  <meta property="og:site_name" content="Siglair" />
+
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Siglair — Your signature. Your motion." />
+  <meta name="twitter:description" content="Créez des signatures email premium, animées et mémorables." />
+
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"SoftwareApplication",
+    "name":"Siglair",
+    "applicationCategory":"BusinessApplication",
+    "operatingSystem":"Web",
+    "description":"Éditeur visuel de signatures email professionnelles et animées.",
+    "offers":[
+      {"@type":"Offer","name":"Free","price":"0","priceCurrency":"EUR"},
+      {"@type":"Offer","name":"Pro","priceCurrency":"EUR"}
+    ]
+  }
+  </script>
+
+  <script type="application/ld+json">
+  {
+    "@context":"https://schema.org",
+    "@type":"FAQPage",
+    "mainEntity":[
+      {
+        "@type":"Question",
+        "name":"Puis-je créer une signature email animée ?",
+        "acceptedAnswer":{"@type":"Answer","text":"Oui. Siglair permet de concevoir des animations visuelles puis de les exporter sous une forme adaptée à l’email, avec un fallback statique pour les clients qui limitent l’animation."}
+      },
+      {
+        "@type":"Question",
+        "name":"Siglair fonctionne-t-il avec Gmail et Outlook ?",
+        "acceptedAnswer":{"@type":"Answer","text":"Siglair est conçu pour produire des signatures adaptées aux principaux clients email. Les fonctions avancées peuvent utiliser un rendu de secours lorsque le client mail ne prend pas en charge certaines animations."}
+      },
+      {
+        "@type":"Question",
+        "name":"Puis-je créer ma première signature gratuitement ?",
+        "acceptedAnswer":{"@type":"Answer","text":"Oui. Le positionnement proposé pour Siglair inclut une première signature gratuite afin de tester l’éditeur avant de passer à des fonctions premium."}
+      }
+    ]
+  }
+  </script>
+
+  <style>
+    :root {
+      --bg:#060911;
+      --bg2:#0b1020;
+      --panel:#0f1628;
+      --panel2:#111a31;
+      --text:#f8fbff;
+      --muted:#9ca9bd;
+      --line:rgba(255,255,255,.10);
+      --blue:#4c74ff;
+      --blue2:#1f5bff;
+      --cyan:#4de1ff;
+      --purple:#8a5cff;
+      --green:#37d995;
+      --shadow:0 30px 90px rgba(0,0,0,.45);
+    }
+    *{box-sizing:border-box}
+    html{scroll-behavior:smooth}
+    body{
+      margin:0;
+      background:
+        radial-gradient(circle at 15% 10%,rgba(51,94,255,.16),transparent 26%),
+        radial-gradient(circle at 85% 18%,rgba(80,218,255,.12),transparent 24%),
+        linear-gradient(180deg,#060911 0%,#080c16 45%,#060911 100%);
+      color:var(--text);
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      overflow-x:hidden;
+    }
+    a{color:inherit;text-decoration:none}
+    button{font:inherit}
+    .wrap{width:min(1180px,calc(100% - 40px));margin:auto}
+    .nav{
+      position:sticky;top:0;z-index:40;
+      backdrop-filter:blur(18px);
+      background:rgba(6,9,17,.68);
+      border-bottom:1px solid rgba(255,255,255,.06);
+    }
+    .nav-inner{height:72px;display:flex;align-items:center;justify-content:space-between}
+    .brand{display:flex;align-items:center;gap:11px;font-weight:850;letter-spacing:-.04em;font-size:19px}
+    .brand-ring{width:34px;height:34px;border-radius:50%;position:relative;filter:drop-shadow(0 0 12px rgba(78,138,255,.5))}
+    .brand-ring::before{
+      content:"";position:absolute;inset:3px;border-radius:50%;
+      border:6px solid transparent;
+      background:linear-gradient(135deg,#8dc7ff,#315cff,#5de4ff) border-box;
+      mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);
+      -webkit-mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);
+      mask-composite:exclude;-webkit-mask-composite:xor;
+    }
+    .nav-links{display:flex;gap:26px;color:#b7c0cf;font-size:13px}
+    .nav-links a:hover{color:white}
+    .nav-cta{display:flex;align-items:center;gap:9px}
+    .btn{
+      display:inline-flex;align-items:center;justify-content:center;gap:9px;
+      min-height:46px;padding:0 18px;border-radius:13px;border:1px solid var(--line);
+      background:#111827;color:white;font-size:13px;font-weight:750;cursor:pointer;
+      transition:.2s ease;
+    }
+    .btn:hover{transform:translateY(-2px);border-color:rgba(130,167,255,.42)}
+    .btn.primary{
+      border:none;background:linear-gradient(135deg,#315cff,#527cff 55%,#3bb8ff);
+      box-shadow:0 12px 36px rgba(55,102,255,.28);
+    }
+    .btn.soft{background:rgba(255,255,255,.055)}
+    .btn.big{min-height:54px;padding:0 24px;border-radius:15px;font-size:14px}
+    .hero{padding:82px 0 52px;position:relative}
+    .hero-grid{display:grid;grid-template-columns:1.02fr .98fr;gap:70px;align-items:center}
+    .eyebrow{
+      display:inline-flex;align-items:center;gap:8px;border:1px solid rgba(107,143,255,.28);
+      background:rgba(53,91,210,.12);padding:7px 11px;border-radius:999px;
+      color:#b9ccff;font-size:11px;font-weight:800;letter-spacing:.02em
+    }
+    .eyebrow .dot{width:7px;height:7px;border-radius:50%;background:#55e7a7;box-shadow:0 0 12px #55e7a7}
+    h1{font-size:clamp(54px,6.3vw,88px);line-height:.97;letter-spacing:-.065em;margin:22px 0 24px;max-width:760px}
+    .gradient-text{
+      color:transparent;background:linear-gradient(100deg,#fff 0,#b5ccff 28%,#55dfff 56%,#879bff 100%);
+      -webkit-background-clip:text;background-clip:text;
+    }
+    .hero-copy{font-size:18px;line-height:1.65;color:#acb7c8;max-width:650px}
+    .hero-copy strong{color:#fff}
+    .hero-actions{display:flex;gap:12px;margin-top:30px;flex-wrap:wrap}
+    .micro{display:flex;gap:15px;align-items:center;margin-top:18px;color:#7f8ba0;font-size:11px}
+    .micro span{display:flex;align-items:center;gap:6px}
+    .check{color:#63e3ab;font-weight:900}
+    .hero-demo{position:relative}
+    .glow{
+      position:absolute;width:440px;height:440px;inset:50% auto auto 50%;transform:translate(-50%,-50%);
+      background:radial-gradient(circle,rgba(64,120,255,.32),rgba(45,154,255,.10) 42%,transparent 70%);
+      filter:blur(18px);pointer-events:none
+    }
+    .browser{
+      position:relative;border:1px solid rgba(255,255,255,.12);border-radius:22px;
+      background:linear-gradient(180deg,rgba(17,25,46,.96),rgba(9,14,26,.96));
+      box-shadow:var(--shadow);overflow:hidden;transform:perspective(1200px) rotateY(-4deg) rotateX(1deg);
+    }
+    .browser-bar{height:50px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;padding:0 14px;gap:8px}
+    .bubble{width:9px;height:9px;border-radius:50%;background:#27314a}
+    .url{margin-left:12px;height:27px;flex:1;max-width:250px;border-radius:8px;background:#0b1020;border:1px solid rgba(255,255,255,.06);display:flex;align-items:center;padding-left:10px;color:#627089;font-size:9px}
+    .demo-body{padding:16px;display:grid;grid-template-columns:122px 1fr 150px;gap:12px;min-height:390px}
+    .demo-side,.demo-inspector{background:#0b101c;border:1px solid rgba(255,255,255,.07);border-radius:13px;padding:10px}
+    .demo-side strong,.demo-inspector strong{font-size:9px;color:#b9c6d8;text-transform:uppercase;letter-spacing:.12em}
+    .tool{margin-top:9px;padding:9px;border:1px solid rgba(255,255,255,.07);border-radius:9px;background:#111827;font-size:9px;color:#9cabc1}
+    .tool.active{border-color:rgba(80,120,255,.5);background:rgba(57,91,198,.18);color:#dbe7ff}
+    .editor{display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;border-radius:14px;background:
+      linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px),#080d16;background-size:12px 12px}
+    .sig{
+      width:330px;height:151px;border-radius:15px;padding:17px;display:grid;grid-template-columns:74px 1fr;gap:15px;
+      background:
+        linear-gradient(rgba(0,0,0,.70),rgba(0,0,0,.70)),
+        radial-gradient(circle at 20% 20%,#1f57c7,transparent 33%),
+        linear-gradient(135deg,#0b1427,#05101f);
+      box-shadow:0 20px 45px rgba(0,0,0,.42);border:1px solid rgba(125,165,255,.15)
+    }
+    .sig-logo{display:flex;align-items:flex-start;justify-content:center;padding-top:4px}
+    .animated-ring{
+      width:58px;height:58px;border-radius:50%;position:relative;animation:float 3s ease-in-out infinite;
+      filter:drop-shadow(0 0 12px rgba(57,144,255,.65))
+    }
+    .animated-ring::before{
+      content:"";position:absolute;inset:4px;border-radius:50%;
+      border:8px solid transparent;background:conic-gradient(from 90deg,#2f67ff,#62e3ff,#78a7ff,#2f67ff) border-box;
+      mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);
+      -webkit-mask:linear-gradient(#fff 0 0) padding-box,linear-gradient(#fff 0 0);
+      mask-composite:exclude;-webkit-mask-composite:xor;
+      animation:spin 4s linear infinite;
+    }
+    .sig-content{border-left:1px solid rgba(255,255,255,.14);padding-left:13px}
+    .sig-name{font-size:15px;font-weight:800;margin-top:2px}
+    .sig-role{font-size:9px;color:#f1f5f9;margin-top:4px}
+    .sig-tag{font-size:7px;color:#9eacc0;margin-top:6px;white-space:nowrap}
+    .sig-contact{font-size:7px;color:#8eb6ff;margin-top:10px}
+    .sig-actions{display:flex;gap:5px;margin-top:11px}
+    .sig-btn{font-size:7px;font-weight:800;padding:6px 8px;border-radius:5px;background:#2f62f0}
+    .sig-btn:nth-child(2){background:#0a66c2} .sig-btn:nth-child(3){background:#18a55b}
+    .cursor{
+      position:absolute;width:19px;height:25px;right:112px;bottom:88px;transform:rotate(-8deg);
+      filter:drop-shadow(0 3px 4px rgba(0,0,0,.4));animation:cursorMove 4.5s ease-in-out infinite;
+    }
+    .cursor::before{content:"";position:absolute;left:2px;top:0;border-left:6px solid #fff;border-top:16px solid transparent;border-bottom:0 solid transparent;transform:rotate(-35deg)}
+    .input-mock{margin-top:10px;height:28px;border-radius:8px;border:1px solid rgba(255,255,255,.08);background:#070b14;padding:7px;color:#7f8ba0;font-size:8px}
+    .slider{margin-top:8px;height:3px;background:#253047;border-radius:4px;position:relative}.slider:after{content:"";position:absolute;width:45%;height:100%;background:#557aff;border-radius:4px}
+    .wow-pill{
+      position:absolute;right:-18px;top:38px;padding:10px 13px;border-radius:12px;background:#f5f9ff;color:#0d1320;font-size:10px;font-weight:900;
+      box-shadow:0 10px 30px rgba(0,0,0,.25);animation:float2 3.8s ease-in-out infinite
+    }
+    .section{padding:100px 0}
+    .section.sm{padding:64px 0}
+    .section-head{max-width:760px;margin-bottom:48px}
+    .kicker{font-size:11px;color:#79a3ff;text-transform:uppercase;letter-spacing:.18em;font-weight:850}
+    h2{font-size:clamp(38px,4.6vw,62px);line-height:1.03;letter-spacing:-.055em;margin:14px 0 18px}
+    .section-head p{color:#99a7ba;line-height:1.7;font-size:16px}
+    .problem-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+    .card{
+      border:1px solid rgba(255,255,255,.09);background:linear-gradient(180deg,rgba(17,25,44,.82),rgba(9,14,26,.84));
+      border-radius:20px;padding:26px;box-shadow:0 18px 60px rgba(0,0,0,.18)
+    }
+    .before{opacity:.78}
+    .before .mail-sig{filter:grayscale(.5)}
+    .card-label{font-size:10px;font-weight:850;letter-spacing:.14em;color:#718098;text-transform:uppercase}
+    .mail-sig{margin-top:23px;background:white;color:#1f2937;padding:22px;border-radius:12px;min-height:174px;font-family:Arial,sans-serif}
+    .mail-sig h4{margin:0 0 5px;font-size:15px}.mail-sig p{margin:2px 0;color:#667085;font-size:10px}
+    .bad-icons{display:flex;gap:5px;margin-top:12px}.bad-icons span{width:22px;height:22px;background:#e9edf3;border-radius:4px}
+    .after-sig{background:linear-gradient(135deg,#09182f,#07101e);color:white;position:relative;overflow:hidden}
+    .after-sig::after{content:"";position:absolute;width:180px;height:180px;border-radius:50%;background:rgba(35,104,255,.26);filter:blur(35px);right:-80px;top:-90px}
+    .feature-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+    .feature{min-height:225px;position:relative;overflow:hidden}
+    .feature .num{font-size:10px;color:#5d6b80}
+    .feature h3{font-size:20px;letter-spacing:-.03em;margin:42px 0 10px}
+    .feature p{font-size:13px;line-height:1.65;color:#8e9bad}
+    .feature-icon{width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,#183267,#274eac);display:grid;place-items:center;color:#bed3ff;font-size:20px;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+    .story{display:grid;grid-template-columns:.8fr 1.2fr;gap:60px;align-items:center}
+    .story-copy blockquote{font-size:31px;line-height:1.22;letter-spacing:-.04em;margin:0 0 22px}
+    .story-copy p{font-size:14px;line-height:1.8;color:#98a4b7}
+    .story-steps{display:flex;flex-direction:column;gap:10px}
+    .story-step{display:grid;grid-template-columns:42px 1fr;gap:15px;padding:17px 18px;border-radius:14px;border:1px solid rgba(255,255,255,.08);background:#0d1422}
+    .story-step b{width:34px;height:34px;border-radius:10px;background:#18233a;display:grid;place-items:center;color:#7fa5ff}
+    .story-step strong{font-size:13px}.story-step span{display:block;color:#8794a8;font-size:11px;margin-top:5px;line-height:1.5}
+    .motion-lab{border-radius:28px;padding:34px;position:relative;overflow:hidden;background:
+      radial-gradient(circle at 80% 10%,rgba(79,196,255,.17),transparent 30%),
+      radial-gradient(circle at 12% 84%,rgba(85,84,255,.2),transparent 34%),
+      linear-gradient(135deg,#0c1428,#0b0f18);
+      border:1px solid rgba(125,155,255,.18)
+    }
+    .motion-head{display:flex;justify-content:space-between;align-items:flex-end;gap:25px}
+    .motion-head h2{max-width:700px}
+    .preset-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:30px}
+    .preset{padding:8px 11px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.045);border-radius:999px;color:#9fadc2;font-size:10px}
+    .preset.hot{color:#d7e5ff;border-color:rgba(80,127,255,.3);background:rgba(60,100,255,.10)}
+    .compat{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:32px}
+    .compat-card{padding:16px;border-radius:13px;background:#0a101b;border:1px solid rgba(255,255,255,.07)}
+    .compat-card span{font-size:11px;font-weight:800}.compat-card small{display:block;color:#728096;font-size:9px;margin-top:5px}
+    .status{float:right;width:8px;height:8px;border-radius:50%;background:#42dc9a;box-shadow:0 0 9px rgba(66,220,154,.55)}
+    .status.yellow{background:#ffbd58;box-shadow:0 0 9px rgba(255,189,88,.5)}
+    .audience-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}
+    .audience{padding:22px;border-radius:16px;border:1px solid rgba(255,255,255,.08);background:#0c121f}
+    .audience strong{display:block;margin-top:25px;font-size:15px}.audience span{display:block;color:#8491a5;font-size:11px;line-height:1.55;margin-top:7px}
+    .pricing{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+    .price-card{position:relative}
+    .price-card.featured{border-color:rgba(95,135,255,.45);box-shadow:0 24px 80px rgba(40,80,210,.16)}
+    .popular{position:absolute;right:18px;top:18px;padding:6px 9px;border-radius:999px;background:#223c82;color:#bcd1ff;font-size:9px;font-weight:850}
+    .price-card h3{font-size:18px;margin:8px 0 15px}.price{font-size:38px;font-weight:850;letter-spacing:-.05em}.price small{font-size:11px;color:#768399;font-weight:500}
+    .price-copy{font-size:11px;color:#8794a8;line-height:1.55;margin:10px 0 22px;min-height:36px}
+    .features-list{list-style:none;padding:0;margin:22px 0;display:flex;flex-direction:column;gap:10px;font-size:11px;color:#aab5c5}.features-list li::before{content:"✓";color:#59dca1;font-weight:900;margin-right:8px}
+    .faq{max-width:850px}
+    .faq-item{border-top:1px solid rgba(255,255,255,.09);padding:20px 0}
+    .faq-q{display:flex;justify-content:space-between;gap:20px;font-weight:750;font-size:14px;cursor:pointer}.faq-a{display:none;color:#8996aa;font-size:12px;line-height:1.7;padding-top:12px;max-width:760px}.faq-item.open .faq-a{display:block}
+    .final{
+      padding:90px 0 110px;text-align:center;position:relative
+    }
+    .final-box{
+      padding:70px 30px;border-radius:30px;border:1px solid rgba(255,255,255,.10);
+      background:radial-gradient(circle at 50% 0,rgba(71,117,255,.22),transparent 35%),linear-gradient(180deg,#0c1325,#080d17);
+      box-shadow:var(--shadow)
+    }
+    .final h2{max-width:880px;margin:0 auto 18px}.final p{max-width:620px;margin:0 auto 28px;color:#92a0b3;line-height:1.7}
+    footer{padding:34px 0 45px;border-top:1px solid rgba(255,255,255,.06);color:#68758a;font-size:10px}footer .wrap{display:flex;align-items:center;justify-content:space-between}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-7px)}}
+    @keyframes float2{0%,100%{transform:translateY(0) rotate(2deg)}50%{transform:translateY(-8px) rotate(-1deg)}}
+    @keyframes cursorMove{0%,20%{transform:translate(0,0) rotate(-8deg)}45%{transform:translate(-95px,-55px) rotate(-8deg)}65%{transform:translate(-95px,-55px) rotate(-8deg)}100%{transform:translate(0,0) rotate(-8deg)}}
+    .reveal{opacity:0;transform:translateY(22px);transition:.65s ease}
+    .reveal.visible{opacity:1;transform:none}
+    @media(max-width:980px){
+      .nav-links{display:none}
+      .hero-grid,.story{grid-template-columns:1fr}
+      .hero{padding-top:60px}
+      .browser{transform:none}
+      .feature-grid{grid-template-columns:1fr 1fr}
+      .audience-grid{grid-template-columns:1fr 1fr}
+      .pricing{grid-template-columns:1fr}
+    }
+    @media(max-width:700px){
+      .wrap{width:min(100% - 24px,1180px)}
+      h1{font-size:52px}
+      .hero-demo{margin-top:10px}
+      .demo-body{grid-template-columns:1fr;padding:10px;min-height:auto}
+      .demo-side,.demo-inspector{display:none}
+      .editor{min-height:280px}
+      .problem-grid,.feature-grid,.audience-grid,.compat{grid-template-columns:1fr}
+      .motion-head{display:block}
+      .nav-cta .soft{display:none}
+      footer .wrap{display:block;text-align:center}
+    }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><span class="brand-ring"></span>Siglair</a>
+      <div class="nav-links">
+        <a href="#why">Pourquoi</a>
+        <a href="#features">Fonctions</a>
+        <a href="#motion">Animations</a>
+        <a href="#pricing">Tarifs</a>
+      </div>
+      <div class="nav-cta">
+        <a class="btn soft" href="#pricing">Voir les plans</a>
+        <a class="btn primary" href="./signature-studio-motion-lab.html">Créer gratuitement ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="hero">
+      <div class="wrap hero-grid">
+        <div>
+          <div class="eyebrow"><span class="dot"></span>Votre première signature est gratuite</div>
+          <h1>Vos emails finissent.<br><span class="gradient-text">Votre marque, non.</span></h1>
+          <p class="hero-copy">
+            La plupart des signatures email ressemblent encore à un bloc de texte de 2012.
+            <strong>Siglair transforme chaque email en mini expérience de marque</strong> :
+            design libre, animations subtiles, CTA, templates premium et export pensé pour l’email.
+          </p>
+          <div class="hero-actions">
+            <a class="btn primary big" href="./signature-studio-motion-lab.html">Créer ma signature — Gratuit</a>
+            <a class="btn soft big" href="#demo">Voir la démo ↓</a>
+          </div>
+          <div class="micro">
+            <span><b class="check">✓</b> Sans carte bancaire</span>
+            <span><b class="check">✓</b> Éditeur libre</span>
+            <span><b class="check">✓</b> Preview Gmail / Outlook</span>
+          </div>
+        </div>
+
+        <div class="hero-demo" id="demo">
+          <div class="glow"></div>
+          <div class="browser">
+            <div class="browser-bar">
+              <span class="bubble"></span><span class="bubble"></span><span class="bubble"></span>
+              <div class="url">app.siglair.com/editor</div>
+            </div>
+            <div class="demo-body">
+              <div class="demo-side">
+                <strong>Éléments</strong>
+                <div class="tool">T&nbsp;&nbsp; Texte</div>
+                <div class="tool">▧&nbsp;&nbsp; Logo</div>
+                <div class="tool active">✦&nbsp;&nbsp; Animate</div>
+                <div class="tool">↗&nbsp;&nbsp; Bouton</div>
+                <div class="tool">━&nbsp;&nbsp; Ligne</div>
+              </div>
+              <div class="editor">
+                <div class="sig">
+                  <div class="sig-logo"><div class="animated-ring"></div></div>
+                  <div class="sig-content">
+                    <div class="sig-name">Mathis Higuinen</div>
+                    <div class="sig-role">Founder — Orizn</div>
+                    <div class="sig-tag">Visa Requirements API · 199 passports · 15 languages</div>
+                    <div class="sig-contact">contact@orizn.app · +33 6 74 57 86 68</div>
+                    <div class="sig-actions">
+                      <div class="sig-btn">Website</div><div class="sig-btn">LinkedIn</div><div class="sig-btn">WhatsApp</div>
+                    </div>
+                  </div>
+                </div>
+                <span class="cursor"></span>
+              </div>
+              <div class="demo-inspector">
+                <strong>Animate</strong>
+                <div class="tool active">Glow</div>
+                <div class="tool">Draw</div>
+                <div class="tool">Shimmer</div>
+                <div class="input-mock">Duration&nbsp;&nbsp; 2.5s</div>
+                <div class="input-mock">Loop&nbsp;&nbsp; Forever</div>
+                <div class="slider"></div>
+              </div>
+            </div>
+          </div>
+          <div class="wow-pill">“Attends… ta signature bouge ?”</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section sm" id="why">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="kicker">Le problème</div>
+          <h2>Vous soignez votre site.<br>Votre LinkedIn. Votre produit.<br><span class="gradient-text">Puis vous envoyez ça.</span></h2>
+          <p>
+            Chaque email est une impression de marque. Pourtant, la signature reste souvent le morceau le moins travaillé de toute l’identité visuelle.
+            Siglair part d’une idée simple : <strong style="color:white">si quelqu’un voit votre signature 20 fois, elle mérite mieux qu’un logo posé à côté d’un numéro.</strong>
+          </p>
+        </div>
+
+        <div class="problem-grid">
+          <div class="card before reveal">
+            <div class="card-label">Avant</div>
+            <div class="mail-sig">
+              <h4>Jean Dupont</h4>
+              <p>CEO — Example Company</p>
+              <p>+33 6 00 00 00 00</p>
+              <p>contact@example.com</p>
+              <p>www.example.com</p>
+              <div class="bad-icons"><span></span><span></span><span></span><span></span></div>
+            </div>
+          </div>
+
+          <div class="card reveal">
+            <div class="card-label">Avec Siglair</div>
+            <div class="mail-sig after-sig">
+              <div style="display:flex;gap:15px;align-items:center;position:relative;z-index:2">
+                <div class="animated-ring" style="width:64px;height:64px;flex:none"></div>
+                <div>
+                  <h4 style="color:white;font-size:18px">Jean Dupont</h4>
+                  <p style="color:#d5e0ef">CEO — Example Company</p>
+                  <p style="color:#87b3ff;margin-top:8px">contact@example.com · +33 6 00 00 00 00</p>
+                  <div style="display:flex;gap:6px;margin-top:12px">
+                    <span class="sig-btn">Book a call</span><span class="sig-btn" style="background:#0a66c2">LinkedIn</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="features">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="kicker">Pas un générateur de template</div>
+          <h2>Plus proche de Figma.<br>Mais pour votre signature.</h2>
+          <p>Vous partez d’un template ou de zéro. Chaque élément est déplaçable, redimensionnable et personnalisable. Le design vous appartient.</p>
+        </div>
+
+        <div class="feature-grid">
+          <div class="card feature reveal">
+            <div class="feature-icon">↔</div><span class="num">01</span>
+            <h3>Placement libre</h3>
+            <p>Texte, logo, image, bouton, badge, séparation : placez chaque élément exactement où vous le voulez.</p>
+          </div>
+          <div class="card feature reveal">
+            <div class="feature-icon">✦</div><span class="num">02</span>
+            <h3>Animations premium</h3>
+            <p>Glow, draw, shimmer, pulse, reveal, float, rotate… pour créer du mouvement sans transformer votre email en sapin de Noël.</p>
+          </div>
+          <div class="card feature reveal">
+            <div class="feature-icon">◫</div><span class="num">03</span>
+            <h3>Templates instantanés</h3>
+            <p>Founder, freelance, sales, agence, corporate, créateur : remplissez vos infos et personnalisez ensuite tout le reste.</p>
+          </div>
+          <div class="card feature reveal">
+            <div class="feature-icon">◎</div><span class="num">04</span>
+            <h3>Hosted assets</h3>
+            <p>Images, GIF et éléments dynamiques peuvent être servis depuis une URL stable, pratique pour mettre à jour une campagne sans refaire la signature.</p>
+          </div>
+          <div class="card feature reveal">
+            <div class="feature-icon">↗</div><span class="num">05</span>
+            <h3>CTA qui se voient</h3>
+            <p>Site, portfolio, WhatsApp, démo, calendrier ou lancement : transformez la signature en surface de conversion discrète.</p>
+          </div>
+          <div class="card feature reveal">
+            <div class="feature-icon">✓</div><span class="num">06</span>
+            <h3>Email Safe</h3>
+            <p>Prévisualisez les limites des clients mail et utilisez un fallback lorsque certaines animations ou mises en page sont trop risquées.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap story">
+        <div class="story-copy reveal">
+          <div class="kicker">Le moment wow</div>
+          <blockquote>Le meilleur marketing n’explique pas le produit.<br><span class="gradient-text">Il donne envie de demander : “Comment t’as fait ça ?”</span></blockquote>
+          <p>
+            C’est le pari de Siglair. Votre signature devient elle-même une démonstration du produit.
+            Chaque email envoyé peut déclencher une conversation, un clic ou simplement une impression plus forte.
+          </p>
+        </div>
+        <div class="story-steps reveal">
+          <div class="story-step"><b>1</b><div><strong>Vous envoyez un email normal.</strong><span>Pas de campagne, pas de popup, pas de nouvelle habitude à créer.</span></div></div>
+          <div class="story-step"><b>2</b><div><strong>La signature attire l’œil.</strong><span>Une animation subtile, un branding propre, un CTA clair.</span></div></div>
+          <div class="story-step"><b>3</b><div><strong>Le destinataire remarque la différence.</strong><span>“Attends… ta signature est animée ?”</span></div></div>
+          <div class="story-step"><b>4</b><div><strong>Votre produit voyage avec vos emails.</strong><span>La signature devient une micro surface de marque répétée naturellement.</span></div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section sm" id="motion">
+      <div class="wrap motion-lab reveal">
+        <div class="motion-head">
+          <div>
+            <div class="kicker">Motion engine</div>
+            <h2>Animez ce que vous voulez.<br><span class="gradient-text">Sans apprendre After Effects.</span></h2>
+          </div>
+          <a class="btn primary big" href="./signature-studio-motion-lab.html">Tester Motion Lab ↗</a>
+        </div>
+        <div class="preset-row">
+          <span class="preset hot">Glow</span><span class="preset hot">Draw</span><span class="preset hot">Shimmer</span>
+          <span class="preset">Pulse</span><span class="preset">Reveal</span><span class="preset">Float</span>
+          <span class="preset">Rotate</span><span class="preset">Bounce</span><span class="preset">Zoom</span><span class="preset">Slide</span>
+        </div>
+        <div class="compat">
+          <div class="compat-card"><span>Gmail <i class="status"></i></span><small>Preview principal</small></div>
+          <div class="compat-card"><span>Apple Mail <i class="status"></i></span><small>Animation riche</small></div>
+          <div class="compat-card"><span>Outlook Web <i class="status"></i></span><small>Preview principal</small></div>
+          <div class="compat-card"><span>Outlook Legacy <i class="status yellow"></i></span><small>Fallback statique</small></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="kicker">Pour qui ?</div>
+          <h2>Un petit détail.<br>Répété dans chaque conversation.</h2>
+        </div>
+        <div class="audience-grid">
+          <div class="audience reveal"><div class="feature-icon">⚡</div><strong>Founders</strong><span>Faites de chaque email une extension propre de votre produit et de votre marque.</span></div>
+          <div class="audience reveal"><div class="feature-icon">↗</div><strong>Sales</strong><span>Ajoutez booking, WhatsApp, démo ou offre sans alourdir le corps de vos emails.</span></div>
+          <div class="audience reveal"><div class="feature-icon">◈</div><strong>Agences</strong><span>Créez des signatures pour vos clients et transformez un détail oublié en livrable premium.</span></div>
+          <div class="audience reveal"><div class="feature-icon">✦</div><strong>Créateurs & freelances</strong><span>Montrez votre personnalité dès le dernier pixel de votre email.</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="pricing">
+      <div class="wrap">
+        <div class="section-head reveal">
+          <div class="kicker">Pricing simple</div>
+          <h2>Commencez gratuit.<br>Passez Pro quand votre signature travaille pour vous.</h2>
+          <p>Tarifs indicatifs pour visualiser le positionnement marketing de la landing.</p>
+        </div>
+
+        <div class="pricing">
+          <div class="card price-card reveal">
+            <div class="card-label">Free</div>
+            <h3>Pour créer votre première signature</h3>
+            <div class="price">0€</div>
+            <div class="price-copy">Aucune carte bancaire. Vous pouvez vraiment essayer le produit avant de payer.</div>
+            <a class="btn soft" style="width:100%" href="./signature-studio-motion-lab.html">Créer gratuitement</a>
+            <ul class="features-list">
+              <li>1 signature</li>
+              <li>Éditeur visuel libre</li>
+              <li>Templates essentiels</li>
+              <li>Export HTML</li>
+            </ul>
+          </div>
+          <div class="card price-card featured reveal">
+            <span class="popular">LE PLUS ATTRACTIF</span>
+            <div class="card-label">Pro</div>
+            <h3>Pour une signature qui se remarque</h3>
+            <div class="price">7,90€ <small>/ mois</small></div>
+            <div class="price-copy">Pour founders, freelances et commerciaux qui veulent exploiter toute la surface.</div>
+            <a class="btn primary" style="width:100%" href="./signature-studio-motion-lab.html">Essayer Pro</a>
+            <ul class="features-list">
+              <li>Signatures illimitées</li>
+              <li>Motion presets premium</li>
+              <li>GIF / assets hébergés</li>
+              <li>Brand Kit</li>
+              <li>Templates premium</li>
+              <li>Fallback avancé</li>
+            </ul>
+          </div>
+          <div class="card price-card reveal">
+            <div class="card-label">Team</div>
+            <h3>Pour déployer une marque entière</h3>
+            <div class="price">29€ <small>/ mois</small></div>
+            <div class="price-copy">Pour équipes commerciales, agences et entreprises avec plusieurs collaborateurs.</div>
+            <a class="btn soft" style="width:100%" href="#faq">Découvrir Team</a>
+            <ul class="features-list">
+              <li>Profils collaborateurs</li>
+              <li>Templates verrouillés</li>
+              <li>Campagnes de bannières</li>
+              <li>Variables par employé</li>
+              <li>Analytics de clics</li>
+              <li>Gestion centralisée</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="faq">
+      <div class="wrap faq">
+        <div class="section-head reveal">
+          <div class="kicker">FAQ</div>
+          <h2>Les questions avant de cliquer.</h2>
+        </div>
+        <div class="faq-item open reveal">
+          <div class="faq-q">Est-ce qu’une signature email peut vraiment être animée ? <span>+</span></div>
+          <div class="faq-a">Oui, notamment via des images animées comme les GIF. L’important est de prévoir une première frame propre et un fallback lorsque certains clients email ne rendent pas l’animation de la même façon.</div>
+        </div>
+        <div class="faq-item reveal">
+          <div class="faq-q">Est-ce que ça fonctionne avec Outlook ? <span>+</span></div>
+          <div class="faq-a">Outlook existe sous plusieurs moteurs de rendu. Siglair est pensé autour d’une logique de compatibilité et de fallback plutôt que de supposer qu’un seul HTML moderne fonctionne partout.</div>
+        </div>
+        <div class="faq-item reveal">
+          <div class="faq-q">Je dois savoir coder ? <span>+</span></div>
+          <div class="faq-a">Non. L’idée du produit est précisément de travailler visuellement : vous placez, redimensionnez, animez et exportez.</div>
+        </div>
+        <div class="faq-item reveal">
+          <div class="faq-q">Pourquoi ne pas utiliser simplement Canva ? <span>+</span></div>
+          <div class="faq-a">Canva est excellent pour créer des visuels. Siglair est spécialisé dans les contraintes particulières de l’email : HTML, liens, clients mail, fallback, assets hébergés et déploiement de signatures.</div>
+        </div>
+        <div class="faq-item reveal">
+          <div class="faq-q">Pourquoi une première signature gratuite ? <span>+</span></div>
+          <div class="faq-a">Parce que le résultat doit convaincre avant le paiement. Le free sert d’acquisition ; le Pro monétise les animations avancées, les signatures multiples, les assets hébergés, les campagnes et les fonctions d’équipe.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="final">
+      <div class="wrap final-box reveal">
+        <div class="eyebrow"><span class="dot"></span>1 email. Puis 10. Puis 1 000.</div>
+        <h2>Votre prochaine impression de marque<br>commence au bas de votre prochain email.</h2>
+        <p>Créez-la en quelques minutes. Faites-la bouger juste assez pour qu’on la remarque. Et laissez vos emails faire le reste.</p>
+        <div class="hero-actions" style="justify-content:center">
+          <a class="btn primary big" href="./signature-studio-motion-lab.html">Créer ma première signature — Gratuit</a>
+          <a class="btn soft big" href="#top">Revoir la démo ↑</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <div class="brand" style="font-size:14px"><span class="brand-ring" style="width:26px;height:26px"></span>Siglair</div>
+      <div>Prototype marketing — Your signature. Your motion.</div>
+    </div>
+  </footer>
+
+  <script>
+    const obs = new IntersectionObserver((entries)=>{
+      entries.forEach(e=>{ if(e.isIntersecting) e.target.classList.add('visible') });
+    }, {threshold:.12});
+    document.querySelectorAll('.reveal').forEach(el=>obs.observe(el));
+
+    document.querySelectorAll('.faq-item').forEach(item=>{
+      item.querySelector('.faq-q').addEventListener('click',()=>item.classList.toggle('open'));
+    });
+  </script>
+</body>
+</html>

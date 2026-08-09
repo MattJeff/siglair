@@ -1,0 +1,1392 @@
+/*
+ * Styles de l'éditeur, portés du bloc <style> de docs/reference/editor-original.html.
+ * Aucune couleur littérale : tout vient de src/styles/tokens.css, les nuances intermédiaires
+ * sont dérivées par color-mix() pour rester justes si la charte bouge.
+ *
+ * Écart assumé avec la maquette : elle écrit du texte secondaire en 7–9 px sur --muted, ce que
+ * docs/DESIGN.md §Accessibilité interdit (--muted n'est lisible qu'à partir de 14 px). La densité
+ * est conservée, mais le texte dense passe à 11–12 px sur --ink-2, dérivé de --text (≈10:1).
+ */
+
+.app {
+  --ink-2: color-mix(in srgb, var(--text) 80%, var(--bg));
+  --surface-1: color-mix(in srgb, var(--panel) 88%, var(--bg));
+  --surface-2: color-mix(in srgb, var(--panel3) 82%, var(--bg));
+  --accent-soft: color-mix(in srgb, var(--blue) 22%, var(--panel));
+
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ---------------- Barre supérieure ---------------- */
+
+.topbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.topGroup {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.topGroup:last-child {
+  margin-left: auto;
+}
+
+.nameInput {
+  min-width: 140px;
+  max-width: 260px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  background: transparent;
+}
+
+.nameInput:hover,
+.nameInput:focus {
+  border-color: var(--line2);
+  background: var(--panel2);
+}
+
+.iconBtn {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-size: 15px;
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.iconBtn:hover:not(:disabled) {
+  border-color: var(--line2);
+  background: var(--panel3);
+}
+
+.iconBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.segmented {
+  display: flex;
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+}
+
+.segmented button {
+  min-height: 34px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+.segmented button[aria-pressed='true'] {
+  color: var(--text);
+  background: var(--panel3);
+}
+
+.saveState {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.saveError {
+  color: var(--red);
+}
+
+/* ---------------- Espace de travail ---------------- */
+
+.workspace {
+  display: grid;
+  flex: 1;
+  min-height: 0;
+  grid-template-columns: 320px minmax(420px, 1fr) 336px;
+}
+
+.sidebar {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  background: var(--panel);
+}
+
+.left {
+  border-right: 1px solid var(--line);
+}
+
+.right {
+  border-left: 1px solid var(--line);
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 3px;
+  padding: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs button {
+  min-height: 38px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+.tabs button[aria-selected='true'] {
+  color: var(--text);
+  background: var(--panel3);
+}
+
+.panel {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px;
+}
+
+.sectionHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.sectionHead h3 {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.sectionHead span {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.gap {
+  margin-top: 20px;
+}
+
+.note {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+  background: var(--panel2);
+}
+
+.noteWarn {
+  border-color: color-mix(in srgb, var(--yellow) 34%, transparent);
+  background: color-mix(in srgb, var(--yellow) 8%, var(--panel2));
+}
+
+.noteGood {
+  border-color: color-mix(in srgb, var(--green) 34%, transparent);
+  background: color-mix(in srgb, var(--green) 8%, var(--panel2));
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ---------------- Palette d'éléments ---------------- */
+
+.elementGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+
+.elementCard {
+  display: flex;
+  min-height: 82px;
+  flex-direction: column;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  text-align: left;
+  color: var(--text);
+  background: var(--panel2);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.elementCard:hover {
+  border-color: var(--line2);
+  background: var(--panel3);
+}
+
+.elIcon {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: var(--r-sm);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--blue2);
+  background: var(--accent-soft);
+}
+
+.elementCard b {
+  margin-top: 7px;
+  font-size: 12px;
+}
+
+.elementCard small {
+  margin-top: 3px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--ink-2);
+}
+
+/* ---------------- Calques ---------------- */
+
+.layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layer {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: var(--surface-1);
+}
+
+.layerActive {
+  border-color: color-mix(in srgb, var(--blue) 55%, transparent);
+  background: var(--accent-soft);
+}
+
+.layerSelect {
+  display: flex;
+  overflow: hidden;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  text-align: left;
+  color: var(--text);
+  background: transparent;
+}
+
+.layerIcon {
+  display: grid;
+  width: 21px;
+  height: 21px;
+  flex: none;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--panel3);
+}
+
+.layerName {
+  overflow: hidden;
+  flex: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layerAnim {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--blue2);
+  background: var(--accent-soft);
+}
+
+.layerBtn {
+  display: grid;
+  width: 26px;
+  height: 26px;
+  flex: none;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+  background: transparent;
+}
+
+.layerBtn:hover {
+  color: var(--text);
+  background: var(--panel3);
+}
+
+.layerBtn[aria-pressed='true'] {
+  color: var(--yellow);
+}
+
+/* ---------------- Modèles ---------------- */
+
+.templateGrid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.template {
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  text-align: left;
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.template:hover {
+  border-color: var(--line2);
+}
+
+.templateThumb {
+  position: relative;
+  height: 84px;
+  margin: 7px;
+  border-radius: var(--r-sm);
+  overflow: hidden;
+}
+
+.thumbRing,
+.thumbLine1,
+.thumbLine2,
+.thumbCta {
+  position: absolute;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--text) 72%, transparent);
+}
+
+.thumbRing {
+  left: 14px;
+  top: 22px;
+  width: 38px;
+  height: 38px;
+  border: 5px solid color-mix(in srgb, var(--text) 75%, transparent);
+  border-radius: 50%;
+  background: none;
+}
+
+.thumbLine1 {
+  left: 65px;
+  top: 24px;
+  width: 105px;
+  height: 7px;
+}
+
+.thumbLine2 {
+  left: 65px;
+  top: 40px;
+  width: 78px;
+  height: 5px;
+  opacity: 0.42;
+}
+
+.thumbCta {
+  left: 65px;
+  top: 60px;
+  width: 95px;
+  height: 16px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--blue2) 78%, transparent);
+}
+
+.templateMeta {
+  display: block;
+  padding: 4px 10px 11px;
+}
+
+.templateMeta b {
+  display: block;
+  font-size: 12px;
+}
+
+.templateMeta small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* ---------------- Assets ---------------- */
+
+.assetList {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 7px;
+}
+
+.asset {
+  position: relative;
+  overflow: hidden;
+  aspect-ratio: 1;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel2);
+}
+
+.assetPick {
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.assetPick img,
+.assetPick video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.assetKind {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 11px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 78%, transparent);
+}
+
+.assetRemove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border: 0;
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--bg) 72%, transparent);
+}
+
+.assetRemove:hover {
+  color: var(--red);
+}
+
+.quota {
+  display: block;
+  width: 100%;
+  height: 6px;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.quotaFill {
+  display: block;
+  height: 100%;
+  border-radius: 99px;
+  background: var(--blue);
+}
+
+.quotaFull {
+  background: var(--red);
+}
+
+/* ---------------- Campagnes ---------------- */
+
+.campaign {
+  padding: 10px;
+  margin-bottom: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+}
+
+.campaignActive {
+  border-color: color-mix(in srgb, var(--blue) 50%, transparent);
+  background: var(--accent-soft);
+}
+
+.campaignHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.campaignHead strong {
+  font-size: 12px;
+}
+
+.badgeState {
+  padding: 3px 7px;
+  border-radius: 99px;
+  font-size: 11px;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 14%, transparent);
+}
+
+.badgeIdle {
+  color: var(--yellow);
+  background: color-mix(in srgb, var(--yellow) 14%, transparent);
+}
+
+.campaign p {
+  margin: 7px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+.campaignDates {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+/* ---------------- Scène ---------------- */
+
+.stage {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  background: radial-gradient(circle at 50% 32%, var(--panel3) 0, var(--panel) 50%, var(--bg) 100%);
+}
+
+.stagebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.stagebar strong {
+  font-size: 12px;
+}
+
+.stageSize {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.stageControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tinyBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 10px;
+  text-decoration: none;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.tinyBtn:hover:not(:disabled) {
+  border-color: var(--line2);
+  background: var(--panel3);
+}
+
+.tinyBtn[aria-pressed='true'] {
+  border-color: var(--blue);
+  background: var(--accent-soft);
+}
+
+.inlineLabel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.inlineSelect {
+  min-height: 34px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-size: 12px;
+  color: var(--text);
+  background: var(--panel2);
+}
+
+/* ---------------- Canvas ---------------- */
+
+.canvasWrap {
+  display: grid;
+  overflow: auto;
+  min-height: 260px;
+  flex: 1;
+  padding: 40px;
+  place-items: center;
+}
+
+.canvas {
+  position: relative;
+  overflow: hidden;
+  transform-origin: center;
+  background-position: center;
+  background-size: cover;
+  box-shadow: var(--shadow);
+  outline: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.grid::after {
+  content: '';
+  position: absolute;
+  z-index: 999;
+  inset: 0;
+  pointer-events: none;
+  background-image: linear-gradient(color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--text) 4%, transparent) 1px, transparent 1px);
+  background-size: 10px 10px;
+}
+
+/* Élément du canvas : un vrai <button>, donc sélectionnable au clavier. */
+.ce {
+  position: absolute;
+  display: flex;
+  overflow: hidden;
+  align-items: center;
+  padding: 0;
+  border: 0;
+  font-family: inherit;
+  line-height: 1.25;
+  text-align: inherit;
+  white-space: pre-wrap;
+  transform-origin: center;
+  user-select: none;
+  touch-action: none;
+}
+
+.ceSelected {
+  outline: 1px solid var(--blue2);
+  outline-offset: 0;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 22%, transparent);
+}
+
+.ceLocked::before {
+  content: '🔒';
+  position: absolute;
+  z-index: 5;
+  top: 1px;
+  right: 2px;
+  font-size: 9px;
+}
+
+.ce img,
+.ce video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+}
+
+.mediaPlaceholder {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  padding: 2px;
+  border: 1px dashed color-mix(in srgb, var(--text) 34%, transparent);
+  border-radius: inherit;
+  font-size: 10px;
+  text-align: center;
+  color: color-mix(in srgb, var(--text) 80%, transparent);
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+
+.handle {
+  position: absolute;
+  z-index: 20;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--blue2);
+  border-radius: 3px;
+  background: var(--text);
+}
+
+.handleResize {
+  right: -6px;
+  bottom: -6px;
+  cursor: nwse-resize;
+}
+
+.handleRotate {
+  top: -22px;
+  left: calc(50% - 6px);
+  border-radius: 50%;
+  cursor: grab;
+}
+
+.playBadge {
+  position: absolute;
+  z-index: 8;
+  right: 2px;
+  bottom: 2px;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--blue) 60%, var(--bg));
+}
+
+/* ---------------- Timeline ---------------- */
+
+.timeline {
+  display: flex;
+  height: 172px;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.timelineHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.timelineHead strong {
+  font-size: 12px;
+}
+
+.timelineSide {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.readout {
+  padding: 4px 7px;
+  border-radius: 5px;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--blue2);
+  background: var(--panel2);
+}
+
+.timelineBody {
+  display: grid;
+  overflow: hidden;
+  min-height: 0;
+  flex: 1;
+  grid-template-columns: 148px 1fr;
+}
+
+.trackLabels {
+  overflow: auto;
+  padding-top: 22px;
+  border-right: 1px solid var(--line);
+}
+
+.trackLabel {
+  display: flex;
+  height: 28px;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 11px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
+}
+
+.trackDot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--blue);
+}
+
+.timelineScroll {
+  position: relative;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.timelineScale {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  height: 22px;
+  min-width: 720px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel2);
+}
+
+.tick {
+  position: absolute;
+  top: 0;
+  height: 22px;
+  padding-left: 3px;
+  border-left: 1px solid var(--line2);
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.tracks {
+  position: relative;
+  min-width: 720px;
+}
+
+.trackRow {
+  position: relative;
+  height: 28px;
+  border-bottom: 1px solid var(--line);
+}
+
+.animBlock {
+  position: absolute;
+  top: 5px;
+  overflow: hidden;
+  height: 18px;
+  padding: 2px 5px;
+  border: 1px solid color-mix(in srgb, var(--text) 12%, transparent);
+  border-radius: 5px;
+  font-size: 11px;
+  line-height: 1.1;
+  white-space: nowrap;
+  color: var(--text);
+  background: linear-gradient(90deg, var(--blue), var(--purple));
+}
+
+.playhead {
+  position: absolute;
+  z-index: 8;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  pointer-events: none;
+  background: var(--red);
+}
+
+.playhead::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 9px;
+  height: 7px;
+  background: var(--red);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+}
+
+/* ---------------- Bandeau compatibilité ---------------- */
+
+.compat {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 13px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.compatLeft {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.compatDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--green);
+}
+
+.compatWarn {
+  background: var(--yellow);
+}
+
+.compatRisky {
+  background: var(--red);
+}
+
+.compat strong {
+  color: var(--text);
+}
+
+/* ---------------- Inspecteur ---------------- */
+
+.rightHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line);
+}
+
+.rightHead small {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  color: var(--ink-2);
+}
+
+.rightHead h2 {
+  margin: 2px 0 0;
+  font-size: 14px;
+}
+
+.inspector {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  padding: 13px;
+}
+
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+}
+
+.groupTitle {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-2);
+}
+
+.row2,
+.row3,
+.row4 {
+  display: grid;
+  gap: 6px;
+}
+
+.row2 {
+  grid-template-columns: 1fr 1fr;
+}
+
+.row3 {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.row4 {
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+.switch input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--blue);
+}
+
+/* Densité de l'outil : les contrôles partagés sont compacts DANS les panneaux.
+   Sélecteurs d'élément volontairement : les classes de ui.module.css sont hachées,
+   et la maquette d'origine procédait déjà ainsi. */
+.inspector label,
+.panel label {
+  font-size: 12px;
+}
+
+.inspector input,
+.inspector select,
+.inspector textarea,
+.panel input,
+.panel select,
+.panel textarea {
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.inspector input[type='range'],
+.panel input[type='range'] {
+  padding: 0;
+  accent-color: var(--blue);
+}
+
+.inspector input[type='color'] {
+  padding: 2px;
+}
+
+.textarea {
+  display: block;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--text);
+  background: var(--panel2);
+  resize: vertical;
+}
+
+/* Doigt : on retrouve 40 px, la densité ne vaut que pour une souris. */
+@media (pointer: coarse) {
+  .inspector input,
+  .inspector select,
+  .inspector textarea,
+  .panel input,
+  .panel select,
+  .panel textarea,
+  .tinyBtn,
+  .inlineSelect,
+  .layerBtn,
+  .segmented button {
+    min-height: 40px;
+  }
+
+  .layerBtn {
+    width: 40px;
+  }
+}
+
+.presetGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.preset {
+  display: flex;
+  height: 56px;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.preset:hover {
+  border-color: var(--line2);
+  background: var(--panel3);
+}
+
+.presetActive {
+  border-color: var(--blue);
+  background: var(--accent-soft);
+}
+
+.preset i {
+  font-size: 14px;
+  font-style: normal;
+}
+
+.preset span {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.presetActive span {
+  color: var(--text);
+}
+
+.chipGrid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.chip {
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--panel2);
+}
+
+.chip strong {
+  display: block;
+  font-size: 11px;
+}
+
+.chip small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.chipOk {
+  color: var(--green);
+}
+
+.chipWarn {
+  color: var(--yellow);
+}
+
+/* ---------------- Barre d’options en tête de modale ---------------- */
+
+.toolbarRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* ---------------- Aperçu client ---------------- */
+
+.mailShell {
+  padding: 24px;
+  border-radius: var(--r-md);
+  background: #e7ebf1;
+}
+
+.mail {
+  width: min(820px, 100%);
+  padding: 24px;
+  margin: 0 auto;
+  border-radius: var(--r-md);
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  color: #20242b;
+  background: #ffffff;
+}
+
+.mailHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  font-weight: 700;
+  color: #ffffff;
+  background: #5974e8;
+}
+
+.mailHead small {
+  display: block;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.mail p {
+  margin: 0 0 10px;
+}
+
+.previewFrame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+
+.previewScroll {
+  overflow-x: auto;
+  margin-top: 16px;
+}
+
+/* ---------------- Export / publication ---------------- */
+
+.exportGrid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: 1.3fr 0.7fr;
+}
+
+.exportCode {
+  display: block;
+  width: 100%;
+  height: 420px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font: 12px/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--text);
+  background: var(--bg);
+  resize: vertical;
+}
+
+.modes {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-bottom: 9px;
+}
+
+.mode {
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  text-align: left;
+  color: var(--text);
+  background: var(--panel2);
+}
+
+.mode:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.modeActive {
+  border-color: var(--blue);
+  background: var(--accent-soft);
+}
+
+.mode b {
+  display: block;
+  font-size: 12px;
+}
+
+.mode small {
+  font-size: 11px;
+  color: var(--ink-2);
+}
+
+.hostedUrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--bg);
+}
+
+.hostedUrl code {
+  overflow-x: auto;
+  flex: 1;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--blue2);
+  white-space: nowrap;
+}
+
+.centered {
+  display: grid;
+  min-height: 60dvh;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+}
+
+/* ---------------- Écrans étroits ---------------- */
+
+@media (max-width: 1180px) {
+  .workspace {
+    grid-template-columns: 250px minmax(320px, 1fr) 290px;
+  }
+
+  .canvasWrap {
+    padding: 24px;
+  }
+}
+
+@media (max-width: 980px) {
+  .app {
+    height: auto;
+    overflow: visible;
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .left,
+  .right {
+    border: 0;
+    border-top: 1px solid var(--line);
+  }
+
+  .sidebar,
+  .panel,
+  .inspector {
+    overflow: visible;
+  }
+
+  .exportGrid {
+    grid-template-columns: 1fr;
+  }
+}

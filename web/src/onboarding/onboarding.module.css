@@ -1,0 +1,411 @@
+/*
+ * Parcours d'onboarding (contrat §6bis). Aucune couleur littérale : jetons de tokens.css.
+ * Les classes reprennent volontairement les formes de pages/app.module.css (carte, notice,
+ * upsell) : c'est le même écran connecté, il ne doit pas avoir l'air d'un autre produit.
+ */
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+}
+
+.cardTitle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 17px;
+}
+
+/* 14 px minimum : --muted ne passe AA qu'à partir de cette taille (DESIGN.md). */
+.muted {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.errorText {
+  font-size: 14px;
+  color: var(--red);
+}
+
+.notice {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border: 1px solid var(--line2);
+  border-left: 3px solid var(--blue2);
+  border-radius: var(--r-md);
+  background: var(--panel2);
+  font-size: 14px;
+}
+
+/* Quota atteint : une invitation, pas une alerte d'erreur (§6bis.6). */
+.upsell {
+  border-left-color: var(--cyan);
+}
+
+.alert {
+  border-left-color: var(--red);
+}
+
+.linkBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel2);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.linkBtn:hover {
+  background: var(--panel3);
+  border-color: var(--line2);
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+/* Le rappel qui lève la crainte d'être enfermé dans un résultat généré. */
+.reassure {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--green);
+}
+
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* ------------------------------------------------------- récapitulatif marque */
+
+.recap {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.logoBox {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: 148px;
+}
+
+.logo {
+  width: 96px;
+  height: 96px;
+  object-fit: contain;
+  padding: 8px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r-md);
+  background: var(--panel3);
+}
+
+.noLogo {
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  border: 1px dashed var(--line2);
+  border-radius: var(--r-md);
+  font-size: 14px;
+  color: var(--muted);
+}
+
+/* <label> stylé en bouton : le <input type="file"> natif reste focalisable, lui. */
+.fileBtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--panel2);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fileBtn:hover {
+  border-color: var(--blue);
+}
+
+/* Le champ natif est invisible : c'est son <label> qui doit montrer le focus clavier. */
+.srOnly:focus-visible + .fileBtn {
+  outline: 2px solid var(--blue2);
+  outline-offset: 2px;
+}
+
+.recapFields {
+  flex: 1 1 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.fieldset {
+  border: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.legend {
+  padding: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.swatches {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.swatchRow {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+
+.swatchInput {
+  width: 46px;
+  height: 40px;
+  padding: 2px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--panel2);
+  cursor: pointer;
+}
+
+.swatchRemove {
+  min-height: 24px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font-size: 14px;
+  text-decoration: underline;
+}
+
+.swatchRemove:hover {
+  color: var(--text);
+}
+
+.detected {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.detectedList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.detectedList li {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel2);
+}
+
+.detectedList span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.detectedList strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+/* ------------------------------------------------------------- coordonnées */
+
+.fields {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+}
+
+/* ------------------------------------------------------------- attente assumée */
+
+.waiting {
+  align-items: flex-start;
+}
+
+.waitBrand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.waitLogo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  padding: 6px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  background: var(--panel3);
+}
+
+.waitName {
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.waitColors {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.waitColor {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--line2);
+}
+
+/* Indéterminé, et ça se voit : aucune promesse de pourcentage. */
+.bar {
+  width: min(420px, 100%);
+  height: 6px;
+  border-radius: 999px;
+  background: var(--panel3);
+  overflow: hidden;
+}
+
+.barFill {
+  display: block;
+  width: 40%;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--grad-primary);
+  animation: sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+/* ------------------------------------------------------------- propositions */
+
+.chooseWrap {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.chooseHead {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/*
+ * Côte à côte et à taille réelle : trois signatures de 620 px ne tiennent pas dans une page,
+ * on fait défiler horizontalement plutôt que de les réduire. Une signature vue à 60 % ne
+ * renseigne pas sur ce qui arrivera dans une boîte de réception.
+ */
+.variants {
+  display: flex;
+  gap: 16px;
+  margin: 0;
+  padding: 0 0 8px;
+  list-style: none;
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+}
+
+.variant {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+  max-width: 660px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--panel);
+  scroll-snap-align: start;
+}
+
+.variantName {
+  font-size: 16px;
+}
+
+.frame {
+  display: grid;
+  place-items: center;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel2);
+  overflow: hidden;
+}
+
+.iframe {
+  border: 0;
+}
+
+.rationale {
+  max-width: 60ch;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--muted);
+}

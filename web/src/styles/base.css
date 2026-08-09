@@ -1,0 +1,108 @@
+/* Reset court, typographie, focus, mouvement réduit. Aucune couleur littérale ici. */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+* {
+  margin: 0;
+}
+
+html {
+  color-scheme: dark;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100dvh;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial,
+    sans-serif;
+  font-size: 16px;
+  line-height: 1.55;
+  color: var(--text);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+img,
+picture,
+video,
+canvas,
+svg,
+iframe {
+  display: block;
+  max-width: 100%;
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  line-height: 1.2;
+  text-wrap: balance;
+  font-weight: 700;
+}
+
+p {
+  text-wrap: pretty;
+}
+
+a {
+  color: var(--blue2);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+/* Anneau de focus unique, visible partout (docs/DESIGN.md §Accessibilité). */
+:focus-visible {
+  outline: 2px solid var(--blue2);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+::selection {
+  background: var(--blue);
+  color: var(--text);
+}
+
+/* Cible d'ancre pas cachée sous une barre collante. */
+:target {
+  scroll-margin-top: 80px;
+}
+
+/*
+ * Mouvement réduit : on coupe la décoration.
+ * data-motion="keep" exempte ce qui porte une information (indicateur de chargement)
+ * ou ce qui EST le contenu (une signature en cours d'édition) — cf. DESIGN.md.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *:not([data-motion='keep']):not([data-motion='keep'] *) {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

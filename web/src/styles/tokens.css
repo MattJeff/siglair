@@ -1,0 +1,51 @@
+/* Jetons de docs/DESIGN.md — l'unique endroit où une couleur est écrite. */
+:root {
+  --bg: #060911;
+  --bg2: #0b1020;
+  --panel: #0f1628;
+  --panel2: #111a31;
+  --panel3: #111827;
+  --line: rgba(255, 255, 255, 0.1);
+  --line2: rgba(255, 255, 255, 0.14);
+  --text: #f8fbff;
+  --muted: #9ca9bd;
+  --blue: #4c74ff;
+  --blue2: #1f5bff;
+  --cyan: #4de1ff;
+  --green: #37d995;
+  --yellow: #ffbd58;
+  --red: #fb7185;
+  --purple: #8a5cff;
+  --shadow: 0 30px 90px rgba(0, 0, 0, 0.45);
+  --r-sm: 8px;
+  --r: 13px;
+  --r-md: 15px;
+  --r-lg: 22px;
+  --landing-bg-mid: #080c16;
+  --landing-glow-blue: rgba(51, 94, 255, 0.16);
+  --landing-glow-cyan: rgba(80, 218, 255, 0.12);
+  --nav-glass: rgba(6, 9, 17, 0.68);
+  --button-soft: rgba(255, 255, 255, 0.055);
+  --button-hover-line: rgba(130, 167, 255, 0.42);
+  --button-primary-shadow: 0 12px 36px rgba(55, 102, 255, 0.28);
+  --button-hero-shadow: 0 16px 40px rgba(49, 92, 255, 0.31);
+  --url-box-bg: rgba(14, 21, 39, 0.78);
+  --url-box-line: rgba(126, 157, 255, 0.22);
+  --url-box-shadow:
+    0 18px 55px rgba(0, 0, 0, 0.26),
+    0 0 0 1px rgba(255, 255, 255, 0.025) inset;
+  --url-input-bg: #080d18;
+  --url-input-line: rgba(255, 255, 255, 0.075);
+  --eyebrow-bg: rgba(53, 91, 210, 0.12);
+  --eyebrow-line: rgba(107, 143, 255, 0.28);
+  --eyebrow-text: #b9ccff;
+  --primary-a: #315cff;
+  --primary-b: #527cff;
+  --primary-c: #3bb8ff;
+
+  /*
+   * Bouton primaire — UN seul dégradé pour la vitrine, l'application et l'éditeur.
+   */
+  --grad-primary: linear-gradient(135deg, var(--primary-a), var(--primary-b) 55%, var(--primary-c));
+  --on-primary: var(--text);
+}

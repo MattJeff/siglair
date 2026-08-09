@@ -1,0 +1,283 @@
+/* Boîte à outils partagée. Volontairement pauvre : chaque écran habille le reste. */
+
+/* ---------------- Button ---------------- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 40px; /* zone tactile mobile */
+  padding: 0 16px;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--text);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color 140ms ease,
+    border-color 140ms ease,
+    opacity 140ms ease;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Dégradé de la charte : défini une seule fois, dans styles/tokens.css. */
+.primary {
+  background: var(--grad-primary);
+  color: var(--on-primary);
+  border-color: transparent;
+  font-weight: 700;
+}
+
+.primary:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.ghost {
+  background: var(--panel2);
+  border-color: var(--line);
+}
+
+.ghost:hover:not(:disabled) {
+  background: var(--panel3);
+  border-color: var(--line2);
+}
+
+.danger {
+  background: transparent;
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+}
+
+/* ---------------- Input / Select ---------------- */
+
+.control {
+  display: block;
+  width: 100%;
+  min-height: 40px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font: inherit;
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel2);
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.control::placeholder {
+  color: var(--muted);
+}
+
+.control:hover:not(:disabled) {
+  border-color: var(--line2);
+}
+
+.control:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.control[aria-invalid='true'] {
+  border-color: var(--red);
+}
+
+select.control {
+  /* la flèche native reste : moins de CSS, et elle est déjà accessible */
+  padding-right: 10px;
+  cursor: pointer;
+}
+
+/* ---------------- Field ---------------- */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* 14px minimum : --muted sur --bg ne passe AA qu'à partir de là. */
+.hint {
+  font-size: 14px;
+  color: var(--muted);
+}
+
+.errorText {
+  font-size: 14px;
+  color: var(--red);
+}
+
+/* ---------------- Modal ---------------- */
+
+.modal {
+  /* base.css applique `* { margin: 0 }`, ce qui neutralise le `margin:auto` que le
+     navigateur pose sur <dialog> : sans cette ligne la boîte se colle en haut à gauche. */
+  margin: auto;
+  width: min(520px, calc(100vw - 32px));
+  max-height: 92dvh;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  color: var(--text);
+  background: var(--panel);
+  box-shadow: var(--shadow);
+}
+
+/* Aperçu et export : une signature fait 620 px de large, 520 px l'amputerait. */
+.modalLg {
+  width: min(1040px, calc(100vw - 32px));
+}
+
+.modal::backdrop {
+  background: color-mix(in srgb, var(--bg) 76%, transparent);
+}
+
+.modalBody {
+  display: flex;
+  max-height: 92dvh;
+  flex-direction: column;
+}
+
+.modalHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Le contenu défile, l'en-tête reste : une modale d'export dépasse la hauteur d'écran. */
+.modalContent {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+}
+
+.modalTitle {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0;
+}
+
+.modalClose {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin: -8px -8px -8px 0;
+  border: 0;
+  border-radius: var(--r);
+  font-size: 18px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.modalClose:hover {
+  color: var(--text);
+  background: var(--panel3);
+}
+
+/* ---------------- Toast ---------------- */
+
+.toasts {
+  position: fixed;
+  z-index: 100;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(380px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line2);
+  border-left: 3px solid var(--blue2);
+  border-radius: var(--r-md);
+  font-size: 14px;
+  color: var(--text);
+  background: var(--panel2);
+  box-shadow: var(--shadow);
+}
+
+.toastSuccess {
+  border-left-color: var(--green);
+}
+
+.toastError {
+  border-left-color: var(--red);
+}
+
+.toastText {
+  flex: 1;
+}
+
+.toastClose {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+
+.toastClose:hover {
+  color: var(--text);
+}
+
+/* ---------------- Spinner ---------------- */
+
+.spinner {
+  display: inline-block;
+  flex: none;
+  border: 2px solid color-mix(in srgb, currentColor 28%, transparent);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
+/* Le spinner reste, ralenti : il porte une information, ce n'est pas de la décoration. */
+@media (prefers-reduced-motion: reduce) {
+  .spinner {
+    animation-duration: 2s;
+  }
+}

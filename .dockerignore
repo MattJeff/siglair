@@ -1,0 +1,12 @@
+.git
+.gitignore
+target
+data
+web/node_modules
+web/dist
+docs
+README.md
+.env
+.env.*
+!.env.example
+**/.DS_Store

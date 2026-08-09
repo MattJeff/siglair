@@ -1,0 +1,527 @@
+//! CRUD des signatures, publication et export — contrat §5.3 et §7.
+//!
+//! Tout est filtré par `access.org_id` : une requête ne peut pas nommer une signature
+//! d'une autre organisation, elle reçoit 404 (pas 403 — ne pas confirmer l'existence).
+
+use axum::{
+    extract::{Path, Query, State},
+    http::StatusCode,
+    routing::{get, post},
+    Json, Router,
+};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use sqlx::PgPool;
+use uuid::Uuid;
+
+use crate::{
+    auth::OrgAccess,
+    doc::{Doc, Profile},
+    error::{AppError, Result},
+    plans::{check_signature_quota, Plan},
+    render::{html::render_document, RenderMode, RenderOpts},
+    routes::{analytics, assets},
+    util::{doc_hash, gen_slug},
+    AppState,
+};
+
+/// Fenêtre des plafonds de débit du contrat §8.
+const HOUR: std::time::Duration = std::time::Duration::from_secs(3600);
+
+pub fn router() -> Router<AppState> {
+    Router::new()
+        .route("/signatures", get(list).post(create))
+        .route(
+            "/signatures/{id}",
+            get(get_one).patch(update).delete(remove),
+        )
+        .route("/signatures/{id}/publish", post(publish))
+        .route("/signatures/{id}/status", get(status))
+        .route("/signatures/{id}/export", get(export))
+        .route("/signatures/{id}/analytics", get(stats))
+        .route("/signatures/{id}/duplicate", post(duplicate))
+}
+
+/// `public_slug` est un `citext` : sans `::text` sqlx ne sait pas le décoder.
+const COLS: &str = "id, org_id, owner_user_id, name, kind, doc, profile, \
+                    public_slug::text AS public_slug, published_render_id, created_at, updated_at";
+
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct SignatureRow {
+    pub id: Uuid,
+    pub org_id: Uuid,
+    pub owner_user_id: Option<Uuid>,
+    pub name: String,
+    pub kind: String,
+    pub doc: Value,
+    pub profile: Value,
+    pub public_slug: Option<String>,
+    pub published_render_id: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+async fn fetch(db: &PgPool, org_id: Uuid, id: Uuid) -> Result<SignatureRow> {
+    sqlx::query_as::<_, SignatureRow>(&format!(
+        "SELECT {COLS} FROM signatures WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL"
+    ))
+    .bind(id)
+    .bind(org_id)
+    .fetch_optional(db)
+    .await?
+    .ok_or(AppError::NotFound)
+}
+
+fn doc_of(row: &SignatureRow) -> Result<Doc> {
+    Ok(serde_json::from_value(row.doc.clone())?)
+}
+
+fn profile_of(row: &SignatureRow) -> Profile {
+    serde_json::from_value(row.profile.clone()).unwrap_or_default()
+}
+
+async fn count_live(db: &PgPool, org_id: Uuid) -> Result<u32> {
+    let n: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM signatures WHERE org_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(org_id)
+    .fetch_one(db)
+    .await?;
+    Ok(n.max(0) as u32)
+}
+
+fn clean_name(raw: &str) -> Result<String> {
+    let n = raw.trim();
+    if n.is_empty() {
+        return Err(AppError::validation("Donnez un nom à votre signature."));
+    }
+    if n.chars().count() > 120 {
+        return Err(AppError::validation(
+            "Le nom d'une signature est limité à 120 caractères.",
+        ));
+    }
+    Ok(n.to_string())
+}
+
+fn clean_kind(raw: Option<&str>, plan: &Plan) -> Result<&'static str> {
+    match raw.unwrap_or("personal") {
+        "personal" => Ok("personal"),
+        "org_template" if plan.limits.org_templates => Ok("org_template"),
+        "org_template" => Err(AppError::QuotaExceeded(
+            "Les modèles d'organisation sont inclus dans le plan Team. Passez à Team pour \
+             déployer une même signature sur toute votre équipe."
+                .into(),
+        )),
+        _ => Err(AppError::validation(
+            "Type de signature inconnu : attendu personal ou org_template.",
+        )),
+    }
+}
+
+// ------------------------------------------------------------------ lecture
+
+async fn list(State(st): State<AppState>, access: OrgAccess) -> Result<Json<Vec<SignatureRow>>> {
+    let rows = sqlx::query_as::<_, SignatureRow>(&format!(
+        "SELECT {COLS} FROM signatures WHERE org_id = $1 AND deleted_at IS NULL \
+         ORDER BY updated_at DESC"
+    ))
+    .bind(access.org_id)
+    .fetch_all(&st.db)
+    .await?;
+    Ok(Json(rows))
+}
+
+async fn get_one(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<Json<SignatureRow>> {
+    Ok(Json(fetch(&st.db, access.org_id, id).await?))
+}
+
+// ------------------------------------------------------------------ écriture
+
+#[derive(Deserialize)]
+struct CreateReq {
+    #[serde(default)]
+    name: String,
+    doc: Option<Doc>,
+    kind: Option<String>,
+    profile: Option<Profile>,
+}
+
+async fn create(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Json(req): Json<CreateReq>,
+) -> Result<(StatusCode, Json<SignatureRow>)> {
+    let plan = access.plan;
+    let name = clean_name(&req.name)?;
+    let kind = clean_kind(req.kind.as_deref(), &plan)?;
+    let doc = req.doc.unwrap_or_default();
+    doc.validate()?;
+    check_signature_quota(&plan, count_live(&st.db, access.org_id).await?)?;
+
+    let row = sqlx::query_as::<_, SignatureRow>(&format!(
+        "INSERT INTO signatures (id, org_id, owner_user_id, name, kind, doc, profile) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLS}"
+    ))
+    .bind(Uuid::new_v4())
+    .bind(access.org_id)
+    .bind(access.user_id)
+    .bind(&name)
+    .bind(kind)
+    .bind(serde_json::to_value(&doc)?)
+    .bind(serde_json::to_value(req.profile.unwrap_or_default())?)
+    .fetch_one(&st.db)
+    .await?;
+    Ok((StatusCode::CREATED, Json(row)))
+}
+
+#[derive(Deserialize)]
+struct UpdateReq {
+    name: Option<String>,
+    doc: Option<Doc>,
+    profile: Option<Profile>,
+}
+
+async fn update(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+    Json(req): Json<UpdateReq>,
+) -> Result<Json<SignatureRow>> {
+    // ponytail : lecture puis écriture complète, sans verrou. Un éditeur a un seul auteur ;
+    // le jour où deux onglets se battent, il faudra un numéro de version dans la table.
+    let cur = fetch(&st.db, access.org_id, id).await?;
+    let name = match req.name {
+        Some(n) => clean_name(&n)?,
+        None => cur.name,
+    };
+    let doc = match req.doc {
+        Some(d) => {
+            d.validate()?;
+            serde_json::to_value(&d)?
+        }
+        None => cur.doc,
+    };
+    let profile = match req.profile {
+        Some(p) => serde_json::to_value(p)?,
+        None => cur.profile,
+    };
+
+    let row = sqlx::query_as::<_, SignatureRow>(&format!(
+        "UPDATE signatures SET name = $1, doc = $2, profile = $3, updated_at = now() \
+         WHERE id = $4 AND org_id = $5 AND deleted_at IS NULL RETURNING {COLS}"
+    ))
+    .bind(&name)
+    .bind(doc)
+    .bind(profile)
+    .bind(id)
+    .bind(access.org_id)
+    .fetch_optional(&st.db)
+    .await?
+    .ok_or(AppError::NotFound)?;
+    Ok(Json(row))
+}
+
+/// Soft delete : le slug reste réservé pour qu'une URL déjà collée dans un client mail ne
+/// se retrouve jamais réattribuée à la signature de quelqu'un d'autre.
+async fn remove(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<StatusCode> {
+    let n = sqlx::query(
+        "UPDATE signatures SET deleted_at = now(), updated_at = now() \
+         WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL",
+    )
+    .bind(id)
+    .bind(access.org_id)
+    .execute(&st.db)
+    .await?
+    .rows_affected();
+    if n == 0 {
+        return Err(AppError::NotFound);
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn duplicate(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<(StatusCode, Json<SignatureRow>)> {
+    let plan = access.plan;
+    let src = fetch(&st.db, access.org_id, id).await?;
+    check_signature_quota(&plan, count_live(&st.db, access.org_id).await?)?;
+
+    let name: String = format!("{} (copie)", src.name).chars().take(120).collect();
+    // un modèle dupliqué reste un modèle tant que le plan le permet, sinon il redevient perso
+    let kind = if src.kind == "org_template" && plan.limits.org_templates {
+        "org_template"
+    } else {
+        "personal"
+    };
+
+    let row = sqlx::query_as::<_, SignatureRow>(&format!(
+        "INSERT INTO signatures (id, org_id, owner_user_id, name, kind, doc, profile) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLS}"
+    ))
+    .bind(Uuid::new_v4())
+    .bind(access.org_id)
+    .bind(access.user_id)
+    .bind(&name)
+    .bind(kind)
+    .bind(src.doc)
+    .bind(src.profile)
+    .fetch_one(&st.db)
+    .await?;
+    Ok((StatusCode::CREATED, Json(row)))
+}
+
+// ------------------------------------------------------------------ publication
+
+pub(crate) struct Published {
+    pub slug: String,
+    pub job_id: Option<Uuid>,
+    pub render_id: Option<Uuid>,
+}
+
+/// Contrat §7.1. Partagé avec le rollout d'organisation.
+pub(crate) async fn publish_doc(
+    db: &PgPool,
+    sig_id: Uuid,
+    current_slug: Option<String>,
+    doc: &Doc,
+    profile: &Profile,
+) -> Result<Published> {
+    // Le hash porte sur (doc, profil) : c'est la même empreinte que celle que le renderer
+    // recalcule et écrit dans `renders.doc_hash`, sinon le cache §7.1 ne se croiserait jamais.
+    let hash = doc_hash(doc, profile);
+    let slug = match current_slug {
+        Some(s) => s,
+        None => assign_slug(db, sig_id).await?,
+    };
+
+    // « republier sans avoir rien changé » est le cas le plus fréquent : pas de nouveau job.
+    let existing: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM renders WHERE signature_id = $1 AND doc_hash = $2 \
+         ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(sig_id)
+    .bind(&hash)
+    .fetch_optional(db)
+    .await?;
+    if let Some(render_id) = existing {
+        sqlx::query(
+            "UPDATE signatures SET published_render_id = $1, updated_at = now() WHERE id = $2",
+        )
+        .bind(render_id)
+        .bind(sig_id)
+        .execute(db)
+        .await?;
+        return Ok(Published {
+            slug,
+            job_id: None,
+            render_id: Some(render_id),
+        });
+    }
+
+    // un double-clic sur « Publier » ne doit pas empiler deux fois le même travail
+    let queued: Option<Uuid> = sqlx::query_scalar(
+        "SELECT id FROM render_jobs WHERE signature_id = $1 AND doc_hash = $2 \
+         AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(sig_id)
+    .bind(&hash)
+    .fetch_optional(db)
+    .await?;
+    let job_id = match queued {
+        Some(id) => id,
+        None => {
+            let id = Uuid::new_v4();
+            sqlx::query("INSERT INTO render_jobs (id, signature_id, doc_hash) VALUES ($1, $2, $3)")
+                .bind(id)
+                .bind(sig_id)
+                .bind(&hash)
+                .execute(db)
+                .await?;
+            id
+        }
+    };
+    Ok(Published {
+        slug,
+        job_id: Some(job_id),
+        render_id: None,
+    })
+}
+
+async fn assign_slug(db: &PgPool, sig_id: Uuid) -> Result<String> {
+    for _ in 0..5 {
+        let candidate = gen_slug();
+        let res = sqlx::query(
+            "UPDATE signatures SET public_slug = $1 WHERE id = $2 AND public_slug IS NULL",
+        )
+        .bind(&candidate)
+        .bind(sig_id)
+        .execute(db)
+        .await;
+        match res {
+            Ok(r) if r.rows_affected() == 1 => return Ok(candidate),
+            // publication concurrente : le slug déjà posé fait foi
+            Ok(_) => {
+                let cur: Option<String> =
+                    sqlx::query_scalar("SELECT public_slug::text FROM signatures WHERE id = $1")
+                        .bind(sig_id)
+                        .fetch_one(db)
+                        .await?;
+                if let Some(slug) = cur {
+                    return Ok(slug);
+                }
+            }
+            Err(sqlx::Error::Database(e)) if e.is_unique_violation() => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(AppError::Internal(anyhow::anyhow!(
+        "aucun slug libre après 5 tirages"
+    )))
+}
+
+async fn publish(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>> {
+    // §8 : une publication met un Chromium en file. Plafonné par organisation.
+    if !crate::util::rate_limit(&format!("publish:{}", access.org_id), 30, HOUR) {
+        return Err(AppError::RateLimited);
+    }
+    let plan = access.plan;
+    if !plan.limits.hosted_gif {
+        return Err(AppError::QuotaExceeded(
+            "Le GIF hébergé est inclus à partir du plan Pro. Passez à Pro pour publier votre \
+             signature à une URL et suivre ses ouvertures."
+                .into(),
+        ));
+    }
+    let row = fetch(&st.db, access.org_id, id).await?;
+    let doc = doc_of(&row)?;
+    // revalidation avant rendu : Chromium chargera ces URL depuis notre réseau (contrat §8),
+    // et un DNS peut avoir changé de réponse depuis l'enregistrement.
+    doc.validate()?;
+
+    let profile = profile_of(&row);
+    let p = publish_doc(&st.db, row.id, row.public_slug, &doc, &profile).await?;
+    Ok(Json(json!({
+        "slug": p.slug,
+        "job_id": p.job_id,
+        "render_id": p.render_id,
+        "gif_url": format!("{}/s/{}.gif", st.cfg.public_url, p.slug),
+        "png_url": format!("{}/s/{}.png", st.cfg.public_url, p.slug),
+    })))
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct JobRow {
+    id: Uuid,
+    status: String,
+    error: Option<String>,
+    attempts: i32,
+    created_at: DateTime<Utc>,
+    finished_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Serialize, sqlx::FromRow)]
+struct RenderInfo {
+    id: Uuid,
+    width: i32,
+    height: i32,
+    frames: i32,
+    fps: i32,
+    bytes: i64,
+    created_at: DateTime<Utc>,
+}
+
+async fn status(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>> {
+    let row = fetch(&st.db, access.org_id, id).await?;
+    let job: Option<JobRow> = sqlx::query_as(
+        "SELECT id, status, error, attempts, created_at, finished_at FROM render_jobs \
+         WHERE signature_id = $1 ORDER BY created_at DESC LIMIT 1",
+    )
+    .bind(row.id)
+    .fetch_optional(&st.db)
+    .await?;
+    let render: Option<RenderInfo> = match row.published_render_id {
+        Some(rid) => sqlx::query_as(
+            "SELECT id, width, height, frames, fps, bytes, created_at FROM renders WHERE id = $1",
+        )
+        .bind(rid)
+        .fetch_optional(&st.db)
+        .await?,
+        None => None,
+    };
+    let urls = row.public_slug.as_ref().map(|s| {
+        json!({
+            "gif": format!("{}/s/{}.gif", st.cfg.public_url, s),
+            "png": format!("{}/s/{}.png", st.cfg.public_url, s),
+        })
+    });
+    Ok(Json(
+        json!({ "slug": row.public_slug, "job": job, "render": render, "urls": urls }),
+    ))
+}
+
+// ------------------------------------------------------------------ export
+
+#[derive(Deserialize)]
+struct ExportQuery {
+    #[serde(default)]
+    mode: RenderMode,
+}
+
+async fn export(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+    Query(q): Query<ExportQuery>,
+) -> Result<Json<Value>> {
+    let plan = access.plan;
+    if q.mode == RenderMode::Hosted && !plan.limits.hosted_gif {
+        return Err(AppError::QuotaExceeded(
+            "L'export vers le GIF hébergé est inclus à partir du plan Pro. En Free, exportez \
+             votre signature en mode statique."
+                .into(),
+        ));
+    }
+    let row = fetch(&st.db, access.org_id, id).await?;
+    let doc = doc_of(&row)?;
+    let opts = RenderOpts {
+        public_url: st.cfg.public_url.clone(),
+        // sans GIF hébergé il n'y a ni suivi de clic ni URL publique : liens directs
+        slug: plan
+            .limits
+            .hosted_gif
+            .then(|| row.public_slug.clone())
+            .flatten(),
+        assets: assets::urls_for_doc(&st, access.org_id, &doc).await?,
+        for_capture: false,
+        branding: plan.limits.branding,
+    };
+    let html = render_document(&doc, &profile_of(&row), q.mode, &opts);
+    Ok(Json(json!({ "html": html, "mode": q.mode })))
+}
+
+async fn stats(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+) -> Result<Json<Value>> {
+    analytics::for_signature(&st, &access, id).await
+}

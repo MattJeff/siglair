@@ -1,0 +1,22 @@
+# SITE_ADDRESS vide → ":80" (HTTP local). SITE_ADDRESS=siglair.app → TLS
+# automatique via Let's Encrypt, sans autre réglage.
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	# Tout ce que l'API sert : l'app, les URL publiques collées dans les mails
+	# (/s, /c) et les fichiers du stockage (/f). Le reste est le SPA.
+	@api path /api/* /s/* /c/* /f/* /health /ready
+	handle @api {
+		reverse_proxy api:8080
+	}
+
+	handle {
+		reverse_proxy web:80
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

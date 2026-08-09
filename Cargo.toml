@@ -1,0 +1,69 @@
+[package]
+name = "siglair"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"   # une dépendance transitive (time-macros) exige l'édition 2024
+
+[[bin]]
+name = "api"
+path = "src/bin/api.rs"
+
+[[bin]]
+name = "renderer"
+path = "src/bin/renderer.rs"
+
+[dependencies]
+axum = { version = "0.8", features = ["macros", "multipart"] }
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["fs", "trace", "compression-gzip", "set-header", "cors", "limit"] }
+hyper = "1"
+
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros",
+] }
+
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_urlencoded = "0.7"
+
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
+
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+time = "0.3"
+
+# crypto / auth
+sha2 = "0.10"
+hmac = "0.12"
+subtle = "2"
+base64 = "0.22"
+rand = "0.8"
+jsonwebtoken = "9"
+
+# rendu
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
+futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
+
+# divers
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+thiserror = "2"
+anyhow = "1"
+dotenvy = "0.15"
+url = "2"
+mime_guess = "2"
+infer = "0.16"
+percent-encoding = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+async-trait = "0.1"
+
+[dev-dependencies]
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 2
+lto = "thin"
+codegen-units = 4
+strip = true

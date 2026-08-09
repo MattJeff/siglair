@@ -1,0 +1,10 @@
+/target
+/data
+.env
+.env.local
+
+web/node_modules
+web/dist
+
+.DS_Store
+*.log
