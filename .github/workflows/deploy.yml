@@ -1,0 +1,116 @@
+name: Déploiement
+
+# Le build se fait ICI, pas sur le serveur. Les runners GitHub sont gratuits et
+# rapides ; le CX23 a 2 vCPU et fait tourner Chromium. Compiler Rust en release
+# dessus prend ~15 minutes pendant que la production sert des GIF, et le pic de
+# mémoire peut faire tuer un rendu en cours par l'OOM.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  # Deux déploiements simultanés se marcheraient dessus au moment du `up -d`.
+  # On ne les annule pas : un déploiement à moitié fait est pire qu'un déploiement
+  # qui attend son tour.
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_REPO: ghcr.io/${{ github.repository_owner }}/siglair
+
+jobs:
+  # Les tests tournent avant tout build : inutile de fabriquer 1,5 Go d'image
+  # pour découvrir ensuite qu'un test échoue.
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test --all-targets
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+        working-directory: web
+      - run: npx tsc --noEmit
+        working-directory: web
+      - run: npm run build
+        working-directory: web
+
+  build:
+    needs: tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # linux/amd64 explicitement : le serveur est en x86. Un runner ARM produirait
+      # une image qui ne démarre pas, et l'erreur n'apparaîtrait qu'au déploiement.
+      - name: Image API + renderer
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}:latest
+            ${{ env.IMAGE_REPO }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image web
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./docker/Dockerfile.web
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_REPO }}-web:latest
+            ${{ env.IMAGE_REPO }}-web:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      # Rien à synchroniser : les migrations sont EMBARQUÉES dans le binaire par
+      # sqlx::migrate!, et le code applicatif vient de l'image. compose.yml, le
+      # Caddyfile et les scripts changent rarement — quand c'est le cas, on les
+      # pousse à la main (cf. docs/DEPLOY.md § Modifier la configuration).
+      - name: Clé de déploiement
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
+
+      # La clé est à commande forcée : quelle que soit la commande envoyée, le serveur
+      # exécute /opt/siglair/scripts/deploy.sh et rien d'autre. Ce n'est pas de la
+      # coquetterie — le secret GitHub ne donne alors pas un shell root, seulement le
+      # droit de redéployer.
+      - name: Déployer et valider
+        run: |
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
+            root@${{ secrets.DEPLOY_HOST }} true

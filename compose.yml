@@ -36,7 +36,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: siglair:latest
+    image: ${IMAGE_REPO:-siglair}:${IMAGE_TAG:-latest}
     env_file: [.env]
     environment:
       DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://siglair:${POSTGRES_PASSWORD:-siglair}@db:5432/siglair}
@@ -58,7 +58,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: siglair:latest
+    image: ${IMAGE_REPO:-siglair}:${IMAGE_TAG:-latest}
     command: ["renderer"]
     env_file: [.env]
     environment:
@@ -115,7 +115,7 @@ services:
       dockerfile: docker/Dockerfile.web
       args:
         VITE_PUBLIC_HOST: ${VITE_PUBLIC_HOST:-}
-    image: siglair-web:latest
+    image: ${IMAGE_REPO:-siglair}-web:${IMAGE_TAG:-latest}
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:80"
     depends_on:
