@@ -27,7 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # Pas @stable : la version vient de rust-toolchain.toml, la même que le
+      # Dockerfile. Sinon une nouvelle version de Rust casse la CI un mardi matin
+      # sans qu'aucune ligne de code n'ait bougé.
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.90.0'
+          components: clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test --all-targets

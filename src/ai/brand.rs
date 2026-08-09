@@ -850,7 +850,7 @@ fn candidates(page: &Page, base: &Url, manifest: &[Url]) -> Vec<Url> {
                 .map(|u| (size, u))
         })
         .collect();
-    apple.sort_by(|a, b| b.0.cmp(&a.0));
+    apple.sort_by_key(|e| std::cmp::Reverse(e.0));
 
     let mut declared_icons: Vec<(u32, Url)> = page
         .tags("link")
@@ -863,7 +863,7 @@ fn candidates(page: &Page, base: &Url, manifest: &[Url]) -> Vec<Url> {
                 .map(|u| (size, u))
         })
         .collect();
-    declared_icons.sort_by(|a, b| b.0.cmp(&a.0));
+    declared_icons.sort_by_key(|e| std::cmp::Reverse(e.0));
 
     let meta_images = meta_image_candidates(page, base);
     let html_logos = html_logo_candidates(page, base);
@@ -977,7 +977,7 @@ fn html_logo_candidates(page: &Page, base: &Url) -> Vec<Url> {
         }
     }
 
-    imgs.sort_by(|a, b| b.0.cmp(&a.0));
+    imgs.sort_by_key(|e| std::cmp::Reverse(e.0));
     imgs.into_iter().map(|(_, u)| u).collect()
 }
 
@@ -1127,7 +1127,7 @@ fn manifest_icons(json: &str, base: &Url) -> Vec<Url> {
         })
         .filter(|(_, u)| matches!(u.scheme(), "http" | "https"))
         .collect();
-    icons.sort_by(|a, b| b.0.cmp(&a.0));
+    icons.sort_by_key(|e| std::cmp::Reverse(e.0));
     icons.into_iter().map(|(_, u)| u).collect()
 }
 
@@ -1144,6 +1144,11 @@ fn largest_size(sizes: &str) -> u32 {
         .unwrap_or(0)
 }
 
+/// Un logo retenu, avec ses couleurs dominantes et sa surface en pixels.
+/// Nommé plutôt qu'écrit en triplet : `Option<(Logo, Vec<(Color, f64)>, u64)>`
+/// ne dit pas ce que chaque membre représente.
+type LogoCandidate = (Logo, Vec<(Color, f64)>, u64);
+
 async fn pick_logo(page: &Page<'_>, base: &Url) -> Option<(Logo, Vec<(Color, f64)>)> {
     let mut manifest = Vec::new();
     for u in manifest_urls(page, base) {
@@ -1155,7 +1160,7 @@ async fn pick_logo(page: &Page<'_>, base: &Url) -> Option<(Logo, Vec<(Color, f64
         }
     }
 
-    let mut fallback: Option<(Logo, Vec<(Color, f64)>, u64)> = None;
+    let mut fallback: Option<LogoCandidate> = None;
     for url in candidates(page, base, &manifest) {
         let Ok(f) = fetch(url.as_str(), MAX_ICON).await else {
             continue;

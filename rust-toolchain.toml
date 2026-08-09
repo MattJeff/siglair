@@ -1,0 +1,14 @@
+# Version épinglée pour tout le monde : développement local, CI et image Docker.
+#
+# Sans ce fichier, la CI utilisait `stable` — donc la dernière version du jour — pendant
+# que le Dockerfile compilait en 1.90 et les postes de développement en 1.91. Chaque
+# sortie de Rust apportait alors de nouveaux lints clippy et cassait le build sans
+# qu'une seule ligne de code n'ait changé. Ce n'est pas de la rigueur excessive : c'est
+# la différence entre « la CI est rouge parce que j'ai écrit un bug » et « la CI est
+# rouge parce qu'on est mardi ».
+#
+# Pour monter de version : changer ce numéro ET la ligne FROM du Dockerfile ensemble,
+# dans le même commit, puis lancer clippy pour absorber les nouveaux lints.
+[toolchain]
+channel = "1.90.0"
+components = ["clippy", "rustfmt"]
