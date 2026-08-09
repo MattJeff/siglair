@@ -9,6 +9,7 @@ import { useToast } from '../components/Toast';
 import { AppShell } from '../components/app/AppShell';
 import { ConfirmDialog } from '../components/app/ConfirmDialog';
 import { PENDING_NEXT, apiMessage, formatDate } from '../components/app/helpers';
+import { TemplatePreview } from '../editor/TemplateGallery';
 // Les modèles sont ceux de l'éditeur : une seconde table de modèles finirait par diverger.
 import { TEMPLATES, docFromTemplate } from '../editor/templates';
 import type { Template } from '../editor/templates';
@@ -254,7 +255,7 @@ export default function Dashboard() {
                   disabled={creating}
                   onClick={() => void create(t)}
                 >
-                  <span className={s.templateThumb} style={{ background: t.thumb }} />
+                  <TemplatePreview template={t} />
                   <span className={s.rowName}>{t.name}</span>
                   <span className={s.muted}>{t.description}</span>
                 </button>

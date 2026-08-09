@@ -4,10 +4,11 @@
  */
 import { useRef, useState } from 'react';
 import type { Dispatch } from 'react';
+import { Film, ImagePlus, Upload } from 'lucide-react';
 import { Button } from '../components/Button';
 import { useToast } from '../components/Toast';
 import { formatBytes } from '../components/app/helpers';
-import { ApiError, deleteAsset, listAssets, uploadAsset } from '../lib/api';
+import { ApiError, deleteAsset, listAssets } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Asset } from '../lib/types';
 import type { Action } from './state';
@@ -16,31 +17,28 @@ import s from './editor.module.css';
 interface AssetsProps {
   assets: Asset[];
   onAssetsChange: (assets: Asset[]) => void;
+  onUploadFiles: (files: File[]) => Promise<Asset[]>;
   dispatch: Dispatch<Action>;
 }
 
-export function Assets({ assets, onAssetsChange, dispatch }: AssetsProps) {
+export function Assets({ assets, onAssetsChange, onUploadFiles, dispatch }: AssetsProps) {
   const toast = useToast();
   const { limits, usage, refresh } = useSession();
   const imageInput = useRef<HTMLInputElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [dragging, setDragging] = useState(false);
 
   const used = usage?.assets_bytes ?? 0;
   const allowed = limits?.assets_bytes ?? 0;
   const ratio = allowed > 0 ? Math.min(1, used / allowed) : 0;
   const full = allowed > 0 && used >= allowed;
 
-  async function upload(file: File | undefined) {
-    if (!file) return;
+  async function upload(files: File[]) {
+    if (files.length === 0) return;
     setBusy(true);
     try {
-      const asset = await uploadAsset(file);
-      onAssetsChange([asset, ...assets]);
-      await refresh();
-      toast('Média ajouté à la bibliothèque', 'success');
-    } catch (error) {
-      toast(error instanceof ApiError ? error.message : "L'envoi du média a échoué.", 'error');
+      await onUploadFiles(files);
     } finally {
       setBusy(false);
     }
@@ -68,22 +66,41 @@ export function Assets({ assets, onAssetsChange, dispatch }: AssetsProps) {
       <div className={s.stack}>
         {/* Aucune taille maximale écrite ici : la limite par fichier n'est pas servie par
             l'API, et un chiffre en dur finirait par mentir. Le serveur renvoie son message. */}
-        <p className={s.note}>PNG, JPG, GIF et vidéo. Le GIF reste animé dans l’aperçu.</p>
+        <div
+          className={[s.assetDropzone, dragging ? s.assetDropzoneActive : null]
+            .filter(Boolean)
+            .join(' ')}
+          onDragOver={(event) => {
+            event.preventDefault();
+            setDragging(true);
+          }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setDragging(false);
+            void upload(Array.from(event.dataTransfer.files));
+          }}
+        >
+          <Upload size={20} aria-hidden="true" />
+          <strong>Déposez vos fichiers ici</strong>
+          <span>PNG, JPG, WebP, GIF ou vidéo</span>
+        </div>
         <div className={s.row2}>
           <Button variant="ghost" loading={busy} disabled={full} onClick={() => imageInput.current?.click()}>
-            Image / GIF
+            <ImagePlus size={15} aria-hidden="true" /> Image / GIF
           </Button>
           <Button variant="ghost" loading={busy} disabled={full} onClick={() => videoInput.current?.click()}>
-            Vidéo
+            <Film size={15} aria-hidden="true" /> Vidéo
           </Button>
         </div>
         <input
           ref={imageInput}
           type="file"
-          accept="image/*"
+          accept="image/png,image/jpeg,image/webp,image/gif"
+          multiple
           hidden
           onChange={(event) => {
-            void upload(event.target.files?.[0]);
+            void upload(Array.from(event.target.files ?? []));
             event.target.value = '';
           }}
         />
@@ -91,9 +108,10 @@ export function Assets({ assets, onAssetsChange, dispatch }: AssetsProps) {
           ref={videoInput}
           type="file"
           accept="video/*"
+          multiple
           hidden
           onChange={(event) => {
-            void upload(event.target.files?.[0]);
+            void upload(Array.from(event.target.files ?? []));
             event.target.value = '';
           }}
         />

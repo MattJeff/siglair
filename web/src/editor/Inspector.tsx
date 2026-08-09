@@ -3,8 +3,9 @@
  * Les listes déroulantes sont peuplées depuis les tableaux `as const` de lib/types :
  * une copie locale finirait par diverger de ce que le serveur accepte.
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import type { Dispatch } from 'react';
+import { Upload } from 'lucide-react';
 import { Field } from '../components/Field';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
@@ -16,6 +17,7 @@ import {
   EASINGS,
 } from '../lib/types';
 import type { Align, AnimDirection, AnimIterations, AnimPreset, Asset, Easing, Element } from '../lib/types';
+import { FillControl } from './FillControl';
 import { TYPE_LABELS, selectedElement } from './state';
 import type { Action, EditorState } from './state';
 import s from './editor.module.css';
@@ -67,10 +69,13 @@ interface InspectorProps {
   state: EditorState;
   dispatch: Dispatch<Action>;
   assets: Asset[];
+  onUploadFiles: (files: File[]) => Promise<Asset[]>;
 }
 
-export function Inspector({ state, dispatch, assets }: InspectorProps) {
+export function Inspector({ state, dispatch, assets, onUploadFiles }: InspectorProps) {
   const [tab, setTab] = useState<'style' | 'animate'>('style');
+  const [uploading, setUploading] = useState(false);
+  const mediaInput = useRef<HTMLInputElement>(null);
   const element = selectedElement(state);
   const { canvas } = state.doc;
 
@@ -177,15 +182,13 @@ export function Inspector({ state, dispatch, assets }: InspectorProps) {
 
             <div className={s.group}>
               <span className={s.groupTitle}>Arrière-plan</span>
-              <Field label="Couleur">
-                <Input
-                  type="color"
-                  value={canvas.bg}
-                  onChange={(e) =>
-                    dispatch({ type: 'updateCanvas', patch: { bg: e.target.value }, coalesce: 'canvas.bg' })
-                  }
-                />
-              </Field>
+              <FillControl
+                label="Fond du canvas"
+                value={canvas.bg}
+                onChange={(bg) =>
+                  dispatch({ type: 'updateCanvas', patch: { bg }, coalesce: 'canvas.bg' })
+                }
+              />
               <Field label="Image de fond" hint="URL http(s) publique. Les adresses privées sont refusées.">
                 <Input
                   type="url"
@@ -327,20 +330,53 @@ export function Inspector({ state, dispatch, assets }: InspectorProps) {
                 </Field>
               )}
               {(element.type === 'image' || element.type === 'video') && (
-                <Field label="Média" hint="Envoyez vos fichiers depuis l’onglet Médias.">
-                  <Select
-                    value={element.assetId ?? ''}
-                    onChange={(e) => patch(element.id, { assetId: e.target.value || null })}
-                  >
-                    <option value="">Aucun</option>
-                    {assets
-                      .filter((asset) => asset.kind === element.type)
-                      .map((asset) => (
-                        <option key={asset.id} value={asset.id}>
-                          {asset.filename}
-                        </option>
-                      ))}
-                  </Select>
+                <Field label="Média" hint="Choisissez un fichier existant ou importez-en un ici.">
+                  <div className={s.mediaPicker}>
+                    <Select
+                      value={element.assetId ?? ''}
+                      onChange={(e) => patch(element.id, { assetId: e.target.value || null })}
+                    >
+                      <option value="">Aucun</option>
+                      {assets
+                        .filter((asset) => asset.kind === element.type)
+                        .map((asset) => (
+                          <option key={asset.id} value={asset.id}>
+                            {asset.filename}
+                          </option>
+                        ))}
+                    </Select>
+                    <button
+                      type="button"
+                      className={s.mediaUploadBtn}
+                      disabled={uploading}
+                      title={element.type === 'image' ? 'Importer une image ou un GIF' : 'Importer une vidéo'}
+                      onClick={() => mediaInput.current?.click()}
+                    >
+                      <Upload size={15} />
+                      {uploading ? 'Import…' : 'Importer'}
+                    </button>
+                    <input
+                      ref={mediaInput}
+                      type="file"
+                      hidden
+                      accept={
+                        element.type === 'image'
+                          ? 'image/png,image/jpeg,image/webp,image/gif'
+                          : 'video/*'
+                      }
+                      onChange={(event) => {
+                        const file = event.target.files?.[0];
+                        event.target.value = '';
+                        if (!file) return;
+                        setUploading(true);
+                        void onUploadFiles([file])
+                          .then(([asset]) => {
+                            if (asset) patch(element.id, { assetId: asset.id });
+                          })
+                          .finally(() => setUploading(false));
+                      }}
+                    />
+                  </div>
                 </Field>
               )}
             </div>
@@ -397,16 +433,13 @@ export function Inspector({ state, dispatch, assets }: InspectorProps) {
                   </div>
                 </>
               )}
+              {element.type !== 'text' && element.type !== 'image' && element.type !== 'video' && (
+                <FillControl
+                  value={element.background}
+                  onChange={(background) => patch(element.id, { background }, `bg:${element.id}`)}
+                />
+              )}
               <div className={s.row2}>
-                {element.type !== 'text' && element.type !== 'image' && element.type !== 'video' && (
-                  <Field label="Fond">
-                    <Input
-                      type="color"
-                      value={element.background}
-                      onChange={(e) => patch(element.id, { background: e.target.value }, `bg:${element.id}`)}
-                    />
-                  </Field>
-                )}
                 <Field label="Rayon">
                   <Input
                     type="number"

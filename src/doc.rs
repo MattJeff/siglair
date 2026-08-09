@@ -237,7 +237,7 @@ impl Doc {
         range("canvas.overlay", self.canvas.overlay, 0.0, 1.0)?;
         range("canvas.radius", self.canvas.radius, 0.0, 200.0)?;
         range("timelineDuration", self.timeline_duration, 0.1, 60.0)?;
-        color("canvas.bg", &self.canvas.bg)?;
+        paint("canvas.bg", &self.canvas.bg)?;
         if !self.canvas.bg_image.is_empty() {
             check_remote_url(&self.canvas.bg_image)?;
         }
@@ -284,7 +284,7 @@ impl Element {
         range("fontSize", self.font_size, 1.0, 400.0)?;
         range("radius", self.radius, 0.0, 500.0)?;
         color("color", &self.color)?;
-        color("background", &self.background)?;
+        paint("background", &self.background)?;
         one_of("align", &self.align, &ALIGNS)?;
         one_of("fontWeight", &self.font_weight, &FONT_WEIGHTS)?;
 
@@ -340,13 +340,112 @@ fn range(field: &str, v: f64, min: f64, max: f64) -> Result<()> {
 }
 
 fn color(field: &str, v: &str) -> Result<()> {
-    if v.len() == 7 && v.starts_with('#') && v[1..].bytes().all(|b| b.is_ascii_hexdigit()) {
+    if is_hex_color(v) {
         Ok(())
     } else {
         Err(AppError::validation(format!(
             "La couleur « {field} » doit être au format #rrggbb."
         )))
     }
+}
+
+/// Remplissage fermé : couleur hex ou l'un des trois dégradés produits par l'éditeur.
+/// Accepter du CSS arbitraire ici réintroduirait `url(...)` dans le HTML capturé par Chromium.
+fn paint(field: &str, value: &str) -> Result<()> {
+    if safe_paint(value).is_some() {
+        Ok(())
+    } else {
+        Err(AppError::validation(format!(
+            "Le remplissage « {field} » doit être une couleur #rrggbb ou un dégradé Siglair valide."
+        )))
+    }
+}
+
+pub fn safe_paint(value: &str) -> Option<&str> {
+    let value = value.trim();
+    if is_hex_color(value) {
+        return Some(value);
+    }
+
+    if let Some(body) = value
+        .strip_prefix("linear-gradient(")
+        .and_then(|v| v.strip_suffix(')'))
+    {
+        let parts: Vec<_> = body.split(',').map(str::trim).collect();
+        return (parts.len() == 3
+            && angle(parts[0]).is_some()
+            && color_stop(parts[1], "%", 0.0, 100.0)
+            && color_stop(parts[2], "%", 0.0, 100.0))
+        .then_some(value);
+    }
+
+    if let Some(body) = value
+        .strip_prefix("radial-gradient(")
+        .and_then(|v| v.strip_suffix(')'))
+    {
+        let parts: Vec<_> = body.split(',').map(str::trim).collect();
+        return (parts.len() == 3
+            && parts[0] == "circle at center"
+            && color_stop(parts[1], "%", 0.0, 100.0)
+            && color_stop(parts[2], "%", 0.0, 100.0))
+        .then_some(value);
+    }
+
+    if let Some(body) = value
+        .strip_prefix("conic-gradient(from ")
+        .and_then(|v| v.strip_suffix(')'))
+    {
+        let parts: Vec<_> = body.split(',').map(str::trim).collect();
+        let heading = parts.first()?.strip_suffix(" at center")?;
+        return (parts.len() == 3
+            && angle(heading).is_some()
+            && color_stop(parts[1], "deg", 0.0, 360.0)
+            && color_stop(parts[2], "deg", 0.0, 360.0))
+        .then_some(value);
+    }
+
+    None
+}
+
+pub fn paint_fallback_color(value: &str) -> Option<&str> {
+    let bytes = value.as_bytes();
+    for index in 0..bytes.len().saturating_sub(6) {
+        let Some(candidate) = value.get(index..index + 7) else {
+            continue;
+        };
+        if is_hex_color(candidate) {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+fn is_hex_color(value: &str) -> bool {
+    value.len() == 7 && value.starts_with('#') && value[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn angle(value: &str) -> Option<f64> {
+    let value = value.strip_suffix("deg")?.parse::<f64>().ok()?;
+    (value.is_finite() && (0.0..=360.0).contains(&value)).then_some(value)
+}
+
+fn color_stop(value: &str, unit: &str, min: f64, max: f64) -> bool {
+    let mut parts = value.split_whitespace();
+    let Some(color) = parts.next() else {
+        return false;
+    };
+    let Some(position) = parts.next() else {
+        return false;
+    };
+    if parts.next().is_some() || !is_hex_color(color) {
+        return false;
+    }
+    let Some(number) = position.strip_suffix(unit) else {
+        return false;
+    };
+    number
+        .parse::<f64>()
+        .is_ok_and(|n| n.is_finite() && (min..=max).contains(&n))
 }
 
 fn one_of(field: &str, v: &str, allowed: &[&str]) -> Result<()> {
@@ -586,6 +685,30 @@ mod tests {
             ..Default::default()
         };
         assert!(too_many.validate().is_err());
+    }
+
+    #[test]
+    fn validates_editor_gradients_without_accepting_arbitrary_css() {
+        for valid in [
+            "#112233",
+            "linear-gradient(135deg, #112233 0%, #445566 100%)",
+            "radial-gradient(circle at center, #112233 0%, #445566 100%)",
+            "conic-gradient(from 45deg at center, #112233 0deg, #445566 360deg)",
+        ] {
+            assert!(safe_paint(valid).is_some(), "aurait dû accepter {valid}");
+            assert_eq!(paint_fallback_color(valid), Some("#112233"));
+        }
+
+        for invalid in [
+            "red",
+            "linear-gradient(90deg, #112233, url(https://evil.test/x))",
+            "linear-gradient(999deg, #112233 0%, #445566 100%)",
+            "radial-gradient(circle at top, #112233 0%, #445566 100%)",
+            "conic-gradient(from 45deg at center, #112233 0%, var(--evil) 360deg)",
+            "é linear-gradient(90deg, #112233 0%, #445566 100%)",
+        ] {
+            assert!(safe_paint(invalid).is_none(), "aurait dû refuser {invalid}");
+        }
     }
 
     #[test]

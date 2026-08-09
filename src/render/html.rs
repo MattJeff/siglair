@@ -9,8 +9,8 @@ use std::fmt::Write as _;
 
 use super::{RenderMode, RenderOpts};
 use crate::doc::{
-    resolve_tokens, safe_href, Doc, Element, ElementType, Profile, ALIGNS, DIRECTIONS, EASINGS,
-    FONT_WEIGHTS,
+    paint_fallback_color, resolve_tokens, safe_href, safe_paint, Doc, Element, ElementType,
+    Profile, ALIGNS, DIRECTIONS, EASINGS, FONT_WEIGHTS,
 };
 use crate::util::esc_html as esc;
 
@@ -106,12 +106,12 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     let c = &doc.canvas;
     let mut out = format!(
         "<div class=\"sg-canvas\" style=\"position:relative;overflow:hidden;box-sizing:border-box;\
-         width:{}px;height:{}px;border-radius:{}px;background-color:{};{}\
+         width:{}px;height:{}px;border-radius:{}px;background:{};{}\
          background-size:cover;background-position:center;font-family:{FONT};\">",
         num(c.width),
         num(c.height),
         num(c.radius),
-        css_color(&c.bg, "#000000"),
+        safe_paint(&c.bg).unwrap_or("#000000"),
         background_image(doc),
     );
 
@@ -124,7 +124,7 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
             "position:absolute;box-sizing:border-box;display:flex;align-items:center;overflow:hidden;\
              white-space:pre-wrap;text-decoration:none;line-height:1.3;\
              left:{}px;top:{}px;width:{}px;height:{}px;z-index:{};opacity:{};color:{};font-size:{}px;\
-             font-weight:{};text-align:{};justify-content:{};border-radius:{}px;background-color:{};",
+             font-weight:{};text-align:{};justify-content:{};border-radius:{}px;background:{};",
             num(el.x),
             num(el.y),
             num(el.w),
@@ -194,7 +194,7 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
         w = c.width_px(),
         h = c.height_px(),
         // fond transparent interdit à la capture : le GIF hériterait de coins noirs
-        bg = css_color(&c.bg, "#ffffff"),
+        bg = paint_fallback_color(&c.bg).unwrap_or("#ffffff"),
     )
 }
 
@@ -221,13 +221,13 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
             ElementType::Divider | ElementType::Shape => format!(
                 "<div style=\"height:{}px;line-height:0;font-size:0;background-color:{};border-radius:{}px;\">&nbsp;</div>",
                 num(el.h.max(1.0)),
-                element_background(el),
+                element_fallback_color(el),
                 num(el.radius),
             ),
             ElementType::Button | ElementType::Badge => format!(
                 "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;display:inline-table;\">\
                  <tr><td style=\"background-color:{};border-radius:{}px;padding:7px 14px;color:{};font-size:{}px;font-weight:{};\">{}</td></tr></table>",
-                element_background(el),
+                element_fallback_color(el),
                 num(el.radius),
                 color,
                 num(el.font_size),
@@ -252,7 +252,7 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
          <tr><td style=\"padding:14px 18px;\">\
          <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;\">{rows}</table>\
          </td></tr>{}</table>",
-        css_color(&doc.canvas.bg, "#ffffff"),
+        paint_fallback_color(&doc.canvas.bg).unwrap_or("#ffffff"),
         doc.canvas.width_px(),
         branding_row(opts),
     )
@@ -320,7 +320,14 @@ fn asset_url<'a>(el: &Element, opts: &'a RenderOpts) -> Option<&'a str> {
 fn element_background(el: &Element) -> &str {
     match el.kind {
         ElementType::Text | ElementType::Image | ElementType::Video => "transparent",
-        _ => css_color(&el.background, "transparent"),
+        _ => safe_paint(&el.background).unwrap_or("transparent"),
+    }
+}
+
+fn element_fallback_color(el: &Element) -> &str {
+    match el.kind {
+        ElementType::Text | ElementType::Image | ElementType::Video => "transparent",
+        _ => paint_fallback_color(&el.background).unwrap_or("transparent"),
     }
 }
 
@@ -414,6 +421,27 @@ mod tests {
             slug: slug.map(String::from),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn freeform_renders_gradients_and_safe_uses_the_first_color() {
+        let mut d = doc_with(vec![Element {
+            id: "aaa1111".into(),
+            kind: ElementType::Button,
+            content: "Démo".into(),
+            background: "linear-gradient(125deg, #123456 0%, #abcdef 100%)".into(),
+            ..Default::default()
+        }]);
+        d.canvas.bg = "radial-gradient(circle at center, #102030 0%, #405060 100%)".into();
+
+        let freeform = render_document(&d, &Profile::new(), RenderMode::Freeform, &opts(None));
+        assert!(freeform
+            .contains("background:radial-gradient(circle at center, #102030 0%, #405060 100%)"));
+        assert!(freeform.contains("background:linear-gradient(125deg, #123456 0%, #abcdef 100%)"));
+
+        let safe = render_document(&d, &Profile::new(), RenderMode::Safe, &opts(None));
+        assert!(safe.contains("background-color:#102030"));
+        assert!(safe.contains("background-color:#123456"));
     }
 
     fn doc_with(els: Vec<Element>) -> Doc {

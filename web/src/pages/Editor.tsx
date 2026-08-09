@@ -6,12 +6,12 @@
  *  2. les médias sont des `assetId` résolus vers une URL, plus jamais des data-URL ;
  *  3. l'aperçu et l'export viennent du serveur (contrat §2), ce canvas ne sert qu'à manipuler.
  */
-import { useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
-import { ApiError, getSignature, listAssets } from '../lib/api';
+import { ApiError, getSignature, listAssets, uploadAsset } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Asset, Signature } from '../lib/types';
 import { Assets } from '../editor/Assets';
@@ -107,7 +107,7 @@ export default function Editor() {
 
 function EditorShell({ signature }: { signature: Signature }) {
   const toast = useToast();
-  const { limits, user } = useSession();
+  const { limits, user, refresh } = useSession();
   const [state, dispatch] = useReducer(reducer, signature.doc, initialEditorState);
   const [name, setName] = useState(signature.name);
   const [assets, setAssets] = useState<Asset[]>([]);
@@ -142,6 +142,64 @@ function EditorShell({ signature }: { signature: Signature }) {
       alive = false;
     };
   }, [toast]);
+
+  const uploadFiles = useCallback(
+    async (files: File[]): Promise<Asset[]> => {
+      const supported = files.filter(
+        (file) => file.type.startsWith('image/') || file.type.startsWith('video/'),
+      );
+      if (supported.length === 0) {
+        toast('Choisissez une image, un GIF ou une vidéo.', 'error');
+        return [];
+      }
+
+      const uploaded: Asset[] = [];
+      for (const file of supported) {
+        try {
+          uploaded.push(await uploadAsset(file));
+        } catch (cause) {
+          toast(cause instanceof ApiError ? cause.message : `Impossible d’importer ${file.name}.`, 'error');
+        }
+      }
+      if (uploaded.length > 0) {
+        setAssets((current) => [
+          ...uploaded,
+          ...current.filter((asset) => !uploaded.some((next) => next.id === asset.id)),
+        ]);
+        await refresh();
+        toast(
+          uploaded.length === 1 ? 'Média importé' : `${uploaded.length} médias importés`,
+          'success',
+        );
+      }
+      return uploaded;
+    },
+    [refresh, toast],
+  );
+
+  async function uploadAt(files: File[], point: { x: number; y: number }) {
+    const uploaded = await uploadFiles(files);
+    uploaded.forEach((asset, index) => {
+      const ratio = asset.width && asset.height ? asset.width / asset.height : asset.kind === 'video' ? 16 / 9 : 1;
+      const maxWidth = asset.kind === 'video' ? 200 : 160;
+      const maxHeight = asset.kind === 'video' ? 120 : 150;
+      let width = maxWidth;
+      let height = width / ratio;
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * ratio;
+      }
+      dispatch({
+        type: 'add',
+        kind: asset.kind,
+        assetId: asset.id,
+        x: point.x + index * 12,
+        y: point.y + index * 12,
+        w: Math.max(40, Math.round(width)),
+        h: Math.max(40, Math.round(height)),
+      });
+    });
+  }
 
   // Raccourcis clavier. L'état courant passe par une ref : réabonner la fenêtre
   // à chaque frappe ne servirait à rien.
@@ -280,7 +338,12 @@ function EditorShell({ signature }: { signature: Signature }) {
             )}
 
             {tab === 'assets' && (
-              <Assets assets={assets} onAssetsChange={setAssets} dispatch={dispatch} />
+              <Assets
+                assets={assets}
+                onAssetsChange={setAssets}
+                onUploadFiles={uploadFiles}
+                dispatch={dispatch}
+              />
             )}
 
             {tab === 'campaigns' && (
@@ -346,6 +409,7 @@ function EditorShell({ signature }: { signature: Signature }) {
             grid={grid}
             playing={playing}
             restartKey={restartKey}
+            onUploadFiles={(files, point) => void uploadAt(files, point)}
           />
 
           <Timeline doc={state.doc} dispatch={dispatch} profile={signature.profile} />
@@ -374,7 +438,7 @@ function EditorShell({ signature }: { signature: Signature }) {
         </section>
 
         <aside className={`${s.sidebar} ${s.right}`}>
-          <Inspector state={state} dispatch={dispatch} assets={assets} />
+          <Inspector state={state} dispatch={dispatch} assets={assets} onUploadFiles={uploadFiles} />
         </aside>
       </main>
 

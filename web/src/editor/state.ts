@@ -232,7 +232,7 @@ export type Action =
   /** Document venu du serveur : remet l'historique à zéro. */
   | { type: 'load'; doc: Doc }
   | { type: 'select'; id: string | null }
-  | { type: 'add'; kind: ElementType; x?: number; y?: number; assetId?: string }
+  | { type: 'add'; kind: ElementType; x?: number; y?: number; w?: number; h?: number; assetId?: string }
   | { type: 'update'; id: string; patch: Partial<Element>; coalesce?: string }
   | { type: 'updateAnim'; id: string; patch: Partial<Anim>; coalesce?: string }
   | { type: 'updateCanvas'; patch: Partial<Canvas>; coalesce?: string }
@@ -308,6 +308,8 @@ export function reducer(state: EditorState, action: Action): EditorState {
           type: action.kind,
           x: Math.round(action.x ?? 45),
           y: Math.round(action.y ?? 45),
+          ...(action.w ? { w: Math.round(action.w) } : {}),
+          ...(action.h ? { h: Math.round(action.h) } : {}),
           ...(action.assetId ? { assetId: action.assetId } : {}),
         },
         idsOf(state.doc),

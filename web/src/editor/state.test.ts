@@ -30,6 +30,26 @@ describe('ajout', () => {
     expect(state.selectedId).toBe(element.id);
   });
 
+  it('conserve les dimensions naturelles d’un média déposé sur le canvas', () => {
+    const state = run(start(), {
+      type: 'add',
+      kind: 'image',
+      x: 86,
+      y: 54,
+      w: 144,
+      h: 81,
+      assetId: 'asset-test',
+    });
+    expect(state.doc.elements[0]).toMatchObject({
+      type: 'image',
+      x: 86,
+      y: 54,
+      w: 144,
+      h: 81,
+      assetId: 'asset-test',
+    });
+  });
+
   it('donne à chaque élément un id [a-z0-9]{7} distinct et un anim non partagé', () => {
     const state = withThreeElements();
     const ids = state.doc.elements.map((e) => e.id);

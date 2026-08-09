@@ -98,6 +98,7 @@ export interface Element {
   fontSize: number;
   fontWeight: string;
   color: string;
+  /** couleur #rrggbb ou dégradé produit par FillControl */
   background: string;
   radius: number;
   align: Align;
@@ -109,6 +110,7 @@ export interface Element {
 export interface Canvas {
   width: number;
   height: number;
+  /** couleur #rrggbb ou dégradé produit par FillControl */
   bg: string;
   /** URL http(s) ou "" — jamais de data: */
   bgImage: string;

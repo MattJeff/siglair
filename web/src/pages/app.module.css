@@ -234,13 +234,6 @@
   cursor: not-allowed;
 }
 
-.templateThumb {
-  display: block;
-  height: 76px;
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-}
-
 .center {
   display: grid;
   place-items: center;

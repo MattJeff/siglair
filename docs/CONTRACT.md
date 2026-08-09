@@ -70,6 +70,11 @@ Repris tel quel de l'éditeur d'origine pour que le port soit mécanique. Stock�
 }
 ```
 
+`canvas.bg` et `elements[].background` acceptent une couleur `#rrggbb` ou un dégradé
+linéaire, radial ou conique généré par l’éditeur. La grammaire est volontairement fermée :
+aucune URL ni fonction CSS arbitraire ne peut entrer dans le document. En mode email sûr,
+la première couleur du dégradé sert de repli pour les clients qui ne savent pas l’afficher.
+
 ### Element
 
 ```jsonc
