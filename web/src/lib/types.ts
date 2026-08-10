@@ -156,6 +156,7 @@ export const API_ERROR_CODES = [
   'quota_exceeded',
   'conflict',
   'rate_limited',
+  'not_implemented',
   'internal',
 ] as const;
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number];
@@ -393,6 +394,23 @@ export interface OnboardingVariant {
 export interface GenerateResult {
   variants: OnboardingVariant[];
   source: 'model' | 'fallback';
+}
+
+/** Brouillon réel préparé avant connexion et conservé 24 h côté serveur. */
+export interface OnboardingDraftResult {
+  handoff: string;
+  source: 'model' | 'fallback';
+}
+
+export interface OnboardingClaimResult {
+  id: string;
+  name: string;
+}
+
+/** Réponse du copilote Pro/Team : un document complet, validé et déjà enregistré. */
+export interface AiEditResult {
+  reply: string;
+  doc: Doc;
 }
 
 /** GET /api/me */

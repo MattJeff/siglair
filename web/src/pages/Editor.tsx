@@ -15,6 +15,7 @@ import { ApiError, getSignature, listAssets, uploadAsset } from '../lib/api';
 import { useSession } from '../lib/session';
 import type { Asset, Signature } from '../lib/types';
 import { Assets } from '../editor/Assets';
+import { AiAssistant } from '../editor/AiAssistant';
 import { Campaigns } from '../editor/Campaigns';
 import { Canvas } from '../editor/Canvas';
 import { ExportModal } from '../editor/ExportModal';
@@ -46,6 +47,7 @@ import s from '../editor/editor.module.css';
 import '../../../src/render/anim.css';
 
 const LEFT_TABS = [
+  { id: 'ai', label: 'IA' },
   { id: 'design', label: 'Design' },
   { id: 'templates', label: 'Modèles' },
   { id: 'assets', label: 'Médias' },
@@ -105,11 +107,11 @@ export default function Editor() {
 
 function EditorShell({ signature }: { signature: Signature }) {
   const toast = useToast();
-  const { limits, user, refresh } = useSession();
+  const { limits, user, refresh, plan, features } = useSession();
   const [state, dispatch] = useReducer(reducer, signature.doc, initialEditorState);
   const [name, setName] = useState(signature.name);
   const [assets, setAssets] = useState<Asset[]>([]);
-  const [tab, setTab] = useState<LeftTab>('design');
+  const [tab, setTab] = useState<LeftTab>(plan === 'free' ? 'design' : 'ai');
   const [zoom, setZoom] = useState(1);
   const [view, setView] = useState<'desktop' | 'mobile'>('desktop');
   const [grid, setGrid] = useState(true);
@@ -300,6 +302,17 @@ function EditorShell({ signature }: { signature: Signature }) {
           </div>
 
           <div className={s.panel} role="tabpanel" id="panel-left" aria-labelledby={`tab-${tab}`}>
+            {tab === 'ai' && (
+              <AiAssistant
+                signatureId={signature.id}
+                selectedId={state.selectedId}
+                plan={plan}
+                providerAvailable={features?.ai_provider !== false}
+                save={save}
+                dispatch={dispatch}
+              />
+            )}
+
             {tab === 'design' && (
               <>
                 <div className={s.sectionHead}>

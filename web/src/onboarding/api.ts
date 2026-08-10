@@ -6,13 +6,20 @@
  * de la connexion et les outils de saisie. Les réexports évitent de toucher les appelants.
  */
 export type { Brand, BrandLogo, OnboardingVariant } from '../lib/types';
-export { analyzeBrand, generateVariants, pickVariant } from '../lib/api';
+export {
+  analyzeBrand,
+  claimOnboardingDraft,
+  createOnboardingDraft,
+  generateVariants,
+  pickVariant,
+} from '../lib/api';
 
 import type { Brand, BrandLogo } from '../lib/types';
 
 /* ------------------------------------------------- traversée de la connexion */
 
 const BRAND_KEY = 'siglair:brand';
+const HANDOFF_KEY = 'siglair:onboarding-handoff';
 
 /** Destination du bouton « Continuer » : générer exige un compte (§6bis.6). */
 export const LOGIN_THEN_ONBOARDING = `/login?next=${encodeURIComponent('/onboarding')}`;
@@ -42,6 +49,30 @@ export function readBrand(): Brand | null {
 export function forgetBrand(): void {
   try {
     sessionStorage.removeItem(BRAND_KEY);
+  } catch {
+    /* rien à nettoyer */
+  }
+}
+
+export function rememberHandoff(handoff: string): void {
+  try {
+    sessionStorage.setItem(HANDOFF_KEY, handoff);
+  } catch {
+    /* Le magic link porte aussi le jeton. */
+  }
+}
+
+export function readHandoff(): string | null {
+  try {
+    return sessionStorage.getItem(HANDOFF_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function forgetHandoff(): void {
+  try {
+    sessionStorage.removeItem(HANDOFF_KEY);
   } catch {
     /* rien à nettoyer */
   }

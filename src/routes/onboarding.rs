@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    ai::{brand, compose, generate, Brand, Logo, VariantSource},
+    ai::{brand, compose, generate, handoff, Brand, Logo, VariantSource},
     auth::{middleware::client_ip, OrgAccess},
     doc::{Doc, Profile},
     error::{AppError, Result},
@@ -36,12 +36,16 @@ const HOUR: Duration = Duration::from_secs(3600);
 /// §6bis.6 : gratuite et sans compte, mais elle fait sortir une requête de notre réseau.
 /// Sans ce plafond, la route est un amplificateur offert à qui la trouve.
 const ANALYZE_PER_HOUR: usize = 10;
+/// Une génération publique coûte un appel au modèle : plus stricte que l'analyse seule.
+const DRAFT_PER_HOUR: usize = 3;
 /// Le logo d'un visiteur qui n'a pas encore de compte : aucune organisation, purgé après 24 h.
 const TEMP_HOURS: i32 = 24;
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/onboarding/analyze", post(analyze))
+        .route("/onboarding/draft", post(create_draft))
+        .route("/onboarding/claim", post(claim_draft))
         .route("/onboarding/generate", post(generate_variants))
         .route("/onboarding/pick", post(pick))
 }
@@ -241,6 +245,181 @@ async fn purge_expired(st: &AppState) {
     }
 }
 
+// ------------------------------------------------------------------ relais avant connexion
+
+#[derive(Deserialize)]
+struct DraftReq {
+    #[serde(default)]
+    brand: Brand,
+}
+
+/// Prépare une vraie signature avant l'inscription. Le document reste 24 h dans le stockage ;
+/// seul un jeton signé et court traversera ensuite le magic link.
+async fn create_draft(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<DraftReq>,
+) -> Result<Json<Value>> {
+    let ip = client_ip(&headers);
+    let key = format!("onboarding:draft:{}", ip.as_deref().unwrap_or("?"));
+    if !rate_limit(&key, DRAFT_PER_HOUR, HOUR) {
+        return Err(AppError::RateLimited);
+    }
+
+    let mut brand = req.brand;
+    if let Some(asset_id) = brand.logo_asset_id {
+        let usable: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM assets WHERE id = $1 AND org_id IS NULL \
+             AND expires_at > now())",
+        )
+        .bind(asset_id)
+        .fetch_one(&st.db)
+        .await?;
+        if !usable {
+            brand.logo_asset_id = None;
+        }
+    }
+
+    let mut profile = Profile::new();
+    profile.insert("name".into(), "Votre nom".into());
+    profile.insert("role".into(), "Votre fonction".into());
+    let profile = enriched_profile(&brand, &profile);
+    let fallback = compose::fallback_variants(&brand, &profile);
+    let out = generate::generate(&st.http, &brand, fallback).await;
+    let spec = out
+        .variants
+        .first()
+        .ok_or_else(|| AppError::validation("Aucune direction n'a pu être composée."))?;
+    let doc = compose::compose(spec, &brand, &profile);
+    doc.validate()?;
+
+    // Les octets du logo sont déjà dans l'asset temporaire. Les dupliquer dans le JSON ferait
+    // grossir inutilement le brouillon de plusieurs mégaoctets.
+    brand.logo = None;
+    let token = handoff::store(
+        &st,
+        &handoff::Draft {
+            signature_id: Uuid::new_v4(),
+            brand,
+            doc,
+            profile,
+            name: spec.name.chars().take(120).collect(),
+            source: out.source,
+        },
+    )
+    .await?;
+
+    Ok(Json(json!({ "handoff": token, "source": out.source })))
+}
+
+#[derive(Deserialize)]
+struct ClaimReq {
+    #[serde(default)]
+    handoff: String,
+}
+
+/// Transforme le brouillon préparé sur la landing en signature ordinaire et ouvre directement
+/// l'éditeur. L'identifiant de signature est fixé dans le brouillon : un double appel est donc
+/// idempotent et ne consomme pas deux créations.
+async fn claim_draft(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Json(req): Json<ClaimReq>,
+) -> Result<(StatusCode, Json<Value>)> {
+    let (draft_id, mut draft) = handoff::load(&st, req.handoff.trim()).await?;
+
+    if let Some((name,)) =
+        sqlx::query_as::<_, (Option<String>,)>("SELECT name FROM users WHERE id = $1")
+            .bind(access.user_id)
+            .fetch_optional(&st.db)
+            .await?
+    {
+        if let Some(name) = name.filter(|value| !value.trim().is_empty()) {
+            draft.profile.insert("name".into(), name);
+        }
+    }
+    let email: String = sqlx::query_scalar("SELECT email::text FROM users WHERE id = $1")
+        .bind(access.user_id)
+        .fetch_one(&st.db)
+        .await?;
+    draft.profile.insert("email".into(), email.clone());
+    if draft
+        .profile
+        .get("name")
+        .is_none_or(|name| name == "Votre nom" || name.trim().is_empty())
+    {
+        draft.profile.insert(
+            "name".into(),
+            email.split('@').next().unwrap_or("Votre nom").to_string(),
+        );
+    }
+
+    // Un brouillon déjà réclamé renvoie la même signature, même après un double clic.
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(
+        "SELECT id FROM signatures WHERE id = $1 AND org_id = $2 AND owner_user_id = $3 \
+         AND deleted_at IS NULL",
+    )
+    .bind(draft.signature_id)
+    .bind(access.org_id)
+    .bind(access.user_id)
+    .fetch_optional(&st.db)
+    .await?
+    {
+        handoff::delete(&st, draft_id).await;
+        return Ok((
+            StatusCode::OK,
+            Json(json!({ "id": id, "name": draft.name })),
+        ));
+    }
+
+    let live: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM signatures WHERE org_id = $1 AND deleted_at IS NULL",
+    )
+    .bind(access.org_id)
+    .fetch_one(&st.db)
+    .await?;
+    check_signature_quota(&access.plan, live.max(0) as u32)?;
+
+    if draft.source == VariantSource::Model {
+        consume_ai_generation(&st, &access).await?;
+    }
+    if let Err(error) = attach_temp_assets(&st, access.org_id, &mut draft.doc).await {
+        if draft.source == VariantSource::Model {
+            let _ = refund_ai_generation(&st, &access).await;
+        }
+        return Err(error);
+    }
+
+    let inserted = sqlx::query(
+        "INSERT INTO signatures (id, org_id, owner_user_id, name, kind, doc, profile) \
+         VALUES ($1, $2, $3, $4, 'personal', $5, $6) ON CONFLICT (id) DO NOTHING",
+    )
+    .bind(draft.signature_id)
+    .bind(access.org_id)
+    .bind(access.user_id)
+    .bind(&draft.name)
+    .bind(serde_json::to_value(&draft.doc)?)
+    .bind(serde_json::to_value(&draft.profile)?)
+    .execute(&st.db)
+    .await?
+    .rows_affected();
+
+    if inserted == 0 {
+        if draft.source == VariantSource::Model {
+            let _ = refund_ai_generation(&st, &access).await;
+        }
+        return Err(AppError::conflict(
+            "Cette création a déjà été utilisée par un autre compte.",
+        ));
+    }
+
+    handoff::delete(&st, draft_id).await;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({ "id": draft.signature_id, "name": draft.name })),
+    ))
+}
+
 // ------------------------------------------------------------------ generate
 
 #[derive(Deserialize)]
@@ -291,7 +470,7 @@ async fn generate_variants(
     Ok(Json(json!({ "variants": variants, "source": out.source })))
 }
 
-fn enriched_profile(brand: &Brand, profile: &Profile) -> Profile {
+pub(crate) fn enriched_profile(brand: &Brand, profile: &Profile) -> Profile {
     let mut out = profile.clone();
     fill_profile(&mut out, "website", &brand.site);
     fill_profile(&mut out, "company", &brand.name);
@@ -324,7 +503,7 @@ fn fill_profile(profile: &mut Profile, key: &str, value: &str) {
 ///
 /// La remise à zéro mensuelle des plans payants tient dans le même ordre : pas de tâche
 /// planifiée pour un compteur qu'on lit une fois par génération.
-async fn consume_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> {
+pub(crate) async fn consume_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> {
     let Some(max) = access.plan.ai_generations else {
         return Ok(());
     };
@@ -352,7 +531,7 @@ async fn consume_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> 
     Ok(())
 }
 
-async fn refund_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> {
+pub(crate) async fn refund_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> {
     if access.plan.ai_generations.is_none() {
         return Ok(());
     }
@@ -445,7 +624,7 @@ async fn pick(
 /// Le logo enregistré par `analyze` n'appartenait à personne : le visiteur n'avait pas encore
 /// de compte. Il rejoint l'organisation et cesse d'expirer. Idempotent — un asset déjà
 /// rattaché (le sien ou celui d'une autre org) n'est pas touché.
-async fn attach_temp_assets(st: &AppState, org_id: Uuid, doc: &mut Doc) -> Result<()> {
+pub(crate) async fn attach_temp_assets(st: &AppState, org_id: Uuid, doc: &mut Doc) -> Result<()> {
     for el in &mut doc.elements {
         let Some(id) = el.asset_id else { continue };
         let res = sqlx::query(

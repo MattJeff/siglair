@@ -3,6 +3,8 @@
 //! Tout est filtré par `access.org_id` : une requête ne peut pas nommer une signature
 //! d'une autre organisation, elle reçoit 404 (pas 403 — ne pas confirmer l'existence).
 
+use std::collections::HashSet;
+
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -16,6 +18,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
+    ai::generate::{self, EditorAsset},
     auth::OrgAccess,
     doc::{Doc, Profile},
     error::{AppError, Result},
@@ -37,6 +40,7 @@ pub fn router() -> Router<AppState> {
             get(get_one).patch(update).delete(remove),
         )
         .route("/signatures/{id}/publish", post(publish))
+        .route("/signatures/{id}/ai", post(ai_edit))
         .route("/signatures/{id}/status", get(status))
         .route("/signatures/{id}/export", get(export))
         .route("/signatures/{id}/analytics", get(stats))
@@ -304,6 +308,114 @@ async fn duplicate(
     .fetch_one(&st.db)
     .await?;
     Ok((StatusCode::CREATED, Json(row)))
+}
+
+// ------------------------------------------------------------------ copilote IA
+
+#[derive(Deserialize)]
+struct AiEditReq {
+    #[serde(default)]
+    message: String,
+    selected_id: Option<String>,
+}
+
+/// Le modèle renvoie un document complet, mais il ne devient jamais une écriture aveugle :
+/// même garde d'autorisation que PATCH, validation du contrat, contrôle des assets, puis UPDATE.
+async fn ai_edit(
+    State(st): State<AppState>,
+    access: OrgAccess,
+    Path(id): Path<Uuid>,
+    Json(req): Json<AiEditReq>,
+) -> Result<Json<Value>> {
+    if access.plan.id == "free" {
+        return Err(AppError::QuotaExceeded(format!(
+            "Le copilote IA est inclus dans Pro ({}/mois) et Team.",
+            crate::plans::PRO.price_label()
+        )));
+    }
+    let message = req.message.trim();
+    if message.is_empty() || message.chars().count() > 2_000 {
+        return Err(AppError::validation(
+            "Décrivez la modification souhaitée en 2 000 caractères maximum.",
+        ));
+    }
+
+    let row = fetch(&st.db, access.org_id, id).await?;
+    require_mutation(&access, &row)?;
+    let current = doc_of(&row)?;
+    if req.selected_id.as_ref().is_some_and(|selected| {
+        !current
+            .elements
+            .iter()
+            .any(|element| &element.id == selected)
+    }) {
+        return Err(AppError::validation("L'élément sélectionné n'existe plus."));
+    }
+
+    let assets: Vec<(Uuid, String, String)> = sqlx::query_as(
+        "SELECT id, filename, kind FROM assets WHERE org_id = $1 ORDER BY created_at DESC LIMIT 100",
+    )
+    .bind(access.org_id)
+    .fetch_all(&st.db)
+    .await?;
+    let allowed: HashSet<Uuid> = assets.iter().map(|asset| asset.0).collect();
+    let assets: Vec<EditorAsset> = assets
+        .into_iter()
+        .map(|(id, filename, kind)| EditorAsset { id, filename, kind })
+        .collect();
+    let profile_keys: Vec<String> = profile_of(&row).keys().cloned().collect();
+
+    crate::routes::onboarding::consume_ai_generation(&st, &access).await?;
+    let generated = generate::edit_document(
+        &st.http,
+        message,
+        &current,
+        req.selected_id.as_deref(),
+        &profile_keys,
+        &assets,
+    )
+    .await;
+    let output = match generated {
+        Ok(output) => output,
+        Err(reason) => {
+            let _ = crate::routes::onboarding::refund_ai_generation(&st, &access).await;
+            return Err(AppError::NotImplemented(format!(
+                "Le copilote n'est pas disponible pour l'instant. {reason}"
+            )));
+        }
+    };
+
+    if let Err(error) = output.doc.validate() {
+        let _ = crate::routes::onboarding::refund_ai_generation(&st, &access).await;
+        tracing::warn!(?error, %id, "document du copilote refusé par le validateur");
+        return Err(AppError::validation(
+            "L'IA a proposé une composition invalide. Reformulez la demande plus simplement.",
+        ));
+    }
+    if output
+        .doc
+        .elements
+        .iter()
+        .filter_map(|element| element.asset_id)
+        .any(|asset_id| !allowed.contains(&asset_id))
+    {
+        let _ = crate::routes::onboarding::refund_ai_generation(&st, &access).await;
+        return Err(AppError::validation(
+            "L'IA a référencé un média qui n'appartient pas à votre bibliothèque.",
+        ));
+    }
+
+    sqlx::query(
+        "UPDATE signatures SET doc = $1, updated_at = now() \
+         WHERE id = $2 AND org_id = $3 AND deleted_at IS NULL",
+    )
+    .bind(serde_json::to_value(&output.doc)?)
+    .bind(id)
+    .bind(access.org_id)
+    .execute(&st.db)
+    .await?;
+
+    Ok(Json(json!({ "reply": output.reply, "doc": output.doc })))
 }
 
 // ------------------------------------------------------------------ publication

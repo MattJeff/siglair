@@ -7,25 +7,28 @@
  * pas l'éditeur. D'où le rappel « Vous pourrez tout modifier ensuite. » à chaque étape — c'est
  * ce qui lève la crainte de se retrouver enfermé dans un résultat généré.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
 import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { AppShell } from '../components/app/AppShell';
-import { apiMessage, errorCode } from '../components/app/helpers';
+import { PENDING_NEXT, apiMessage, errorCode } from '../components/app/helpers';
 import { BrandHero } from '../components/marketing/BrandHero';
 import { BrandRecap } from '../onboarding/BrandRecap';
 import { VariantCards } from '../onboarding/VariantCards';
 import type { Proposal } from '../onboarding/VariantCards';
 import {
+  claimOnboardingDraft,
   forgetBrand,
+  forgetHandoff,
   generateVariants,
   logoSrc,
   pickVariant,
   readBrand,
+  readHandoff,
   rememberBrand,
 } from '../onboarding/api';
 import type { Brand } from '../onboarding/api';
@@ -58,6 +61,7 @@ function applyBrandDefaults(form: Form, brand: Brand | null): Form {
 export default function Onboarding() {
   const { user, refresh, features } = useSession();
   const navigate = useNavigate();
+  const [params] = useSearchParams();
 
   const [brand, setBrandState] = useState<Brand | null>(() => readBrand());
   const [form, setForm] = useState<Form>(() =>
@@ -80,6 +84,35 @@ export default function Onboarding() {
   const [error, setError] = useState('');
   const [quota, setQuota] = useState(false);
   const [usedFallback, setUsedFallback] = useState(false);
+  const handoff = params.get('handoff') || readHandoff();
+  const [claiming, setClaiming] = useState(Boolean(handoff));
+  const claimStarted = useRef(false);
+
+  useEffect(() => {
+    if (!handoff || claimStarted.current) return;
+    claimStarted.current = true;
+    // Le magic link sait désormais revenir ici directement. L'ancien relais via /app ne doit
+    // pas ressurgir lors d'une prochaine visite du tableau de bord.
+    try {
+      sessionStorage.removeItem(PENDING_NEXT);
+    } catch {
+      /* stockage indisponible : aucun impact sur la réclamation serveur */
+    }
+    setClaiming(true);
+    setError('');
+    void claimOnboardingDraft(handoff)
+      .then(async ({ id }) => {
+        forgetBrand();
+        forgetHandoff();
+        await refresh();
+        navigate(`/app/editor/${id}`, { replace: true });
+      })
+      .catch((cause: unknown) => {
+        forgetHandoff();
+        setError(apiMessage(cause));
+        setClaiming(false);
+      });
+  }, [handoff, navigate, refresh]);
 
   // La marque édite en place et survit à un rechargement de l'onglet.
   const setBrand = (next: Brand) => {
@@ -144,6 +177,28 @@ export default function Onboarding() {
   };
 
   const logo = logoSrc(brand?.logo ?? null);
+
+  if (claiming) {
+    return (
+      <AppShell
+        title="Votre signature est prête"
+        subtitle="Nous la rattachons à votre compte avant d’ouvrir le canvas."
+      >
+        <section className={`${s.card} ${s.waiting}`} aria-live="polite">
+          <h2 className={s.cardTitle}>
+            <Spinner size={18} /> Ouverture de votre création…
+          </h2>
+          <p className={s.muted}>
+            Logo, couleurs, contenus et animations sont déjà dans le document. Vous arrivez
+            directement dans l’éditeur.
+          </p>
+          <div className={s.bar} aria-hidden="true">
+            <span className={s.barFill} />
+          </div>
+        </section>
+      </AppShell>
+    );
+  }
 
   return (
     <AppShell

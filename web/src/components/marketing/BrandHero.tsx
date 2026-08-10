@@ -18,10 +18,12 @@ import { apiMessage, errorCode } from '../app/helpers';
 import {
   LOGIN_THEN_ONBOARDING,
   analyzeBrand,
+  createOnboardingDraft,
   logoSrc,
   minimalBrand,
   normalizeUrl,
   rememberBrand,
+  rememberHandoff,
 } from '../../onboarding/api';
 import type { Brand } from '../../onboarding/api';
 import s from './BrandHero.module.css';
@@ -92,15 +94,32 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
   const [error, setError] = useState('');
   const [errorHelp, setErrorHelp] = useState('');
   const [fallback, setFallback] = useState(false);
+  const [handoff, setHandoff] = useState<string | null>(null);
 
-  /** Générer exige un compte ; la marque, elle, traverse la connexion. */
-  const accept = (found: Brand) => {
+  const prepareDraft = async (found: Brand): Promise<string> => {
+    const draft = await createOnboardingDraft(found);
+    setHandoff(draft.handoff);
+    rememberHandoff(draft.handoff);
+    return draft.handoff;
+  };
+
+  /** Le document est déjà composé avant la connexion ; seul son jeton traverse le mail. */
+  const accept = async (found: Brand) => {
     if (onBrand) {
       onBrand(found);
       return;
     }
-    rememberBrand(found);
-    navigate(LOGIN_THEN_ONBOARDING);
+    setBusy(true);
+    try {
+      rememberBrand(found);
+      if (!handoff) await prepareDraft(found);
+      navigate(LOGIN_THEN_ONBOARDING);
+    } catch (cause) {
+      setError(apiMessage(cause));
+      setErrorHelp('La marque est reconnue, mais la signature n’a pas encore pu être préparée. Réessayez.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   const submit = async (event: FormEvent) => {
@@ -118,13 +137,23 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
     setBrand(null);
     setNotice(null);
     setFallback(false);
+    setHandoff(null);
     setBusy(true);
     try {
       const { brand: found, notice: found_notice } = await analyzeBrand(target);
       setNotice(found_notice);
       setFallback(false);
-      if (compact) accept(found);
-      else setBrand(found);
+      if (compact) onBrand?.(found);
+      else {
+        try {
+          await prepareDraft(found);
+        } catch (cause) {
+          setNotice(
+            `${found_notice ? `${found_notice} ` : ''}${apiMessage(cause)} Vous pouvez réessayer avec Continuer.`,
+          );
+        }
+        setBrand(found);
+      }
     } catch (cause) {
       const message = apiMessage(cause);
       const code = errorCode(cause);
@@ -160,8 +189,15 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
       setNotice(
         "L'analyse automatique n'a pas pu récupérer ce site. On part quand même de son nom de domaine : vous pourrez ajouter le logo, les couleurs et les liens dans l'éditeur.",
       );
-      if (compact) accept(fallbackBrand);
-      else setBrand(fallbackBrand);
+      if (compact) onBrand?.(fallbackBrand);
+      else {
+        try {
+          await prepareDraft(fallbackBrand);
+        } catch {
+          // Le récapitulatif reste utile et le bouton Continuer pourra réessayer la préparation.
+        }
+        setBrand(fallbackBrand);
+      }
     } finally {
       setBusy(false);
     }
@@ -225,7 +261,7 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
           <button
             className={s.escape}
             type="button"
-            onClick={() => accept(minimalBrand(normalizeUrl(url)))}
+            onClick={() => void accept(minimalBrand(normalizeUrl(url)))}
           >
             Continuer sans mon site →
           </button>
@@ -280,13 +316,13 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
               {notice && <p className={s.escapeText}>{notice}</p>}
 
               <div className={s.panelActions}>
-                <button className={s.continue} type="button" onClick={() => accept(brand)}>
-                  Continuer →
+                <button className={s.continue} type="button" onClick={() => void accept(brand)}>
+                  Ouvrir ma signature →
                 </button>
                 <p className={s.escapeText}>
                   {logo
-                    ? 'Après connexion, Siglair reprend cette base pour générer votre signature gratuite. Tout reste modifiable ensuite.'
-                    : 'Après connexion, on garde votre marque : vous ajouterez le logo dans l’éditeur.'}
+                    ? 'Votre signature est déjà préparée. Après connexion, elle s’ouvrira directement dans l’éditeur.'
+                    : 'La composition est déjà préparée. Après connexion, ajoutez votre logo directement dans l’éditeur.'}
                 </p>
               </div>
             </div>

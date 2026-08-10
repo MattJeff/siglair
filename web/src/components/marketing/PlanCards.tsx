@@ -48,7 +48,7 @@ const formatSignatures = (n: number | null): string =>
 /** Argumentaire par plan. Aucun quota ici : seulement à qui il s'adresse. */
 const PITCH: Record<string, string> = {
   free: 'Une vraie signature animée, hébergée sur son URL, collée dans votre client mail. Elle porte une discrète mention Siglair.',
-  pro: 'La même signature sans notre marque, avec des campagnes datées et la mesure des clics.',
+  pro: 'La même signature sans notre marque, avec un copilote IA, des campagnes datées et la mesure des clics.',
   team: 'Les emails que votre équipe envoie déjà deviennent un canal : une campagne, poussée sur toutes les signatures, mesurée.',
 };
 
@@ -261,6 +261,10 @@ export function PlanComparison() {
           : p.ai_generations === null
           ? 'Illimitées'
           : `${p.ai_generations}${p.ai_generations_monthly ? ' / mois' : ' à vie'}`,
+    },
+    {
+      label: 'Copilote IA avec contrôle du canvas',
+      cell: (p) => (features?.ai_provider !== false && p.plan !== 'free' ? yes : no),
     },
     { label: 'Campagnes datées', cell: (p) => (p.limits.campaigns === 'none' ? no : CAMPAIGN_CELL[p.limits.campaigns]) },
     { label: 'Historique des ouvertures et des clics', cell: (p) => cap(formatRetention(p.limits.analytics_days)) },

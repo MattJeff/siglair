@@ -4,6 +4,7 @@
  */
 import type {
   AnalyticsSeries,
+  AiEditResult,
   AnalyzeResult,
   ApiErrorBody,
   ApiErrorCode,
@@ -12,6 +13,8 @@ import type {
   Config,
   Doc,
   GenerateResult,
+  OnboardingClaimResult,
+  OnboardingDraftResult,
   ExportMode,
   Me,
   Member,
@@ -101,10 +104,13 @@ export async function getMe(): Promise<Me | null> {
 export const getConfig = (): Promise<Config> => api<Config>('/api/config', { redirectOn401: false });
 
 /** Réponse toujours 204, même email inconnu — ne rien déduire du retour. */
-export const requestMagicLink = (email: string): Promise<void> =>
+export const requestMagicLink = (
+  email: string,
+  handoff?: string | null,
+): Promise<void> =>
   api<void>('/api/auth/magic/request', {
     method: 'POST',
-    body: json({ email }),
+    body: json({ email, handoff: handoff || undefined }),
     redirectOn401: false,
   });
 
@@ -145,6 +151,16 @@ export const updateSignature = (
   patch: { name?: string; doc?: Doc; profile?: Profile },
 ): Promise<Signature> =>
   api<Signature>(`/api/signatures/${id}`, { method: 'PATCH', body: json(patch) });
+
+export const editSignatureWithAi = (
+  id: string,
+  message: string,
+  selectedId: string | null,
+): Promise<AiEditResult> =>
+  api<AiEditResult>(`/api/signatures/${id}/ai`, {
+    method: 'POST',
+    body: json({ message, selected_id: selectedId }),
+  });
 
 export const deleteSignature = (id: string): Promise<void> =>
   api<void>(`/api/signatures/${id}`, { method: 'DELETE' });
@@ -216,6 +232,21 @@ export const analyzeBrand = (url: string): Promise<AnalyzeResult> =>
     method: 'POST',
     body: json({ url }),
     redirectOn401: false,
+  });
+
+/** Génère et stocke une vraie première direction avant la création du compte. */
+export const createOnboardingDraft = (brand: Brand): Promise<OnboardingDraftResult> =>
+  api<OnboardingDraftResult>('/api/onboarding/draft', {
+    method: 'POST',
+    body: json({ brand }),
+    redirectOn401: false,
+  });
+
+/** Après connexion, transforme le brouillon en signature puis ouvre directement l'éditeur. */
+export const claimOnboardingDraft = (handoff: string): Promise<OnboardingClaimResult> =>
+  api<OnboardingClaimResult>('/api/onboarding/claim', {
+    method: 'POST',
+    body: json({ handoff }),
   });
 
 /**

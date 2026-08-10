@@ -238,10 +238,26 @@ pub(crate) async fn finish_login(
     headers: &HeaderMap,
     user_id: uuid::Uuid,
 ) -> Result<Response> {
+    finish_login_to(st, headers, user_id, "/app").await
+}
+
+/// Variante bornée à un chemin interne construit par le serveur. Elle sert au relais
+/// d'onboarding : après le magic link, on réclame le brouillon au lieu d'atterrir au dashboard.
+pub(crate) async fn finish_login_to(
+    st: &AppState,
+    headers: &HeaderMap,
+    user_id: uuid::Uuid,
+    path: &str,
+) -> Result<Response> {
     let sid = session::create_session(&st.db, user_id, headers, &st.cfg.ip_salt).await?;
     let secure = session::secure(&st.cfg);
+    let path = if path.starts_with('/') && !path.starts_with("//") {
+        path
+    } else {
+        "/app"
+    };
     Ok(redirect(
-        &format!("{}/app", st.cfg.app_url),
+        &format!("{}{path}", st.cfg.app_url),
         [
             session::set_cookie(
                 &session::cookie_name(&st.cfg, session::SESSION_COOKIE),

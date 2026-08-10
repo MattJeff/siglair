@@ -31,6 +31,8 @@ fn allow(key: String) -> bool {
 #[derive(Deserialize)]
 pub struct MagicRequest {
     email: String,
+    #[serde(default)]
+    handoff: Option<String>,
 }
 
 /// Toujours 204 : une 404 sur adresse inconnue transformerait l'endpoint en oracle
@@ -66,7 +68,19 @@ pub async fn request(
     .await?;
 
     // Le lien clair n'existe qu'ici et dans l'e-mail : la base ne stocke que son sha256.
-    let link = format!("{}/api/auth/magic/consume?token={token}", st.cfg.app_url);
+    let handoff = body
+        .handoff
+        .as_deref()
+        .filter(|value| crate::ai::handoff::valid(&st, value));
+    let mut params = vec![("token", token.as_str())];
+    if let Some(value) = handoff {
+        params.push(("handoff", value));
+    }
+    let link = format!(
+        "{}/api/auth/magic/consume?{}",
+        st.cfg.app_url,
+        auth::qs(&params)
+    );
     email::send_magic_link(&st, &addr, &link, TTL_MINUTES).await?;
 
     Ok(StatusCode::NO_CONTENT)
@@ -75,6 +89,7 @@ pub async fn request(
 #[derive(Deserialize)]
 pub struct ConsumeQuery {
     token: String,
+    handoff: Option<String>,
 }
 
 pub async fn consume(
@@ -100,7 +115,13 @@ pub async fn consume(
 
     // Recevoir le lien prouve la possession de la boîte : l'adresse est vérifiée.
     let user_id = session::find_or_create_user(&st.db, &email, true, None, None, None).await?;
-    auth::finish_login(&st, &headers, user_id).await
+    let destination = q
+        .handoff
+        .as_deref()
+        .filter(|value| crate::ai::handoff::valid(&st, value))
+        .map(|value| format!("/onboarding?{}", auth::qs(&[("handoff", value)])))
+        .unwrap_or_else(|| "/app".into());
+    auth::finish_login_to(&st, &headers, user_id, &destination).await
 }
 
 /// Validation volontairement laxiste : le vrai test est que l'e-mail arrive.

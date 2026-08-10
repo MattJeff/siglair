@@ -90,6 +90,10 @@ export function planFeatures(plan: PlanInfo, aiProvider = true): PlanFeature[] {
         : 'Création guidée à partir de votre site',
       on: aiProvider ? ai === null || ai > 0 : true,
     },
+    {
+      label: 'Copilote IA dans l’éditeur',
+      on: aiProvider && plan.plan !== 'free',
+    },
     // La PORTÉE, pas `hosted_gif` : Free a désormais le GIF hébergé, et ce verrou-ci
     // affichait donc « Campagnes datées ✓ » sur un plan à qui l'API répond 402.
     // C'est exactement le même test que `require_paid_plan` dans routes/campaigns.rs.

@@ -76,6 +76,7 @@ describe('planFeatures', () => {
     // Free garde le GIF hébergé : restent éteintes les campagnes, les analytics, le
     // modèle d'équipe et l'export sans marque.
     expect(off).toEqual([
+      'Copilote IA dans l’éditeur',
       'Campagnes datées sur vos signatures',
       'Ouvertures et clics',
       'Modèle d’équipe et déploiement en masse',

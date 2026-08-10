@@ -159,7 +159,7 @@
 
 .tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 3px;
   padding: 8px;
   border-bottom: 1px solid var(--line);
@@ -226,6 +226,245 @@
 .noteWarn {
   border-color: color-mix(in srgb, var(--yellow) 34%, transparent);
   background: color-mix(in srgb, var(--yellow) 8%, var(--panel2));
+}
+
+/* ---------------- Copilote IA ---------------- */
+
+.aiPanel {
+  display: flex;
+  min-height: 100%;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.aiHead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.aiHead h3,
+.aiGate h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+}
+
+.aiHead span {
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.aiMark,
+.aiGateIcon {
+  display: grid;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--cyan) 35%, var(--line));
+  border-radius: var(--r);
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--blue) 14%, var(--panel2));
+}
+
+.aiMessages {
+  display: flex;
+  flex: 1;
+  min-height: 150px;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+}
+
+.aiWelcome {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  color: var(--ink-2);
+  background: var(--panel2);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aiWelcome svg {
+  color: var(--cyan);
+}
+
+.aiWelcome strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.aiUser,
+.aiReply {
+  max-width: 92%;
+  margin: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  font-size: 12px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.aiUser {
+  align-self: flex-end;
+  border-color: color-mix(in srgb, var(--blue) 36%, var(--line));
+  color: var(--text);
+  background: color-mix(in srgb, var(--blue) 16%, var(--panel2));
+}
+
+.aiReply {
+  align-self: flex-start;
+  color: var(--ink-2);
+  background: var(--panel2);
+}
+
+.aiThinking {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--ink-2);
+  font-size: 11px;
+}
+
+.aiThinking span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--cyan);
+  animation: ai-dot 900ms ease-in-out infinite alternate;
+}
+
+.aiThinking span:nth-child(2) {
+  animation-delay: 150ms;
+}
+
+.aiThinking span:nth-child(3) {
+  animation-delay: 300ms;
+  margin-right: 3px;
+}
+
+@keyframes ai-dot {
+  from { opacity: 0.35; transform: translateY(1px); }
+  to { opacity: 1; transform: translateY(-2px); }
+}
+
+.aiSuggestions {
+  display: grid;
+  gap: 6px;
+}
+
+.aiSuggestions button {
+  padding: 9px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink-2);
+  background: var(--panel2);
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.aiSuggestions button:hover {
+  border-color: color-mix(in srgb, var(--blue) 50%, var(--line));
+  color: var(--text);
+}
+
+.aiComposer {
+  position: relative;
+}
+
+.aiComposer textarea {
+  display: block;
+  width: 100%;
+  min-height: 92px;
+  resize: vertical;
+  padding: 10px 42px 10px 11px;
+  border: 1px solid var(--line2);
+  border-radius: var(--r);
+  color: var(--text);
+  background: var(--panel2);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.aiComposer textarea:focus {
+  border-color: var(--blue);
+  outline: 2px solid color-mix(in srgb, var(--blue) 18%, transparent);
+}
+
+.aiComposer button {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--on-primary);
+  background: var(--grad-primary);
+}
+
+.aiComposer button:disabled {
+  opacity: 0.4;
+}
+
+.aiNotice,
+.aiUndo {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.aiError {
+  color: color-mix(in srgb, var(--red) 75%, var(--text));
+}
+
+.aiUndo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-2);
+}
+
+.aiGate {
+  display: grid;
+  justify-items: start;
+  gap: 11px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--panel2);
+}
+
+.aiGate p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.aiUpgrade {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  padding: 0 13px;
+  border-radius: var(--r-sm);
+  color: var(--on-primary);
+  background: var(--grad-primary);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
 }
 
 .noteGood {

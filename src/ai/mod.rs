@@ -12,6 +12,7 @@
 pub mod brand;
 pub mod compose;
 pub mod generate;
+pub mod handoff;
 
 use std::collections::HashMap;
 use std::fmt;

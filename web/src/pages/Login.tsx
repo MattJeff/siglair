@@ -7,6 +7,7 @@ import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { PENDING_NEXT, apiMessage, safeNext } from '../components/app/helpers';
 import { oauthStartUrl, requestMagicLink } from '../lib/api';
+import { readHandoff } from '../onboarding/api';
 import { useSession } from '../lib/session';
 import s from './app.module.css';
 
@@ -52,7 +53,7 @@ export default function Login() {
     setSending(true);
     try {
       rememberNext();
-      await requestMagicLink(email.trim());
+      await requestMagicLink(email.trim(), readHandoff());
       setSent(true);
       setLeft(RESEND_SECONDS);
     } catch (err) {
