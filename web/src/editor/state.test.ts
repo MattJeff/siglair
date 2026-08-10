@@ -9,6 +9,7 @@ import {
   reducer,
   resolveTokens,
   selectedElement,
+  stripLegacyBranding,
 } from './state';
 import type { Action, EditorState } from './state';
 
@@ -19,6 +20,20 @@ const run = (state: EditorState, ...actions: Action[]): EditorState =>
 
 const withThreeElements = (): EditorState =>
   run(start(), { type: 'add', kind: 'text' }, { type: 'add', kind: 'button' }, { type: 'add', kind: 'badge' });
+
+describe('marque Free historique', () => {
+  it('retire uniquement les anciens libellés système', () => {
+    const built = run(start(), { type: 'add', kind: 'text' }, { type: 'add', kind: 'text' });
+    const doc = structuredClone(built.doc);
+    doc.elements[0].content = ' Power by siglair.com ';
+    doc.elements[1].content = 'Powered by notre équipe';
+
+    const cleaned = stripLegacyBranding(doc);
+    expect(cleaned.elements.map((element) => element.content)).toEqual(['Powered by notre équipe']);
+    expect(initialEditorState(doc).doc).toEqual(cleaned);
+    expect(reducer(start(), { type: 'replaceDoc', doc }).doc).toEqual(cleaned);
+  });
+});
 
 describe('ajout', () => {
   it('ajoute en fin de tableau (donc au premier plan) et sélectionne', () => {

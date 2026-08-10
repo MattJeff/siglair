@@ -18,6 +18,17 @@ const ANIM_CSS: &str = include_str!("anim.css");
 /// Polices système uniquement : Chromium n'a pas de webfont et Outlook les ignore.
 const FONT: &str = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,Helvetica,sans-serif";
 
+/// Les premières versions ajoutaient l'attribution comme un élément texte du document.
+/// Le badge est désormais rendu par le serveur : ignorer ces deux libellés exacts évite
+/// un doublon sur Free et laisse les anciens documents propres après un passage à Pro.
+fn is_legacy_branding_element(element: &Element) -> bool {
+    element.kind == ElementType::Text
+        && matches!(
+            element.content.trim().to_ascii_lowercase().as_str(),
+            "power by siglair.com" | "powered by siglair.com"
+        )
+}
+
 pub fn render_document(
     doc: &Doc,
     profile: &Profile,
@@ -46,6 +57,7 @@ fn hosted(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     let links: Vec<(&Element, String)> = doc
         .elements
         .iter()
+        .filter(|e| !is_legacy_branding_element(e))
         .filter(|e| !e.hidden)
         .filter_map(|e| link(e, profile, opts).map(|href| (e, href)))
         .collect();
@@ -53,7 +65,12 @@ fn hosted(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     let alt = doc
         .elements
         .iter()
-        .find(|e| !e.hidden && e.kind == ElementType::Text && !e.content.is_empty())
+        .find(|e| {
+            !e.hidden
+                && !is_legacy_branding_element(e)
+                && e.kind == ElementType::Text
+                && !e.content.is_empty()
+        })
         .map(|e| esc(&resolve_tokens(&e.content, profile)))
         .unwrap_or_else(|| "Signature".into());
 
@@ -116,7 +133,7 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     );
 
     for (i, el) in doc.elements.iter().enumerate() {
-        if el.hidden {
+        if el.hidden || is_legacy_branding_element(el) {
             continue;
         }
         let href = link(el, profile, opts);
@@ -202,7 +219,11 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
 
 /// Tables imbriquées, empilement vertical trié par y, aucune animation, styles inline.
 fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
-    let mut els: Vec<&Element> = doc.elements.iter().filter(|e| !e.hidden).collect();
+    let mut els: Vec<&Element> = doc
+        .elements
+        .iter()
+        .filter(|e| !e.hidden && !is_legacy_branding_element(e))
+        .collect();
     els.sort_by(|a, b| {
         a.y.partial_cmp(&b.y)
             .unwrap_or(std::cmp::Ordering::Equal)
@@ -572,7 +593,14 @@ mod tests {
 
     #[test]
     fn free_branding_is_server_enforced_in_every_export_mode() {
-        let d = doc_with(vec![el("aaa1111")]);
+        let d = doc_with(vec![
+            el("aaa1111"),
+            Element {
+                id: "bbb2222".into(),
+                content: "Power by siglair.com".into(),
+                ..Element::default()
+            },
+        ]);
         for mode in [RenderMode::Hosted, RenderMode::Freeform, RenderMode::Safe] {
             let mut branded = opts(Some("abcdefgh2345"));
             branded.branding = true;
@@ -581,12 +609,19 @@ mod tests {
                 free.contains("Powered by siglair.com"),
                 "le mode {mode:?} a perdu la marque Free"
             );
+            assert_eq!(
+                free.matches("Powered by siglair.com").count(),
+                1,
+                "le mode {mode:?} a doublé une ancienne marque"
+            );
+            assert!(!free.contains("Power by siglair.com"));
 
             let paid = render_document(&d, &Profile::new(), mode, &opts(Some("abcdefgh2345")));
             assert!(
                 !paid.contains("Powered by siglair.com"),
                 "le mode {mode:?} a marqué un plan payant"
             );
+            assert!(!paid.contains("Power by siglair.com"));
         }
     }
 

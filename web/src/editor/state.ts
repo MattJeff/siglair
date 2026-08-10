@@ -27,6 +27,20 @@ export function uid(taken: ReadonlySet<string> = new Set()): string {
 
 const idsOf = (doc: Doc): Set<string> => new Set(doc.elements.map((e) => e.id));
 
+/**
+ * Les anciennes signatures stockaient la marque Free dans le document. Elle est maintenant
+ * un calque système : retirer ces libellés exacts empêche les doublons et nettoie les comptes
+ * passés à Pro sans toucher aux autres textes de l'utilisateur.
+ */
+export function stripLegacyBranding(doc: Doc): Doc {
+  const elements = doc.elements.filter((element) => {
+    if (element.type !== 'text') return true;
+    const content = element.content.trim().toLowerCase();
+    return content !== 'power by siglair.com' && content !== 'powered by siglair.com';
+  });
+  return elements.length === doc.elements.length ? doc : { ...doc, elements };
+}
+
 /* ------------------------------------------------------------------ */
 /* Jetons de profil (§3.1)                                             */
 /* ------------------------------------------------------------------ */
@@ -247,7 +261,7 @@ export type Action =
   | { type: 'redo' };
 
 export const initialEditorState = (doc: Doc): EditorState => ({
-  doc,
+  doc: stripLegacyBranding(doc),
   selectedId: null,
   past: [],
   future: [],
@@ -371,7 +385,7 @@ export function reducer(state: EditorState, action: Action): EditorState {
       );
 
     case 'replaceDoc': {
-      const next = commit(state, action.doc);
+      const next = commit(state, stripLegacyBranding(action.doc));
       return clampSelection({ ...next, selectedId: null });
     }
 
