@@ -11,8 +11,9 @@ use anyhow::Result;
 use siglair::{config::Config, db, render::job, storage::FsStorage, AppState};
 use tokio::sync::watch;
 
-/// Chromium consomme beaucoup de mémoire : quatre instances sur une petite VM la tuent.
-const DEFAULT_CONCURRENCY: usize = 2;
+/// Sur le CX23, deux captures Chromium 2x en parallèle se ralentissent jusqu'au timeout.
+/// La concurrence reste configurable pour une machine plus grande.
+const DEFAULT_CONCURRENCY: usize = 1;
 const IDLE_SLEEP: Duration = Duration::from_secs(2);
 
 #[tokio::main]

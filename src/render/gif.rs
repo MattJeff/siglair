@@ -34,8 +34,10 @@ const MAX_FRAMES: u32 = 120;
 /// Gmail coupe autour de 1–2 Mo, les passerelles d'entreprise sont plus strictes : au-delà,
 /// le GIF n'est pas « moins beau », il est invisible.
 const MAX_GIF_BYTES: usize = 1_000_000;
-/// Contrat §8 : timeout dur sur l'ensemble du job, Chromium compris.
-const JOB_TIMEOUT: Duration = Duration::from_secs(30);
+/// Une signature de 6 s à 12 fps demande 72 captures haute densité puis un encodage global.
+/// Trente secondes était inférieur au temps normal du CX23 et transformait un rendu sain en
+/// trois échecs successifs. Le plafond reste dur pour tuer tout Chromium réellement bloqué.
+const JOB_TIMEOUT: Duration = Duration::from_secs(90);
 
 /// Média référencé par le document, déjà lu depuis le `Storage`.
 pub struct Asset {

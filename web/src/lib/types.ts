@@ -254,14 +254,26 @@ export interface Render {
 
 /** GET /api/signatures/{id}/status */
 export interface SignatureStatus {
-  job: { status: JobStatus; error: string | null } | null;
+  job: {
+    id: string;
+    status: JobStatus;
+    error: string | null;
+    attempts: number;
+    created_at: string;
+    finished_at: string | null;
+  } | null;
   render: Render | null;
+  slug?: string | null;
+  urls?: { gif: string; png: string } | null;
 }
 
 /** POST /api/signatures/{id}/publish */
 export interface PublishResult {
   slug: string;
-  job_id: string;
+  job_id: string | null;
+  render_id: string | null;
+  gif_url: string;
+  png_url: string;
 }
 
 /* ------------------------------------------------------------------ */
