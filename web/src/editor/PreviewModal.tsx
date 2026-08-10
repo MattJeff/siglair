@@ -30,6 +30,14 @@ type ClientId = (typeof CLIENTS)[number]['id'];
 /** Injectée dans l'iframe pour simuler le figeage d'Outlook, sans toucher au HTML du serveur. */
 const FREEZE = '<style>*{animation:none !important;transition:none !important}</style>';
 
+/**
+ * `srcDoc` reçoit un fragment HTML, donc le navigateur lui applique sinon sa marge de body de
+ * 8 px. L'iframe ayant exactement la taille du canvas, ces 8 px amputent le bord droit et le
+ * bas de la signature. Le reset appartient à l'enveloppe d'aperçu, pas au HTML exporté.
+ */
+const FRAME_RESET =
+  '<style>html,body{margin:0!important;padding:0!important;overflow:hidden!important;background:transparent!important}</style>';
+
 interface PreviewModalProps {
   open: boolean;
   onClose: () => void;
@@ -133,7 +141,7 @@ export function PreviewModal({ open, onClose, doc, profile, user }: PreviewModal
                 width={doc.canvas.width}
                 height={doc.canvas.height}
                 style={{ width: doc.canvas.width, height: doc.canvas.height }}
-                srcDoc={client === 'outlook-legacy' ? html + FREEZE : html}
+                srcDoc={`${FRAME_RESET}${html}${client === 'outlook-legacy' ? FREEZE : ''}`}
               />
             </div>
           </div>
