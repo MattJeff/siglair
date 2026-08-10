@@ -7,7 +7,8 @@ import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { AppShell } from '../components/app/AppShell';
 import { apiMessage, formatDay, formatRetention } from '../components/app/helpers';
-import { getAnalytics, getSignature, updateOrg } from '../lib/api';
+import { getAnalytics as getSignatureAnalytics, getSignature, updateOrg } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import { useSession } from '../lib/session';
 import type { AnalyticsPoint, AnalyticsSeries } from '../lib/types';
 import s from './app.module.css';
@@ -57,9 +58,13 @@ export default function Analytics() {
   }, [id]);
 
   useEffect(() => {
+    if (id) getAnalytics().track('analytics_viewed', { signature_id: id });
+  }, [id]);
+
+  useEffect(() => {
     if (!allowed) return;
     let alive = true;
-    getAnalytics(id)
+    getSignatureAnalytics(id)
       .then((r) => {
         if (alive) setSeries(r);
       })

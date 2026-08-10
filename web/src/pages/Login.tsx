@@ -7,6 +7,8 @@ import { Input } from '../components/Input';
 import { Spinner } from '../components/Spinner';
 import { PENDING_NEXT, apiMessage, safeNext } from '../components/app/helpers';
 import { oauthStartUrl, requestMagicLink } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
+import { captureRef, withRef } from '../lib/referral';
 import { readHandoff } from '../onboarding/api';
 import { useSession } from '../lib/session';
 import s from './app.module.css';
@@ -18,6 +20,10 @@ export default function Login() {
   const { status, features } = useSession();
   const [params] = useSearchParams();
   const next = safeNext(params.get('next'));
+
+  // Contrat §11.3 : arrivée directe sur /login?ref=… ou relais posé par la landing. Figé au
+  // premier rendu pour que les liens OAuth le portent dès leur affichage. Aucun cookie.
+  const [refCode] = useState(() => captureRef(params.get('ref')));
 
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
@@ -51,12 +57,17 @@ export default function Login() {
     if (sending) return;
     setError('');
     setSending(true);
+    getAnalytics().track('signup_started', { method: 'magic_link' });
     try {
       rememberNext();
-      await requestMagicLink(email.trim(), readHandoff());
+      await requestMagicLink(email.trim(), readHandoff(), refCode);
       setSent(true);
       setLeft(RESEND_SECONDS);
     } catch (err) {
+      getAnalytics().track('signup_failed', {
+        method: 'magic_link',
+        error_code: 'magic_link_request_failed',
+      });
       setError(apiMessage(err));
     } finally {
       setSending(false);
@@ -158,12 +169,26 @@ export default function Login() {
 
             {/* Un bouton vers un fournisseur non configuré renverrait une 500 : on le masque. */}
             {features?.google && (
-              <a className={s.oauth} href={oauthStartUrl('google')} onClick={rememberNext}>
+              <a
+                className={s.oauth}
+                href={withRef(oauthStartUrl('google'), refCode)}
+                onClick={() => {
+                  rememberNext();
+                  getAnalytics().track('signup_started', { method: 'google' });
+                }}
+              >
                 Continuer avec Google
               </a>
             )}
             {features?.apple && (
-              <a className={s.oauth} href={oauthStartUrl('apple')} onClick={rememberNext}>
+              <a
+                className={s.oauth}
+                href={withRef(oauthStartUrl('apple'), refCode)}
+                onClick={() => {
+                  rememberNext();
+                  getAnalytics().track('signup_started', { method: 'apple' });
+                }}
+              >
                 Continuer avec Apple
               </a>
             )}

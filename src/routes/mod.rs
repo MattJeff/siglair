@@ -8,11 +8,16 @@
 pub mod analytics;
 pub mod assets;
 pub mod campaigns;
+pub mod events;
+pub mod growth;
 pub mod me;
 pub mod meta;
 pub mod onboarding;
 pub mod orgs;
 pub mod public;
+// `/r/{code}` est publique (§5.1) : déclarée ici, mais montée à la racine par `bin/api.rs`,
+// pas sous `/api` — un destinataire d'e-mail n'a pas de session.
+pub mod referral;
 pub mod signatures;
 pub mod thumb;
 
@@ -35,6 +40,8 @@ pub fn router() -> Router<AppState> {
         .merge(orgs::router())
         .merge(campaigns::router())
         .merge(me::router())
+        .merge(events::router())
+        .merge(growth::router())
         // `analyze` est publique (§6bis.6) : elle ne prend pas d'extracteur `CurrentUser`,
         // c'est tout ce qu'il faut ici — l'authentification n'est pas une couche, c'est un
         // extracteur. `generate` et `pick` en prennent un, donc exigent la session.
@@ -92,6 +99,7 @@ mod tests {
     fn le_routeur_complet_se_monte() {
         let _ = Router::<AppState>::new()
             .merge(super::public::router())
+            .merge(super::referral::router())
             .merge(super::meta::router())
             .merge(crate::auth::router())
             .merge(crate::billing::webhook_router())

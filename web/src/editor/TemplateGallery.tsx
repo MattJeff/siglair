@@ -10,6 +10,7 @@ import { TEMPLATES, docFromTemplate } from './templates';
 import type { Template } from './templates';
 import type { Action } from './state';
 import { FREE_BRANDING_LABEL } from './BrandingUpsell';
+import { getAnalytics } from '../lib/analytics';
 import { resolveTokens } from './state';
 import s from './editor.module.css';
 
@@ -106,7 +107,15 @@ export function TemplatePreview({ template, branding = false }: { template: Temp
   );
 }
 
-export function TemplateGallery({ dispatch, branding }: { dispatch: Dispatch<Action>; branding: boolean }) {
+export function TemplateGallery({
+  dispatch,
+  branding,
+  signatureId,
+}: {
+  dispatch: Dispatch<Action>;
+  branding: boolean;
+  signatureId?: string;
+}) {
   return (
     <div className={s.templateGrid}>
       {TEMPLATES.map((template) => (
@@ -114,7 +123,13 @@ export function TemplateGallery({ dispatch, branding }: { dispatch: Dispatch<Act
           key={template.id}
           type="button"
           className={s.template}
-          onClick={() => dispatch({ type: 'replaceDoc', doc: docFromTemplate(template) })}
+          onClick={() => {
+            getAnalytics().track('template_selected', {
+              ...(signatureId ? { signature_id: signatureId } : {}),
+              template_id: template.id,
+            });
+            dispatch({ type: 'replaceDoc', doc: docFromTemplate(template) });
+          }}
         >
           <TemplatePreview template={template} branding={branding} />
           <span className={s.templateMeta}>

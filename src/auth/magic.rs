@@ -33,6 +33,9 @@ pub struct MagicRequest {
     email: String,
     #[serde(default)]
     handoff: Option<String>,
+    /// Code de parrainage (§11.3). Il voyage dans l'URL du lien, pas dans un cookie.
+    #[serde(default, rename = "ref")]
+    referral: Option<String>,
 }
 
 /// Toujours 204 : une 404 sur adresse inconnue transformerait l'endpoint en oracle
@@ -76,6 +79,11 @@ pub async fn request(
     if let Some(value) = handoff {
         params.push(("handoff", value));
     }
+    // §11.3 : le code traverse la connexion dans l'URL et n'est inscrit qu'à la création
+    // du compte. Sans ce relais, l'attribution s'arrête à la boîte mail.
+    if let Some(value) = body.referral.as_deref().filter(|v| !v.trim().is_empty()) {
+        params.push(("ref", value));
+    }
     let link = format!(
         "{}/api/auth/magic/consume?{}",
         st.cfg.app_url,
@@ -90,6 +98,8 @@ pub async fn request(
 pub struct ConsumeQuery {
     token: String,
     handoff: Option<String>,
+    #[serde(rename = "ref")]
+    referral: Option<String>,
 }
 
 pub async fn consume(
@@ -114,7 +124,16 @@ pub async fn consume(
     };
 
     // Recevoir le lien prouve la possession de la boîte : l'adresse est vérifiée.
-    let user_id = session::find_or_create_user(&st.db, &email, true, None, None, None).await?;
+    let user_id = session::find_or_create_user_referred(
+        &st.db,
+        &email,
+        true,
+        None,
+        None,
+        None,
+        q.referral.as_deref(),
+    )
+    .await?;
     let destination = q
         .handoff
         .as_deref()

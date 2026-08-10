@@ -8,6 +8,7 @@ import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { ApiError, exportSignature } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import type { Doc, ExportMode } from '../lib/types';
 import { Modal } from '../components/Modal';
 import { compatibility } from './state';
@@ -42,9 +43,17 @@ export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, br
     async (next: ExportMode) => {
       setLoading(true);
       setError(null);
+      getAnalytics().track('export_started', {
+        signature_id: signatureId,
+        export_format: next,
+      });
       try {
         const result = await exportSignature(signatureId, next);
         setHtml(result.html);
+        getAnalytics().track('export_completed', {
+          signature_id: signatureId,
+          export_format: next,
+        });
       } catch (cause) {
         setHtml('');
         setError(cause instanceof ApiError ? cause.message : "L'export n'a pas pu être généré.");
@@ -58,12 +67,28 @@ export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, br
   const loadRef = useRef(load);
   loadRef.current = load;
   useEffect(() => {
-    if (open) void loadRef.current(mode);
-  }, [open, mode]);
+    if (open) {
+      getAnalytics().track('install_instructions_viewed', {
+        signature_id: signatureId,
+        client: 'unknown',
+      });
+      void loadRef.current(mode);
+    }
+  }, [open, mode, signatureId]);
 
   async function copy() {
+    getAnalytics().track('install_started', {
+      signature_id: signatureId,
+      client: 'unknown',
+      method: 'copy_html',
+    });
     try {
       await navigator.clipboard.writeText(html);
+      getAnalytics().track('install_completed', {
+        signature_id: signatureId,
+        client: 'unknown',
+        method: 'copy_html',
+      });
       toast('HTML copié dans le presse-papier', 'success');
     } catch {
       toast('Copie impossible : sélectionnez le code et copiez-le à la main.', 'error');
@@ -71,11 +96,21 @@ export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, br
   }
 
   function download() {
+    getAnalytics().track('install_started', {
+      signature_id: signatureId,
+      client: 'unknown',
+      method: 'manual',
+    });
     const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'signature.html';
     link.click();
+    getAnalytics().track('install_completed', {
+      signature_id: signatureId,
+      client: 'unknown',
+      method: 'manual',
+    });
     URL.revokeObjectURL(url);
   }
 

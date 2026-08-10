@@ -27,7 +27,10 @@ const ISSUERS: [&str; 2] = ["https://accounts.google.com", "accounts.google.com"
 
 static JWKS: JwksCache = Mutex::new(None);
 
-pub async fn start(State(st): State<AppState>) -> Result<Response> {
+pub async fn start(
+    State(st): State<AppState>,
+    Query(q): Query<auth::StartQuery>,
+) -> Result<Response> {
     let g = st.cfg.google.as_ref().ok_or_else(|| {
         AppError::validation("La connexion avec Google n'est pas disponible sur cette instance.")
     })?;
@@ -37,6 +40,9 @@ pub async fn start(State(st): State<AppState>) -> Result<Response> {
         verifier: util::random_token(),
         nonce: util::random_token(),
         exp: chrono::Utc::now().timestamp() + session::OAUTH_MAX_AGE,
+        // §11.3 : le code repart avec l'utilisateur chez Google et revient par le cookie
+        // d'état déjà obligatoire. Sans ça l'attribution se perd exactement ici.
+        referral: q.referral,
     };
     let redirect_uri = format!("{}/api/auth/google/callback", st.cfg.app_url);
     let challenge = auth::pkce_challenge(&s.verifier);
@@ -152,13 +158,14 @@ async fn exchange(st: &AppState, headers: &HeaderMap, q: CallbackQuery) -> Resul
         AppError::validation("Votre adresse Google n'est pas vérifiée : impossible de continuer.")
     })?;
 
-    session::find_or_create_user(
+    session::find_or_create_user_referred(
         &st.db,
         &email,
         true,
         claims.name.as_deref(),
         claims.picture.as_deref(),
         Some(("google", claims.sub.as_str())),
+        saved.referral.as_deref(),
     )
     .await
 }

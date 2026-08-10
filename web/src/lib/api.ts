@@ -12,7 +12,9 @@ import type {
   Brand,
   Config,
   Doc,
+  Funnel,
   GenerateResult,
+  GrowthReport,
   OnboardingClaimResult,
   OnboardingDraftResult,
   ExportMode,
@@ -24,6 +26,7 @@ import type {
   PublishResult,
   Role,
   Signature,
+  SignatureFunnel,
   SignatureKind,
   SignatureStatus,
   Subscription,
@@ -107,10 +110,12 @@ export const getConfig = (): Promise<Config> => api<Config>('/api/config', { red
 export const requestMagicLink = (
   email: string,
   handoff?: string | null,
+  /** Code de parrainage (§11.3) : il traverse la connexion dans l'URL, jamais un cookie. */
+  ref?: string | null,
 ): Promise<void> =>
   api<void>('/api/auth/magic/request', {
     method: 'POST',
-    body: json({ email, handoff: handoff || undefined }),
+    body: json({ email, handoff: handoff || undefined, ref: ref || undefined }),
     redirectOn401: false,
   });
 
@@ -211,6 +216,62 @@ export function normalizeAnalytics(value: AnalyticsWire): AnalyticsSeries {
 
 export const getAnalytics = async (id: string): Promise<AnalyticsSeries> =>
   normalizeAnalytics(await api<AnalyticsWire>(`/api/signatures/${id}/analytics`));
+
+/* ---------------- Croissance (§11.4) ---------------- */
+
+/** Ce que le serveur peut envoyer. Tout est facultatif : rien ici n'est supposé présent. */
+type GrowthWire = {
+  days?: number;
+  /** Les quatre agrégats, soit sous `funnel` (`growth::Funnel`), soit à plat. */
+  funnel?: Partial<Funnel>;
+  signatures?: unknown;
+  by_signature?: unknown;
+} & Partial<Funnel>;
+
+const int = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.trunc(v) : 0);
+const str = (v: unknown): string => (typeof v === 'string' ? v : '');
+
+const funnelOf = (row: Record<string, unknown>): Funnel => ({
+  views: int(row.views),
+  badge_clicks: int(row.badge_clicks),
+  signups: int(row.signups),
+  paid: int(row.paid),
+});
+
+/** Même parade que `normalizeAnalytics` : web et API se déploient séparément. */
+export function normalizeGrowth(value: GrowthWire, fallbackDays: number): GrowthReport {
+  const list = Array.isArray(value.signatures)
+    ? value.signatures
+    : Array.isArray(value.by_signature)
+      ? value.by_signature
+      : [];
+
+  const signatures: SignatureFunnel[] = list
+    .filter((row): row is Record<string, unknown> => typeof row === 'object' && row !== null)
+    .map((row) => ({
+      id: str(row.id) || str(row.signature_id),
+      name: str(row.name) || 'Signature sans nom',
+      installed: row.installed === true,
+      ...funnelOf(row),
+    }))
+    .filter((row) => row.id !== '')
+    // La question posée à cet écran est « laquelle rapporte des comptes », pas « laquelle
+    // est la plus vue » : le tri suit les conversions, jamais les ouvertures.
+    .sort((a, b) => b.signups - a.signups || b.badge_clicks - a.badge_clicks || b.views - a.views);
+
+  return {
+    days: int(value.days) || fallbackDays,
+    funnel: funnelOf((value.funnel ?? value) as Record<string, unknown>),
+    signatures,
+  };
+}
+
+/**
+ * `GET /api/growth?days=N`. Une erreur remonte (§5.4) : afficher « 0 vue, 0 clic » sur une
+ * panne ferait conclure à l'utilisateur que le canal viral est mort.
+ */
+export const getGrowth = async (days: number): Promise<GrowthReport> =>
+  normalizeGrowth(await api<GrowthWire>(`/api/growth?days=${days}`), days);
 
 /** Aperçu éditeur : le HTML est produit par le serveur, jamais reconstruit ici (§2). */
 export const previewDoc = (doc: Doc, profile: Profile): Promise<{ html: string }> =>

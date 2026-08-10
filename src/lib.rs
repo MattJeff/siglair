@@ -1,10 +1,12 @@
 //! Siglair — bibliothèque partagée par les binaires `api` et `renderer`.
 //! Contrat : docs/CONTRACT.md.
 
+pub mod analytics;
 pub mod config;
 pub mod db;
 pub mod doc;
 pub mod error;
+pub mod growth;
 pub mod plans;
 pub mod render;
 pub mod storage;

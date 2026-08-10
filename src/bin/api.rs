@@ -48,6 +48,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .merge(routes::public::router()) // /s /c /f /health /ready
+        .merge(routes::referral::router()) // /r/{code} — badge, hors session (§11.2)
         .merge(routes::meta::router()) // /api/config
         .merge(auth::router()) // /api/auth/* /api/me
         .merge(billing::webhook_router()) // /api/stripe/webhook — hors session
@@ -148,6 +149,8 @@ async fn maintenance(state: AppState) {
     campaigns.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut billing_tick = tokio::time::interval(Duration::from_secs(60 * 60));
     billing_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut analytics_tick = tokio::time::interval(Duration::from_secs(24 * 60 * 60));
+    analytics_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
@@ -159,6 +162,16 @@ async fn maintenance(state: AppState) {
             _ = billing_tick.tick() => {
                 if let Err(error) = billing::lifecycle::sweep(&state).await {
                     tracing::error!(?error, "balayage de facturation impossible");
+                }
+            },
+            _ = analytics_tick.tick() => {
+                match sqlx::query_scalar::<_, i64>("SELECT purge_product_events()")
+                    .fetch_one(&state.db)
+                    .await
+                {
+                    Ok(count) if count > 0 => tracing::info!(events = count, "analytics produit purgés"),
+                    Ok(_) => {}
+                    Err(error) => tracing::error!(?error, "purge analytics impossible"),
                 }
             },
         }

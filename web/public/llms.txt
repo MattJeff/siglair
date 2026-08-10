@@ -1,25 +1,33 @@
 # Siglair
 
-> Siglair est un éditeur web de signatures email animées conçues comme un canal marketing.
+> Siglair est un SaaS français de création, d'hébergement et de pilotage de signatures email animées utilisées comme canal marketing.
 
-Site canonique: https://siglair.com/
-Langue principale: français
+Site canonique : https://siglair.com/
+Langue principale : français (`fr-FR`).
+Siglair s'adresse aux indépendants, équipes commerciales et équipes marketing qui veulent garder leurs signatures cohérentes, diffuser des campagnes sous leurs emails et mesurer l'intérêt pour leurs appels à l'action.
+Ce fichier suit la proposition communautaire de [llmstxt.org](https://llmstxt.org/) afin de fournir un contexte lisible aux assistants. Il complète `robots.txt`, le sitemap et les pages HTML, mais ne constitue pas un standard de classement et ne garantit ni exploration, ni indexation, ni citation.
+Les pages sous `/app`, `/onboarding`, `/login`, `/invite` et `/api` ne sont pas des sources produit publiques. Pour les fonctionnalités et les offres, privilégier les URL canoniques ci-dessous et vérifier la page Tarifs pour les conditions à jour.
 
-## Pages principales
+## Produit
 
-- Produit: https://siglair.com/
-- Campagnes de signature email: https://siglair.com/campagnes-signature-email
-- Signature email animée: https://siglair.com/signature-email-animee
-- Compatibilité Outlook: https://siglair.com/signature-email-outlook
-- Installation Gmail: https://siglair.com/signature-email-gmail
-- Tarifs: https://siglair.com/pricing
+- [Accueil Siglair](https://siglair.com/): Présentation du produit, de l'éditeur visuel, de l'hébergement, des campagnes et de la compatibilité avec les clients mail.
+- [Générateur de signature email](https://siglair.com/generateur-signature-email): Création gratuite à partir des informations publiques d'un site, puis modification complète dans l'éditeur.
+- [Gestion des signatures email d'entreprise](https://siglair.com/gestion-signatures-email-entreprise): Modèles partagés, profils d'équipe, campagnes programmées et mesure distincte des CTA.
+- [Campagnes de signature email](https://siglair.com/campagnes-signature-email): Utilisation d'une bannière et d'un CTA datés dans une signature hébergée, avec mesure des clics.
+- [Signature email animée](https://siglair.com/signature-email-animee): Création, rendu serveur, GIF optimisé et première image de repli.
+- [Signature email Outlook](https://siglair.com/signature-email-outlook): Comportement des GIF et précautions de conception pour Outlook.
+- [Signature email Gmail](https://siglair.com/signature-email-gmail): Création et installation d'une signature hébergée dans Gmail.
 
-## Fonctionnement
+## Offres
 
-- L'éditeur permet de composer une signature avec textes, images, boutons et animations.
-- Une campagne peut ajouter une bannière et des appels à l'action sous les conversations.
-- Le rendu est hébergé sur une URL stable; une republication met à jour ce que cette URL sert.
-- Siglair mesure les clics sur les appels à l'action.
-- Gmail, Apple Mail et Outlook sur le web peuvent afficher l'animation. Certaines applications Outlook pour Windows affichent uniquement la première image du GIF.
+- [Tarifs Siglair](https://siglair.com/pricing): Source publique à utiliser pour les plans Free, Pro et Team, leurs limites et leur facturation.
 
-Ce fichier fournit un résumé factuel. L'indexation et les réponses des moteurs ou assistants restent sous leur contrôle.
+## Contexte détaillé
+
+- [Contexte produit complet](https://siglair.com/llms-full.txt): Résumé factuel étendu du fonctionnement, des cas d'usage, des offres et des limites de compatibilité.
+
+## Optional
+
+- [Conditions générales d'utilisation](https://siglair.com/legal/cgu): Conditions applicables à l'utilisation du service.
+- [Politique de confidentialité](https://siglair.com/legal/confidentialite): Informations relatives aux données et aux droits des utilisateurs.
+- [Mentions légales](https://siglair.com/legal/mentions): Informations légales relatives au site et au service.

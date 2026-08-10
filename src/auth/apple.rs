@@ -10,7 +10,12 @@
 use std::sync::Mutex;
 
 use anyhow::anyhow;
-use axum::{extract::State, http::HeaderMap, response::Response, Form};
+use axum::{
+    extract::{Query, State},
+    http::HeaderMap,
+    response::Response,
+    Form,
+};
 use jsonwebtoken::{Algorithm, EncodingKey, Header};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -32,7 +37,10 @@ const SECRET_TTL: i64 = 30 * 24 * 3600;
 
 static JWKS: JwksCache = Mutex::new(None);
 
-pub async fn start(State(st): State<AppState>) -> Result<Response> {
+pub async fn start(
+    State(st): State<AppState>,
+    Query(q): Query<auth::StartQuery>,
+) -> Result<Response> {
     let a = st.cfg.apple.as_ref().ok_or_else(|| {
         AppError::validation("La connexion avec Apple n'est pas disponible sur cette instance.")
     })?;
@@ -42,6 +50,8 @@ pub async fn start(State(st): State<AppState>) -> Result<Response> {
         verifier: util::random_token(),
         nonce: util::random_token(),
         exp: chrono::Utc::now().timestamp() + session::OAUTH_MAX_AGE,
+        // §11.3 : l'attribution voyage dans le cookie d'état, jamais dans un cookie à elle.
+        referral: q.referral,
     };
     let redirect_uri = format!("{}/api/auth/apple/callback", st.cfg.app_url);
     let challenge = auth::pkce_challenge(&s.verifier);
@@ -194,13 +204,14 @@ async fn exchange(st: &AppState, headers: &HeaderMap, form: AppleCallback) -> Re
         })
         .filter(|n| !n.is_empty());
 
-    session::find_or_create_user(
+    session::find_or_create_user_referred(
         &st.db,
         &email,
         verified,
         name.as_deref(),
         None,
         Some(("apple", claims.sub.as_str())),
+        saved.referral.as_deref(),
     )
     .await
 }

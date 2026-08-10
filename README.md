@@ -3,7 +3,7 @@
 Signatures email animées hébergées.
 
 L'utilisateur compose sa signature dans un éditeur, publie, et colle dans Gmail ou Outlook
-un simple `<img src="https://siglair.app/s/{slug}.gif">`. Le serveur rend le GIF, le sert,
+un simple `<img src="https://siglair.com/s/{slug}.gif">`. Le serveur rend le GIF, le sert,
 compte les ouvertures, et redirige les clics en les comptant. Changer sa signature = republier,
 sans jamais recoller de HTML dans le client mail.
 
@@ -84,11 +84,11 @@ Dans `.env` :
 ```
 SIGLAIR_SECRET_KEY=<openssl rand -base64 32>
 SIGLAIR_IP_SALT=<openssl rand -hex 16>
-APP_URL=https://siglair.app
-PUBLIC_URL=https://siglair.app
-SITE_ADDRESS=siglair.app
-# si la base est Supabase au lieu du conteneur local `db` :
-SIGLAIR_DATABASE_URL=postgres://postgres.jxyxysoknqbsnbjyyttz:<mot-de-passe>@<hote-supabase>:5432/postgres?sslmode=require
+APP_URL=https://siglair.com
+PUBLIC_URL=https://siglair.com
+SITE_ADDRESS=siglair.com
+# En production Docker, la base PostgreSQL est le service local `db` du compose.
+SIGLAIR_DATABASE_URL=postgres://siglair:<mot-de-passe>@db:5432/siglair
 ```
 
 Faites pointer l'enregistrement DNS `A` du domaine vers l'IP de la VM, ouvrez 80 et 443,
@@ -96,7 +96,7 @@ puis :
 
 ```bash
 docker compose --profile proxy up -d --build
-API=https://siglair.app scripts/smoke.sh
+API=https://siglair.com scripts/smoke.sh
 ```
 
 Caddy obtient le certificat Let's Encrypt tout seul au premier appel — c'est pour ça que le
@@ -105,11 +105,7 @@ l'API, et tout le reste vers le SPA.
 
 Ensuite seulement, revenez brancher les clés tierces (`.env`, puis
 `docker compose up -d`), y compris l'URL du webhook Stripe qui doit pointer vers
-`https://siglair.app/api/stripe/webhook`.
-
-Pour Supabase, prenez la connexion directe si la VM supporte IPv6, ou le pooler partagé en
-mode session si elle est IPv4-only. N'utilisez pas le pooler transactionnel : SQLx prépare
-ses requêtes, et ce mode ne supporte pas les prepared statements.
+`https://siglair.com/api/stripe/webhook`.
 
 Sauvegardes : le volume `siglair_pgdata` (la base) et `siglair_storage` (les GIF rendus).
 Le second est reconstructible en republiant, le premier ne l'est pas.

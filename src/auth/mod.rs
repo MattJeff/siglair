@@ -304,6 +304,25 @@ pub(crate) struct OauthState {
     /// Le `Max-Age` du cookie est un souhait adressé au navigateur ; l'expiration réelle
     /// se vérifie ici.
     pub exp: i64,
+    /// Code de parrainage (§11.3), le temps de l'aller-retour chez le fournisseur.
+    ///
+    /// Il voyage dans ce cookie-ci et pas dans un nouveau : `sig_oauth` existe déjà, il est
+    /// strictement nécessaire au flux (il porte `state` et le `verifier` PKCE), il dure dix
+    /// minutes et il n'est posé que sur quelqu'un qui vient de cliquer « Continuer avec… ».
+    /// Ce n'est pas le cookie interdit par §11.3 — celui-là serait posé sur le destinataire
+    /// de l'e-mail, qui n'a rien demandé. Aucun cookie nouveau n'est créé.
+    ///
+    /// `default` : les cookies déjà en vol au déploiement n'ont pas ce champ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub referral: Option<String>,
+}
+
+/// Query string de `/api/auth/{provider}/start`. Un seul champ, et il est facultatif :
+/// un départ sans `?ref=` reste un départ valide.
+#[derive(Deserialize, Default)]
+pub struct StartQuery {
+    #[serde(default, rename = "ref")]
+    pub referral: Option<String>,
 }
 
 pub(crate) fn seal(secret: &[u8], s: &OauthState) -> Result<String> {
@@ -447,9 +466,15 @@ mod tests {
             verifier: "ver".into(),
             nonce: "no".into(),
             exp: chrono::Utc::now().timestamp() + 60,
+            referral: Some("abcdefgh2345".into()),
         };
         let sealed = seal(secret, &s).unwrap();
         assert_eq!(open(secret, &sealed).unwrap().verifier, "ver");
+        // §11.3 : le code de parrainage doit survivre à l'aller-retour chez le fournisseur.
+        assert_eq!(
+            open(secret, &sealed).unwrap().referral.as_deref(),
+            Some("abcdefgh2345")
+        );
         assert!(open(b"un autre secret de 32 octets....", &sealed).is_none());
 
         let (payload, tag) = sealed.split_once('.').unwrap();

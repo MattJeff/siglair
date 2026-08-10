@@ -13,6 +13,7 @@ use axum::{
 use chrono::Utc;
 use hmac::{Hmac, Mac};
 use serde::Deserialize;
+use serde_json::json;
 use sha2::Sha256;
 use sqlx::PgPool;
 use subtle::ConstantTimeEq;
@@ -20,7 +21,11 @@ use uuid::Uuid;
 
 use super::lifecycle;
 use super::stripe::{plan_for_price, Stripe, Subscription};
-use crate::{config::StripeConfig, AppState};
+use crate::{
+    config::StripeConfig,
+    growth::{self, GrowthEvent, Visitor},
+    AppState,
+};
 
 /// Tolérance de dérive d'horloge (contrat §8). Au-delà, l'événement est un rejeu.
 const TOLERANCE_SECS: i64 = 300;
@@ -385,6 +390,21 @@ async fn apply_subscription(
         "active" | "trialing" | "past_due" | "unpaid"
     );
 
+    // État d'avant, pour ne compter l'abonnement qu'au moment où il DEVIENT actif (§11.1).
+    // Stripe envoie un `customer.subscription.updated` à chaque renouvellement, à chaque
+    // changement de sièges et à chaque changement de carte : sans cette comparaison, un
+    // client fidèle compterait comme une conversion tous les mois.
+    //
+    // `.ok().flatten()` et pas `?` : cette lecture ne sert qu'à la mesure. Une mesure ne
+    // fait pas échouer ce qu'elle mesure — un `?` ici transformerait un hoquet de base en
+    // abonnement non appliqué, donc en client qui a payé sans recevoir son plan.
+    let plan_before: Option<String> = sqlx::query_scalar("SELECT plan FROM orgs WHERE id = $1")
+        .bind(org)
+        .fetch_optional(&state.db)
+        .await
+        .ok()
+        .flatten();
+
     let plan = match (active, priced) {
         (true, Some(p)) => Some(p),
         // incomplete_expired, canceled, unpaid…
@@ -409,6 +429,35 @@ async fn apply_subscription(
     .bind(sub.period_end())
     .execute(&state.db)
     .await?;
+
+    // §11.1 `upgrade_completed` : « combien paient ». Une seule fois par passage au payant,
+    // et jamais sur un renouvellement — cf. `plan_before` juste au-dessus.
+    if let Some(paid_plan) = plan.filter(|p| *p != "free") {
+        // « Payait déjà » se lit sur la colonne `plan`, pas sur une seconde liste de statuts
+        // recopiée ici : c'est cette colonne qui donne les droits, et la résiliation comme
+        // la fin de grâce la remettent à `free`. Une org passée à Pro à la main puis
+        // abonnée pour de bon ne comptera pas — cas de secours interne, pas une conversion.
+        // Positivement « était gratuite » : si la lecture ci-dessus a échoué, on ne compte
+        // rien plutôt que d'inventer une conversion à chaque renouvellement.
+        let was_free = plan_before.as_deref() == Some("free");
+        if active && was_free {
+            let (db, salt) = (state.db.clone(), state.cfg.ip_salt.clone());
+            tokio::spawn(async move {
+                growth::record(
+                    &db,
+                    org,
+                    // Stripe parle d'une organisation, pas d'un utilisateur : personne
+                    // n'est connecté ici, et deviner le propriétaire serait une invention.
+                    None,
+                    None,
+                    GrowthEvent::UpgradeCompleted,
+                    json!({ "plan": paid_plan }),
+                    Visitor::unknown(&salt),
+                )
+                .await;
+            });
+        }
+    }
 
     // Filet : un `customer.subscription.updated` peut annoncer l'impayé sans qu'aucun
     // `invoice.payment_failed` ne nous soit parvenu (webhook manqué, abonnement importé).

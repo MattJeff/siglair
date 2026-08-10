@@ -5,7 +5,9 @@
  * Aucune preuve sociale : pas de logo client, pas de témoignage, pas de compteur.
  * Tant qu'il n'y a pas de vrais clients, la section n'existe pas.
  */
-import { Link } from 'react-router-dom';
+import { useEffect } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
+import { captureRef } from '../lib/referral';
 import { BrandHero } from '../components/marketing/BrandHero';
 import { CampaignDemo } from '../components/marketing/CampaignDemo';
 import { Faq } from '../components/marketing/Faq';
@@ -110,6 +112,13 @@ const FAQ_ITEMS: QA[] = [
 ];
 
 export default function Landing() {
+  // Contrat §11.3 : le code arrive de /r/{slug} et doit survivre au clic sur « Commencer »,
+  // qui pointe vers un /login?next=... fixe. Rien à l'écran : c'est de la mesure interne.
+  const [params] = useSearchParams();
+  useEffect(() => {
+    captureRef(params.get('ref'));
+  }, [params]);
+
   usePageMeta(
     'Siglair | Signature email marketing animée',
     'Transformez chaque email en canal marketing : signature animée, campagnes et CTA, mise à jour sans copier-coller, analytics, Gmail et Outlook.',

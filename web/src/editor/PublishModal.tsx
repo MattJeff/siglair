@@ -22,6 +22,7 @@ import { Modal } from '../components/Modal';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { ApiError, exportSignature, getSignatureStatus, publishSignature } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import { publicationPhase } from './publication';
 import type { PublicationPhase } from './publication';
 import s from './editor.module.css';
@@ -105,6 +106,14 @@ export function PublishModal({
     onPublished(nextSlug);
     void loadEmbed();
     if (withCelebration) {
+      getAnalytics().track('publish_completed', {
+        signature_id: signatureId,
+        ...(startedAt ? { duration_ms: Math.max(0, Date.now() - startedAt) } : {}),
+      });
+      getAnalytics().track('signature_published', {
+        signature_id: signatureId,
+        zero_edit: false,
+      });
       celebrate();
       toast('Signature publiée', 'success');
     }
@@ -126,6 +135,10 @@ export function PublishModal({
 
         const nextPhase = publicationPhase(status);
         if (nextPhase === 'error') {
+          getAnalytics().track('publish_failed', {
+            signature_id: signatureId,
+            failure_code: 'render_failed',
+          });
           setPhase('error');
           setAttempts(status.job?.attempts ?? 0);
           setError(status.job?.error ?? 'Le rendu a échoué. Réessayez dans un instant.');
@@ -196,6 +209,7 @@ export function PublishModal({
     setError(null);
     setTrackingIssue(null);
     setEmbed('');
+    getAnalytics().track('publish_started', { signature_id: signatureId });
     try {
       const started = await publishSignature(signatureId);
       if (runId.current !== token) return;
@@ -208,6 +222,10 @@ export function PublishModal({
     } catch (cause) {
       if (runId.current !== token) return;
       setPhase('error');
+      getAnalytics().track('publish_failed', {
+        signature_id: signatureId,
+        failure_code: cause instanceof ApiError ? cause.code : 'unknown',
+      });
       setError(cause instanceof ApiError ? cause.message : 'La publication a échoué.');
     }
   }

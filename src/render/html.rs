@@ -372,10 +372,33 @@ fn background_image(doc: &Doc) -> String {
     )
 }
 
+/// Le badge de la marque imposée sur Free (contrat §11.2) — le seul canal d'acquisition
+/// gratuit du produit, donc attribué et compté.
+///
+/// Trois choix tenus ici :
+///
+/// - **du texte, jamais gravé dans le GIF** : un badge dans l'image disparaît quand le
+///   client mail bloque les images, c'est-à-dire exactement quand on a le plus besoin
+///   qu'il reste visible ; il ne serait pas cliquable séparément du CTA du client ; et du
+///   texte pèse zéro octet, Outlook 2016 compris ;
+/// - **tout le libellé est dans le `<a>`** : la zone cliquable est le badge entier, et la
+///   couleur ne dépend plus du conteneur — le bloc `freeform` impose un gris clair à 10 px
+///   à ce qu'il entoure, illisible pour un lien ;
+/// - **contraste** : #576274 sur blanc donne 6,1:1, au-delà de l'AA exigé pour du texte
+///   sous 14 px (DESIGN.md). `--muted` (#8390a4) n'atteint pas 4,5:1 à cette taille — la
+///   charte le dit elle-même — et un badge illisible ne convertit pas.
 fn branding_link(opts: &RenderOpts) -> String {
+    // Le code d'attribution EST le slug public (contrat §11.2 : `/r/{slug}`) : il identifie
+    // déjà la signature, il est stable et il n'y a pas de seconde colonne à tenir en phase.
+    // Sans slug (aperçu de l'éditeur, signature non publiée) il n'y a rien à attribuer :
+    // le badge pointe la racine plutôt qu'un `/r/` vide.
+    let href = match opts.slug.as_deref() {
+        Some(slug) => format!("{}/r/{slug}", opts.public_url),
+        None => opts.public_url.clone(),
+    };
     format!(
         "<a href=\"{}\" target=\"_blank\" style=\"font-size:10px;color:#576274;text-decoration:underline;\">Powered by siglair.com</a>",
-        esc(&opts.public_url)
+        esc(&href)
     )
 }
 
@@ -383,6 +406,8 @@ fn branding_row(opts: &RenderOpts) -> String {
     if !opts.branding {
         return String::new();
     }
+    // La couleur et la taille sont portées par le `<a>` : un `<td>` gris clair repeindrait
+    // le lien dans les clients qui héritent la couleur du parent.
     format!(
         "<tr><td style=\"padding:6px 0 0;font-family:{FONT};font-size:10px;line-height:1.4;text-align:left;\">{}</td></tr>",
         branding_link(opts)
@@ -438,7 +463,7 @@ mod tests {
 
     fn opts(slug: Option<&str>) -> RenderOpts {
         RenderOpts {
-            public_url: "https://siglair.app".into(),
+            public_url: "https://siglair.com".into(),
             slug: slug.map(String::from),
             ..Default::default()
         }
@@ -555,7 +580,7 @@ mod tests {
             RenderMode::Freeform,
             &opts(Some("abcdefgh2345")),
         );
-        assert!(tracked.contains("https://siglair.app/c/abcdefgh2345/aaa1111"));
+        assert!(tracked.contains("https://siglair.com/c/abcdefgh2345/aaa1111"));
         assert!(!tracked.contains("https://ada.dev"));
 
         let direct = render_document(&d, &Profile::new(), RenderMode::Freeform, &opts(None));
@@ -582,7 +607,7 @@ mod tests {
             RenderMode::Hosted,
             &opts(Some("abcdefgh2345")),
         );
-        assert!(h.contains("<img src=\"https://siglair.app/s/abcdefgh2345.gif\""));
+        assert!(h.contains("<img src=\"https://siglair.com/s/abcdefgh2345.gif\""));
         assert!(h.contains("usemap=\"#sg-abcdefgh2345\"") && h.contains("<area "));
         assert!(h.contains("/c/abcdefgh2345/bbb2222"));
 

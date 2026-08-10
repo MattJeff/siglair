@@ -21,9 +21,11 @@
  * │ ils DOIVENT être relus par un juriste avant la première vente.           │
  * └──────────────────────────────────────────────────────────────────────────┘
  */
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { SiteFooter, SiteHeader, usePageMeta } from '../components/marketing/Chrome';
+import { ANALYTICS_STORAGE_KEYS, getAnalytics } from '../lib/analytics';
 import s from './marketing.module.css';
 
 const SLUGS = ['mentions', 'confidentialite', 'cgu'] as const;
@@ -182,6 +184,16 @@ function Mentions() {
 /* ------------------------------------------------------------------ */
 
 function Privacy() {
+  const [analyticsDisabled, setAnalyticsDisabled] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem(ANALYTICS_STORAGE_KEYS.optOut) === '1',
+  );
+
+  const toggleProductAnalytics = () => {
+    const next = !analyticsDisabled;
+    getAnalytics().setOptOut(next);
+    setAnalyticsDisabled(next);
+  };
+
   return (
     <>
       <p>
@@ -225,6 +237,35 @@ function Privacy() {
         <strong>Base légale&nbsp;: exécution du contrat.</strong> Si ces profils contiennent les
         données de vos collaborateurs, c’est vous qui en êtes responsable&nbsp;; nous les
         conservons pour vous.
+      </p>
+
+      <h3>Mesure d’audience du site et du produit</h3>
+      <p>
+        Siglair mesure en interne les étapes utiles du parcours, par exemple la page consultée,
+        le lancement d’une génération, l’ouverture de l’éditeur, une publication ou le début
+        d’une installation. Cette mesure est <strong>first-party</strong>&nbsp;: aucun outil
+        publicitaire ou service analytics tiers ne reçoit ces événements. Les valeurs de formulaire,
+        adresses email, téléphones, prompts IA, URL complètes, adresses IP et en-têtes navigateur
+        complets ne sont jamais enregistrés dans cette table.
+      </p>
+      <p>
+        Deux identifiants aléatoires sont conservés dans le stockage du navigateur afin de relier
+        les étapes d’une même visite. Le serveur peut rattacher les événements au compte connecté,
+        uniquement pour comprendre l’activation et améliorer Siglair. Les paramètres UTM, le
+        domaine référent, le chemin de la page, la langue et une famille de navigateur ou
+        d’appareil peuvent aussi être enregistrés. Les données sont purgées au plus tard après
+        <strong> treize mois</strong>. Les signaux Do Not Track et Global Privacy Control sont
+        respectés côté navigateur et côté serveur.
+      </p>
+      <p>
+        <button type="button" className={s.legalOptOut} onClick={toggleProductAnalytics}>
+          {analyticsDisabled ? 'Réactiver la mesure Siglair' : 'Désactiver la mesure Siglair'}
+        </button>{' '}
+        <span role="status">
+          {analyticsDisabled
+            ? 'La mesure produit est désactivée dans ce navigateur.'
+            : 'La mesure produit est actuellement active dans ce navigateur.'}
+        </span>
       </p>
 
       <h3>Mesure d’ouverture et de clics</h3>
@@ -326,9 +367,11 @@ function Privacy() {
       <h2 id="cookies">Cookies et traceurs</h2>
       <p>
         Le site n’utilise <strong>aucun cookie publicitaire ni aucune mesure d’audience tierce</strong>.
-        Un seul cookie est déposé, strictement nécessaire au fonctionnement&nbsp;: le cookie de
-        session, qui vous maintient connecté. Il est <code>HttpOnly</code>, <code>Secure</code> et
-        limité à notre domaine. Aucune police d’écriture n’est chargée depuis un serveur tiers.
+        Le cookie de session, strictement nécessaire, vous maintient connecté. Il est{' '}
+        <code>HttpOnly</code>, <code>Secure</code> et limité à notre domaine. La mesure produit
+        first-party décrite plus haut utilise le stockage local du navigateur, sans cookie et
+        avec une désactivation accessible sur cette page. Aucune police d’écriture n’est chargée
+        depuis un serveur tiers.
       </p>
 
       <h2 id="securite">Sécurité</h2>

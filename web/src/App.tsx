@@ -1,6 +1,7 @@
 import { Suspense } from 'react';
 import { Link, Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import { AppErrorBoundary } from './components/AppErrorBoundary';
+import { AnalyticsLifecycle } from './components/AnalyticsLifecycle';
 import { Spinner } from './components/Spinner';
 import { lazyPage } from './lib/lazyPage';
 import { useSession } from './lib/session';
@@ -19,6 +20,7 @@ const Onboarding = lazyPage(() => import('./pages/Onboarding'));
 const Dashboard = lazyPage(() => import('./pages/Dashboard'));
 const Editor = lazyPage(() => import('./pages/Editor'));
 const Analytics = lazyPage(() => import('./pages/Analytics'));
+const Growth = lazyPage(() => import('./pages/Growth'));
 const Team = lazyPage(() => import('./pages/Team'));
 const Billing = lazyPage(() => import('./pages/Billing'));
 const Settings = lazyPage(() => import('./pages/Settings'));
@@ -59,10 +61,13 @@ export default function App() {
   return (
     <AppErrorBoundary>
       <Suspense fallback={<PageLoader />}>
+        <AnalyticsLifecycle />
         <Routes>
           <Route path="/" element={<Landing />} />
           <Route path="/pricing" element={<Pricing />} />
           <Route path="/campagnes-signature-email" element={<SeoPages />} />
+          <Route path="/generateur-signature-email" element={<SeoPages />} />
+          <Route path="/gestion-signatures-email-entreprise" element={<SeoPages />} />
           <Route path="/signature-email-animee" element={<SeoPages />} />
           <Route path="/signature-email-outlook" element={<SeoPages />} />
           <Route path="/signature-email-gmail" element={<SeoPages />} />
@@ -80,6 +85,7 @@ export default function App() {
             <Route path="/app" element={<Dashboard />} />
             <Route path="/app/editor/:id" element={<Editor />} />
             <Route path="/app/analytics/:id" element={<Analytics />} />
+            <Route path="/app/growth" element={<Growth />} />
             <Route path="/app/team" element={<Team />} />
             <Route path="/app/billing" element={<Billing />} />
             <Route path="/app/settings" element={<Settings />} />

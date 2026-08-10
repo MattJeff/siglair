@@ -10,7 +10,7 @@
  * Les échecs sont fréquents (site injoignable, domaine interne refusé, pas de logo) : chacun
  * garde une porte de sortie, on ne bloque jamais le visiteur sur cet écran.
  */
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Spinner } from '../Spinner';
@@ -26,6 +26,7 @@ import {
   rememberHandoff,
 } from '../../onboarding/api';
 import type { Brand } from '../../onboarding/api';
+import { getAnalytics } from '../../lib/analytics';
 import s from './BrandHero.module.css';
 
 export interface BrandHeroProps {
@@ -95,6 +96,9 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
   const [errorHelp, setErrorHelp] = useState('');
   const [fallback, setFallback] = useState(false);
   const [handoff, setHandoff] = useState<string | null>(null);
+  const focusTracked = useRef(false);
+  const inputTracked = useRef(false);
+  const attempt = useRef(0);
 
   const prepareDraft = async (found: Brand): Promise<string> => {
     const draft = await createOnboardingDraft(found);
@@ -105,6 +109,7 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
 
   /** Le document est déjà composé avant la connexion ; seul son jeton traverse le mail. */
   const accept = async (found: Brand) => {
+    getAnalytics().track('claim_clicked', { placement: compact ? 'editor' : 'hero' });
     if (onBrand) {
       onBrand(found);
       return;
@@ -139,8 +144,33 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
     setFallback(false);
     setHandoff(null);
     setBusy(true);
+    const startedAt = performance.now();
+    attempt.current += 1;
+    const analytics = getAnalytics();
+    analytics.track('url_submitted', {
+      placement: compact ? 'editor' : 'hero',
+      had_protocol: /^https?:\/\//i.test(url.trim()),
+    });
+    analytics.track('generation_started', {
+      origin: compact ? 'editor' : 'landing',
+      attempt: attempt.current,
+    });
     try {
       const { brand: found, notice: found_notice } = await analyzeBrand(target);
+      const foundContacts = [
+        found.contacts?.email,
+        found.contacts?.phone,
+        found.contacts?.whatsapp,
+        found.socials?.linkedin,
+      ].filter(Boolean).length;
+      analytics.track('generation_completed', {
+        origin: compact ? 'editor' : 'landing',
+        latency_ms: Math.round(performance.now() - startedAt),
+        logo_detected: Boolean(found.logo_asset_id),
+        colors_detected: found.colors.length > 0,
+        contacts_detected: foundContacts > 0,
+      });
+      analytics.track('preview_viewed', { origin: compact ? 'editor' : 'landing' });
       setNotice(found_notice);
       setFallback(false);
       if (compact) onBrand?.(found);
@@ -157,6 +187,12 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
     } catch (cause) {
       const message = apiMessage(cause);
       const code = errorCode(cause);
+      analytics.track('generation_failed', {
+        origin: compact ? 'editor' : 'landing',
+        latency_ms: Math.round(performance.now() - startedAt),
+        error_code: code || 'unknown',
+        recoverable: code !== 'validation',
+      });
       // URL invalide ou domaine privé : on corrige, on ne fabrique pas une marque depuis un
       // intranet. Les pannes du service ou le rate limit ne doivent pas ressembler à un site
       // vide : on affiche l'état réel et on garde une sortie manuelle.
@@ -232,7 +268,24 @@ export function BrandHero({ compact = false, onBrand }: BrandHeroProps) {
             spellCheck={false}
             placeholder="https://votreentreprise.com"
             value={url}
-            onChange={(event) => setUrl(event.currentTarget.value)}
+            onFocus={() => {
+              if (focusTracked.current) return;
+              focusTracked.current = true;
+              getAnalytics().track('url_input_focused', {
+                placement: compact ? 'editor' : 'hero',
+              });
+            }}
+            onChange={(event) => {
+              const value = event.currentTarget.value;
+              setUrl(value);
+              if (!inputTracked.current && value.trim()) {
+                inputTracked.current = true;
+                getAnalytics().track('url_entered', {
+                  placement: compact ? 'editor' : 'hero',
+                  input_method: 'unknown',
+                });
+              }
+            }}
             aria-describedby={`${inputId}-sub`}
             aria-invalid={error ? true : undefined}
           />

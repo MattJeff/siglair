@@ -33,6 +33,7 @@ import {
 } from '../onboarding/api';
 import type { Brand } from '../onboarding/api';
 import { useSession } from '../lib/session';
+import { getAnalytics } from '../lib/analytics';
 import type { Profile } from '../lib/types';
 import s from '../onboarding/onboarding.module.css';
 
@@ -87,6 +88,7 @@ export default function Onboarding() {
   const handoff = params.get('handoff') || readHandoff();
   const [claiming, setClaiming] = useState(Boolean(handoff));
   const claimStarted = useRef(false);
+  const generationAttempt = useRef(0);
 
   useEffect(() => {
     if (!handoff || claimStarted.current) return;
@@ -102,6 +104,10 @@ export default function Onboarding() {
     setError('');
     void claimOnboardingDraft(handoff)
       .then(async ({ id }) => {
+        getAnalytics().track('generated_signature_claimed', {
+          signature_id: id,
+          handoff_preserved: true,
+        });
         forgetBrand();
         forgetHandoff();
         await refresh();
@@ -146,12 +152,32 @@ export default function Onboarding() {
     setSentProfile(profile);
 
     setStep('generating');
+    const startedAt = performance.now();
+    generationAttempt.current += 1;
+    getAnalytics().track('generation_started', {
+      origin: 'editor',
+      attempt: generationAttempt.current,
+    });
     try {
       const result = await generateVariants(brand, profile);
+      getAnalytics().track('generation_completed', {
+        origin: 'editor',
+        latency_ms: Math.round(performance.now() - startedAt),
+        logo_detected: Boolean(brand.logo_asset_id),
+        colors_detected: brand.colors.length > 0,
+        contacts_detected: Boolean(brand.contacts?.email || brand.contacts?.phone),
+      });
+      getAnalytics().track('preview_viewed', { origin: 'editor' });
       setProposals(result.variants);
       setUsedFallback(result.source === 'fallback');
       setStep('choose');
     } catch (cause) {
+      getAnalytics().track('generation_failed', {
+        origin: 'editor',
+        latency_ms: Math.round(performance.now() - startedAt),
+        error_code: errorCode(cause) || 'unknown',
+        recoverable: true,
+      });
       setQuota(errorCode(cause) === 'quota_exceeded');
       setError(apiMessage(cause));
       setStep('form');
@@ -167,6 +193,10 @@ export default function Onboarding() {
       // Le document composé repart tel quel : le serveur le revalide (`Doc::validate`) avant
       // de créer la signature. Sans lui, `pick` enregistrerait un document vide.
       const { id } = await pickVariant(index, chosen.doc, sentProfile, chosen.name);
+      getAnalytics().track('generated_signature_claimed', {
+        signature_id: id,
+        handoff_preserved: true,
+      });
       forgetBrand();
       await refresh();
       navigate(`/app/editor/${id}`, { replace: true });

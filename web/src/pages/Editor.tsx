@@ -12,6 +12,7 @@ import { Button } from '../components/Button';
 import { Spinner } from '../components/Spinner';
 import { useToast } from '../components/Toast';
 import { ApiError, getSignature, listAssets, uploadAsset } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import { useSession } from '../lib/session';
 import type { Asset, Signature } from '../lib/types';
 import { Assets } from '../editor/Assets';
@@ -129,6 +130,13 @@ function EditorShell({ signature }: { signature: Signature }) {
   const selected = selectedElement(state);
 
   useEffect(() => {
+    getAnalytics().track('editor_opened', {
+      signature_id: signature.id,
+      source: 'unknown',
+    });
+  }, [signature.id]);
+
+  useEffect(() => {
     let alive = true;
     listAssets()
       .then((list) => {
@@ -161,6 +169,12 @@ function EditorShell({ signature }: { signature: Signature }) {
         }
       }
       if (uploaded.length > 0) {
+        for (const asset of uploaded) {
+          getAnalytics().track('asset_uploaded', {
+            signature_id: signature.id,
+            asset_kind: asset.kind,
+          });
+        }
         setAssets((current) => [
           ...uploaded,
           ...current.filter((asset) => !uploaded.some((next) => next.id === asset.id)),
@@ -173,7 +187,7 @@ function EditorShell({ signature }: { signature: Signature }) {
       }
       return uploaded;
     },
-    [refresh, toast],
+    [refresh, signature.id, toast],
   );
 
   async function uploadAt(files: File[], point: { x: number; y: number }) {
@@ -261,6 +275,7 @@ function EditorShell({ signature }: { signature: Signature }) {
   /** Export et publication lisent le document STOCKÉ : on écrit avant d'ouvrir. */
   async function openAfterSave(target: 'export' | 'publish') {
     await save.flush();
+    getAnalytics().track('signature_saved', { signature_id: signature.id });
     setModal(target);
   }
 
@@ -279,7 +294,13 @@ function EditorShell({ signature }: { signature: Signature }) {
         grid={grid}
         onGridChange={setGrid}
         analyticsHref={limits && limits.analytics_days > 0 ? `/app/analytics/${signature.id}` : null}
-        onPreview={() => setModal('preview')}
+        onPreview={() => {
+          getAnalytics().track('editor_preview_opened', {
+            signature_id: signature.id,
+            mode: view,
+          });
+          setModal('preview');
+        }}
         onExport={() => void openAfterSave('export')}
         onPublish={() => void openAfterSave('publish')}
       />
@@ -342,7 +363,11 @@ function EditorShell({ signature }: { signature: Signature }) {
                   <h3>Modèles</h3>
                   <span>1 clic</span>
                 </div>
-                <TemplateGallery dispatch={dispatch} branding={limits?.branding ?? false} />
+                <TemplateGallery
+                  dispatch={dispatch}
+                  branding={limits?.branding ?? false}
+                  signatureId={signature.id}
+                />
                 <p className={`${s.note} ${s.gap}`}>
                   Un modèle remplace le document courant. Ctrl+Z revient en arrière.
                 </p>

@@ -23,6 +23,7 @@ use crate::{
     db,
     doc::{resolve_tokens, safe_href, Doc, Profile},
     error::{AppError, Result},
+    growth::{self, GrowthEvent, Visitor},
     util::{hash_ip, ua_family},
     AppState,
 };
@@ -80,6 +81,8 @@ async fn ready(State(st): State<AppState>) -> Response {
 #[derive(sqlx::FromRow)]
 struct ImageRow {
     id: Uuid,
+    /// Nécessaire au seul `growth_events.org_id` : la table est lue par organisation (§11.4).
+    org_id: Uuid,
     plan: String,
     subscription_status: Option<String>,
     grace_until: Option<chrono::DateTime<chrono::Utc>>,
@@ -95,7 +98,7 @@ struct ImageRow {
 // ponytail : la sous-requête `older` est corrélée, mais elle porte sur `signatures(org_id)`
 // qui est indexé et sur des orgs à quelques dizaines de lignes. Si le plan d'exécution
 // devient un problème, matérialiser le rang dans une colonne au moment de la publication.
-const IMAGE_SQL: &str = "SELECT s.id, o.plan, o.subscription_status, o.grace_until, \
+const IMAGE_SQL: &str = "SELECT s.id, s.org_id, o.plan, o.subscription_status, o.grace_until, \
                                 o.analytics_enabled, \
                                 (SELECT count(*) FROM signatures s2 \
                                   WHERE s2.org_id = s.org_id AND s2.deleted_at IS NULL \
@@ -179,6 +182,10 @@ async fn image(
     // même sur un 304, l'e-mail a bien été ouvert : l'événement part avant de répondre
     if row.analytics_enabled {
         record(&st, row.id, "open", None, None, &headers);
+        // §11.1 `signature_installed` : la première ouverture qui ne vient pas d'une IP
+        // connue du propriétaire. Toute la condition est dans le SQL de `growth::record` —
+        // ici on ne fait que lui donner l'occasion de se poser.
+        record_install(&st, row.org_id, row.id, &headers);
     }
     if fresh {
         return (
@@ -401,6 +408,44 @@ fn record(
         if let Err(e) = res {
             tracing::warn!(error = ?e, "événement non enregistré");
         }
+    });
+}
+
+/// `signature_installed` (§11.1) : « combien l'ont vraiment collée dans leur client mail ».
+///
+/// Rien n'est décidé ici. L'IP du propriétaire, l'unicité par signature et le respect de
+/// `orgs.analytics_enabled` sont dans le SQL de `growth::record` : un chemin qui refarait ce
+/// raisonnement à la main finirait par en oublier un morceau.
+///
+/// ponytail : une tentative d'insertion par ouverture. Après la première, l'index unique
+/// partiel de la migration 0007 la transforme en `ON CONFLICT DO NOTHING`, soit une sonde
+/// d'index dans une tâche détachée. Si le volume d'ouvertures rend ce coût mesurable, garder
+/// en mémoire les signatures déjà installées et sauter l'appel — pas avant de l'avoir mesuré.
+fn record_install(st: &AppState, org_id: Uuid, signature_id: Uuid, headers: &HeaderMap) {
+    let (db, salt) = (st.db.clone(), st.cfg.ip_salt.clone());
+    // L'IP brute et l'UA brut ne franchissent pas ce point : `record` les hache et les
+    // réduit à une famille (§4.1).
+    let ip = client_ip(headers);
+    let ua = headers
+        .get(header::USER_AGENT)
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
+
+    tokio::spawn(async move {
+        growth::record(
+            &db,
+            org_id,
+            None, // un destinataire d'e-mail n'est pas un de nos utilisateurs (§11.3)
+            Some(signature_id),
+            GrowthEvent::SignatureInstalled,
+            json!({}),
+            Visitor {
+                ip: ip.as_deref(),
+                ua: ua.as_deref(),
+                salt: &salt,
+            },
+        )
+        .await;
     });
 }
 

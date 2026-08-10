@@ -684,7 +684,7 @@ mod tests {
     /// `url(...)` en guise de couleur, c'est du XSS stocké distribué à des clients.
     #[test]
     fn banner_values_are_checked_before_they_reach_an_email() {
-        assert!(check_banner("Promo", "#2563eb", "https://siglair.app").is_ok());
+        assert!(check_banner("Promo", "#2563eb", "https://siglair.com").is_ok());
         assert!(check_banner("Promo", "#FFF000", "mailto:a@b.dev").is_ok());
         assert!(check_banner("Promo", "#000000", "tel:+33600000000").is_ok());
         assert!(
@@ -714,10 +714,10 @@ mod tests {
     #[test]
     fn clean_rejects_an_impossible_window_and_trims() {
         let mut c = campaign("  Soldes  ", 100, 200);
-        c.href = "  https://siglair.app  ".into();
+        c.href = "  https://siglair.com  ".into();
         assert!(clean(&mut c).is_ok());
         assert_eq!(c.name, "Soldes");
-        assert_eq!(c.href, "https://siglair.app");
+        assert_eq!(c.href, "https://siglair.com");
 
         let mut backwards = campaign("x", 200, 100);
         assert!(matches!(

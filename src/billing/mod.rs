@@ -16,7 +16,14 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 
 // Seul point de couplage avec `src/auth` : l'extracteur de session `CurrentUser`.
-use crate::{auth::CurrentUser, config::StripeConfig, error::AppError, plans::Plan, AppState};
+use crate::{
+    auth::CurrentUser,
+    config::StripeConfig,
+    error::AppError,
+    growth::{self, GrowthEvent, Visitor},
+    plans::Plan,
+    AppState,
+};
 use stripe::{price_for, Interval, Stripe};
 
 /// Routes de facturation, session requise. À monter ainsi :
@@ -130,6 +137,28 @@ async fn checkout(
     let url = checkout
         .url
         .ok_or_else(|| AppError::Internal(anyhow::anyhow!("checkout session sans url")))?;
+
+    // §11.1 `upgrade_started` : « combien atteignent la caisse ». Après l'`url`, pas avant :
+    // une session que Stripe n'a pas rendue n'est pas une caisse atteinte.
+    //
+    // Détaché comme partout ailleurs : rien ne doit s'interposer entre le client et sa page
+    // de paiement, surtout pas une écriture de statistique.
+    let (db, salt) = (state.db.clone(), state.cfg.ip_salt.clone());
+    let (org_id, user_id, plan, seats) = (org.id, user.id, req.plan.clone(), quantity);
+    tokio::spawn(async move {
+        growth::record(
+            &db,
+            org_id,
+            Some(user_id),
+            None,
+            GrowthEvent::UpgradeStarted,
+            // Le plan et les sièges visés : sans eux, « atteint la caisse » ne dit pas
+            // laquelle, et l'abandon d'un Team à 40 sièges ne se lit pas comme celui d'un Pro.
+            json!({ "plan": plan, "seats": seats }),
+            Visitor::unknown(&salt),
+        )
+        .await;
+    });
 
     Ok(Json(json!({ "url": url })))
 }

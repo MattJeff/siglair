@@ -3,8 +3,8 @@ name: siglair
 # `.env` est lu automatiquement par docker compose : c'est lui qui porte les
 # secrets et les clés tierces. Les valeurs ci-dessous ne surchargent que ce qui
 # est spécifique au réseau des conteneurs (hôte `db`, chemins internes).
-# En production Supabase, renseigner SIGLAIR_DATABASE_URL fait pointer l'API et
-# le renderer vers la base externe sans changer DATABASE_URL pour le dev natif.
+# En production, renseigner SIGLAIR_DATABASE_URL fait pointer l'API et le
+# renderer vers une base PostgreSQL externe sans changer DATABASE_URL en local.
 
 services:
   db:

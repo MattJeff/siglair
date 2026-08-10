@@ -16,6 +16,7 @@ import {
 } from '../components/app/billing/compute';
 import { apiMessage, formatDate, formatPrice, planFeatures } from '../components/app/helpers';
 import { createCheckout, getSubscription, openBillingPortal } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import { useSession } from '../lib/session';
 import type { PlanInfo } from '../lib/types';
 import s from './app.module.css';
@@ -56,6 +57,10 @@ export default function Billing() {
   const billingOn = features?.billing === true;
 
   useEffect(() => {
+    getAnalytics().track('billing_viewed', {});
+  }, []);
+
+  useEffect(() => {
     if (!billingOn) return;
     let alive = true;
     getSubscription()
@@ -74,6 +79,17 @@ export default function Billing() {
 
   const goCheckout = async (info: PlanInfo, wanted?: number) => {
     setBusy(info.plan);
+    if (info.plan === 'pro' || info.plan === 'team') {
+      getAnalytics().track('upgrade_clicked', {
+        placement: 'pricing',
+        target_plan: info.plan,
+        trigger: 'billing_plan_selected',
+      });
+      getAnalytics().track('checkout_started', {
+        target_plan: info.plan,
+        billing_period: 'monthly',
+      });
+    }
     try {
       const { url } = await createCheckout(info.plan, wanted);
       location.assign(url);

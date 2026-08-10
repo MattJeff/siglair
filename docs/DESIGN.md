@@ -179,7 +179,7 @@ sur l'URL hébergée, dans la même voix :
   son client mail. C'est ce que vend le plan Team.
 - On voit ce que ça rapporte : ouvertures et clics, par élément.
 
-Montrer visuellement le `<img src="siglair.app/s/…gif">` : c'est concret, et c'est la preuve
+Montrer visuellement le `<img src="siglair.com/s/…gif">` : c'est concret, et c'est la preuve
 qu'il n'y a rien à réinstaller.
 
 ### Honnêteté — non négociable

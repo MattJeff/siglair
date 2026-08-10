@@ -22,6 +22,7 @@ use crate::{
     auth::OrgAccess,
     doc::{Doc, Profile},
     error::{AppError, Result},
+    growth::{self, GrowthEvent, Visitor},
     plans::{check_signature_quota, Plan},
     render::{html::render_document, RenderMode, RenderOpts},
     routes::{analytics, assets},
@@ -637,6 +638,34 @@ async fn publish(
         campaign.as_ref().map(|c| c.id),
     )
     .await?;
+
+    // §11.1 `signature_generated` : « combien arrivent au bout de l'éditeur ». Posé ici et
+    // pas dans `publish_snapshot`, qui sert aussi au rollout Team et au balayage des
+    // campagnes — une bannière programmée qui se republie toute seule n'est pas quelqu'un
+    // qui vient de finir sa signature.
+    //
+    // Tâche détachée : `growth::record` ne renvoie jamais d'erreur, mais une base saturée
+    // lui ferait attendre le `acquire_timeout` du pool. Une publication ne patiente pas
+    // pour une statistique.
+    let (db, salt) = (st.db.clone(), st.cfg.ip_salt.clone());
+    let (org_id, user_id, sig_id) = (access.org_id, access.user_id, row.id);
+    tokio::spawn(async move {
+        // `Visitor::unknown` : l'auteur est déjà identifié par `user_id`, son IP n'ajoute
+        // aucune réponse à la question posée — donc on ne la collecte pas (§4.1).
+        growth::record(
+            &db,
+            org_id,
+            Some(user_id),
+            Some(sig_id),
+            GrowthEvent::SignatureGenerated,
+            // Rien à dire de plus : republier n'ajoute pas une signature de plus au bout de
+            // l'éditeur, et `count(distinct signature_id)` répond déjà à la question.
+            json!({}),
+            Visitor::unknown(&salt),
+        )
+        .await;
+    });
+
     Ok(Json(json!({
         "slug": p.slug,
         "job_id": p.job_id,

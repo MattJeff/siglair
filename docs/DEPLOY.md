@@ -101,14 +101,12 @@ fonctionnalité — rien ne plante, le bouton correspondant disparaît simplemen
 
 ### Base de données
 
-Par défaut, Postgres tourne dans un conteneur avec un volume : rien à faire, mais les
-sauvegardes sont à votre charge.
+PostgreSQL tourne dans le conteneur `db` sur Hetzner avec un volume persistant. Les
+sauvegardes restent à votre charge et doivent être copiées hors de la machine.
 
-Pour utiliser Supabase à la place — sauvegardes gérées, et les données survivent à la perte
-de la machine — remplissez `SIGLAIR_DATABASE_URL`. **Prenez le pooler en mode session
-(port 5432), pas le pooler transactionnel (6543)** : SQLx utilise des requêtes préparées,
-que le mode transactionnel ne supporte pas. La panne serait intermittente et sous charge,
-donc particulièrement pénible à diagnostiquer.
+`SIGLAIR_DATABASE_URL` permet, si nécessaire, de viser un autre serveur PostgreSQL 16.
+Utilisez une connexion persistante compatible avec les requêtes préparées de SQLx et
+chiffrez la connexion lorsqu'elle traverse un réseau non local.
 
 ## 5. Démarrer
 
@@ -173,7 +171,7 @@ cd /opt/siglair && git pull && docker compose --profile proxy up -d --build
 
 Les migrations s'appliquent au démarrage de l'API. Elles ne sont jamais rejouées deux fois.
 
-**Sauvegarder** (inutile si vous êtes sur Supabase)
+**Sauvegarder**
 
 ```bash
 docker compose exec -T db pg_dump -U siglair siglair | gzip > ~/siglair-$(date +%F).sql.gz

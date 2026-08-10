@@ -216,11 +216,11 @@ mod tests {
         let html = html_body(
             "Titre",
             &[format!("Bonjour {}", esc("<script>alert(1)</script>"))],
-            Some(("Ouvrir", "https://siglair.app/app?a=1&b=2")),
+            Some(("Ouvrir", "https://siglair.com/app?a=1&b=2")),
         );
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
-        assert!(html.contains("https://siglair.app/app?a=1&amp;b=2"));
+        assert!(html.contains("https://siglair.com/app?a=1&amp;b=2"));
     }
 
     #[test]

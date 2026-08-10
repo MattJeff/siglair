@@ -10,6 +10,7 @@ import { AppShell } from '../components/app/AppShell';
 import { ConfirmDialog } from '../components/app/ConfirmDialog';
 import { apiMessage, formatDate } from '../components/app/helpers';
 import { deleteAccount, listMembers, logout, updateOwnProfile } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import { useSession } from '../lib/session';
 import { PROFILE_KEYS } from '../lib/types';
 import type { Profile, ProfileKey } from '../lib/types';
@@ -106,6 +107,7 @@ export default function Settings() {
       const { updated_signatures: count } = await updateOwnProfile(profile);
       setValues(normalized);
       setSavedValues(normalized);
+      getAnalytics().track('settings_updated', { area: 'profile' });
 
       toast(
         count > 0

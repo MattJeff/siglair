@@ -24,7 +24,7 @@ pub enum RenderMode {
 
 #[derive(Debug, Clone, Default)]
 pub struct RenderOpts {
-    /// Origine publique, sans slash final (`https://siglair.app`).
+    /// Origine publique, sans slash final (`https://siglair.com`).
     pub public_url: String,
     /// Slug de la signature publiée : active le GIF hébergé et le suivi des clics
     /// via `/c/{slug}/{element_id}`. `None` = aperçu, liens directs.

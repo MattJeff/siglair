@@ -451,6 +451,35 @@ export interface AnalyticsSeries {
   top_elements: AnalyticsElement[];
 }
 
+/* ---------------- Croissance (§11.4) ---------------- */
+
+/** Miroir de `growth::Funnel`. `views` est indicatif, jamais une métrique de pilotage. */
+export interface Funnel {
+  /** Ouvertures. Apple MPP et le proxy Gmail les gonflent : ordre de grandeur. */
+  views: number;
+  /** Clics sur le badge « Powered by siglair.com ». Une action réelle. */
+  badge_clicks: number;
+  /** Comptes créés attribués à une signature de l'org (`users.referred_by_signature_id`). */
+  signups: number;
+  /** Parmi eux, ceux qui appartiennent aujourd'hui à une org payante. */
+  paid: number;
+}
+
+/** Le même entonnoir, restreint à une signature : c'est lui qui dit laquelle copier. */
+export interface SignatureFunnel extends Funnel {
+  id: string;
+  name: string;
+  /** Booléen et non compteur : l'index unique de la migration 0007 n'en garde qu'une. */
+  installed: boolean;
+}
+
+export interface GrowthReport {
+  /** Fenêtre effectivement servie, bornée côté serveur par la rétention du plan (§6). */
+  days: number;
+  funnel: Funnel;
+  signatures: SignatureFunnel[];
+}
+
 /**
  * GET /api/billing/subscription — la forme RÉELLE de `src/billing/mod.rs::subscription`.
  *

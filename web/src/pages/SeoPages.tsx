@@ -2,9 +2,11 @@ import { Link, useLocation } from 'react-router-dom';
 import { START_HREF, SiteFooter, SiteHeader, usePageMeta } from '../components/marketing/Chrome';
 import s from './seo-pages.module.css';
 
-type PageKind = 'campaign' | 'motion' | 'outlook' | 'gmail';
+type PageKind = 'campaign' | 'generator' | 'team' | 'motion' | 'outlook' | 'gmail';
 type SeoPath =
   | '/campagnes-signature-email'
+  | '/generateur-signature-email'
+  | '/gestion-signatures-email-entreprise'
   | '/signature-email-animee'
   | '/signature-email-outlook'
   | '/signature-email-gmail';
@@ -70,8 +72,8 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
     title: 'Lancez une campagne sous chaque conversation.',
     accent: 'Sans nouvelle installation.',
     directAnswer:
-      'Une campagne de signature email ajoute un message, une bannière ou un CTA sous les coordonnées de vos équipes. Dans Siglair, vous appliquez la campagne puis republiez : l’URL hébergée reste identique et chaque bouton conserve sa propre mesure de clics.',
-    heroPoints: ['URL stable', 'CTA mesurés séparément', 'Dates de campagne'],
+      'Une campagne de signature email ajoute un message, une bannière ou un CTA sous les coordonnées de vos équipes. Dans Siglair, vous programmez sa période : le rendu hébergé l’active puis la retire automatiquement, sans changer son URL, et chaque bouton conserve sa propre mesure de clics.',
+    heroPoints: ['URL stable', 'CTA mesurés séparément', 'Activation automatique'],
     preview: {
       app: 'Campagne active',
       status: 'Publiée',
@@ -89,14 +91,14 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
       },
       {
         title: 'Republiez sur la même URL',
-        text: 'La signature installée ne change pas d’adresse. Vous modifiez le document, appliquez la campagne et publiez la nouvelle version.',
+        text: 'La signature installée ne change pas d’adresse. À l’ouverture et à la fin de la période, Siglair republie automatiquement le rendu attendu.',
       },
       {
         title: 'Lisez les bons signaux',
         text: 'La bannière, le site, LinkedIn et la prise de rendez-vous sont suivis comme des CTA distincts, pour éviter un compteur global difficile à interpréter.',
       },
     ],
-    methodTitle: 'De l’idée à la signature publiée.',
+    methodTitle: 'De l’idée à une campagne programmée.',
     methodIntro:
       'Une campagne utile reste courte, liée à une intention précise et lisible même lorsque le mouvement ne se joue pas.',
     steps: [
@@ -109,8 +111,8 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
         text: 'Ajoutez une bannière ou un bloc texte, un CTA explicite et une période cohérente avec votre calendrier marketing.',
       },
       {
-        title: 'Appliquez puis republiez',
-        text: 'Vérifiez la première image, appliquez la campagne à la signature et republiez. Aucun nouveau bloc HTML n’est à distribuer.',
+        title: 'Programmez et laissez Siglair synchroniser',
+        text: 'Vérifiez la première image puis programmez la campagne. Siglair publie son ouverture et son retrait sans nouveau bloc HTML à distribuer.',
       },
     ],
     limitTitle: 'Ce que la campagne ne remplace pas.',
@@ -128,7 +130,7 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
       {
         question: 'Faut-il réinstaller la signature à chaque campagne ?',
         answer:
-          'Non. Lorsque la signature utilise l’URL hébergée Siglair, vous appliquez la nouvelle campagne puis republiez sur cette même URL.',
+          'Non. Lorsque la signature utilise l’URL hébergée Siglair, l’ouverture et la fermeture de la campagne sont republiées automatiquement sur cette même URL.',
       },
       {
         question: 'Peut-on suivre plusieurs boutons ?',
@@ -138,7 +140,175 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
       {
         question: 'Une campagne peut-elle être datée ?',
         answer:
-          'Oui. Les dates servent à préparer et vérifier la campagne active. La publication reste une action explicite afin de garder le contrôle sur la version diffusée.',
+          'Oui. Sa date de début déclenche l’activation du contenu et sa date de fin déclenche son retrait. Un balayage serveur synchronise les signatures concernées.',
+      },
+    ],
+  },
+  '/generateur-signature-email': {
+    kind: 'generator',
+    metaTitle: 'Générateur de signature email gratuit | Siglair',
+    metaDescription:
+      'Créez gratuitement une signature email professionnelle à partir de votre site : logo, couleurs, coordonnées, CTA, aperçu Gmail et Outlook, puis édition complète.',
+    eyebrow: 'Générateur de signature email',
+    title: 'Collez votre site.',
+    accent: 'Repartez avec une vraie signature.',
+    directAnswer:
+      'Le générateur Siglair analyse les éléments publics de votre site, propose une signature aux couleurs de votre marque et ouvre le résultat dans un éditeur visuel. Vous pouvez modifier chaque bloc avant de publier puis installer la signature dans Gmail ou Outlook.',
+    heroPoints: ['Première création gratuite', 'Résultat entièrement modifiable', 'Aucune carte bancaire'],
+    preview: {
+      app: 'Génération IA',
+      status: 'Prête à modifier',
+      name: 'Camille Martin',
+      role: 'Fondatrice · Atelier Nord',
+      message: 'Une identité cohérente, déjà composée à partir du site.',
+      primaryCta: 'Voir le site',
+      secondaryCta: 'LinkedIn',
+    },
+    benefitTitle: 'Un point de départ utile, pas un formulaire interminable.',
+    benefits: [
+      {
+        title: 'Votre marque comme matière première',
+        text: 'Siglair recherche le nom, le logo, les couleurs et les liens publics disponibles. Une information absente reste modifiable dans l’éditeur.',
+      },
+      {
+        title: 'Une composition déjà exploitable',
+        text: 'Le résultat contient une hiérarchie, des coordonnées et des CTA. Vous ne partez pas d’un canvas vide et gardez la main sur chaque élément.',
+      },
+      {
+        title: 'Un rendu fait pour l’email',
+        text: 'La signature est publiée comme une ressource hébergée, avec une première image lisible pour les clients qui ne jouent pas l’animation.',
+      },
+    ],
+    methodTitle: 'De votre URL à votre client mail.',
+    methodIntro:
+      'La génération accélère le premier rendu. La vérification humaine reste indispensable pour les coordonnées, les liens et la compatibilité de votre environnement.',
+    steps: [
+      {
+        title: 'Collez l’adresse publique de votre site',
+        text: 'Le serveur analyse uniquement les informations accessibles publiquement. Un site inaccessible peut être remplacé par une création manuelle.',
+      },
+      {
+        title: 'Choisissez puis ajustez la proposition',
+        text: 'Corrigez le profil, changez le logo, déplacez les blocs, ajoutez un CTA et adaptez les couleurs ou les animations.',
+      },
+      {
+        title: 'Publiez, installez et envoyez un test',
+        text: 'Contrôlez l’aperçu fixe et animé, publiez la signature puis vérifiez-la dans un véritable email Gmail ou Outlook.',
+      },
+    ],
+    limitTitle: 'Ce que l’analyse automatique ne devine pas.',
+    limitText:
+      'Un site peut bloquer les robots, servir un logo dans un format inutilisable ou ne publier aucun contact. Siglair n’invente pas ces données : vous pouvez continuer sans elles, les ajouter dans l’éditeur et vérifier le résultat avant toute installation.',
+    officialLinks: [
+      { href: GMAIL_SIGNATURE_HELP, label: 'Consulter l’aide officielle Gmail sur les signatures' },
+      { href: OUTLOOK_SIGNATURE_HELP, label: 'Consulter l’aide officielle Outlook sur les signatures' },
+    ],
+    useCaseTitle: 'Un générateur adapté à quatre départs fréquents.',
+    useCases: [
+      { title: 'Indépendant', text: 'Nom, activité, site et prise de rendez-vous dans un format compact.' },
+      { title: 'Commercial', text: 'Coordonnées, preuve de marque et CTA vers le bon prochain geste.' },
+      { title: 'Fondateur', text: 'Identité personnelle, lancement et lien vers le produit.' },
+      { title: 'Équipe', text: 'Une première signature qui peut devenir le modèle partagé de l’organisation.' },
+    ],
+    faq: [
+      {
+        question: 'Le générateur de signature email est-il gratuit ?',
+        answer:
+          'Oui. Le plan Free permet de créer et d’héberger une signature avec une discrète mention Siglair. Le plan Pro retire cette mention et ajoute notamment les campagnes et leurs analytics.',
+      },
+      {
+        question: 'Dois-je laisser l’IA choisir le design final ?',
+        answer:
+          'Non. La proposition ouvre le même éditeur que les créations manuelles : textes, images, tailles, couleurs, liens et animations restent modifiables.',
+      },
+      {
+        question: 'Que se passe-t-il si mon site ne peut pas être analysé ?',
+        answer:
+          'Vous pouvez continuer avec le nom du domaine ou partir d’un modèle vierge, puis importer votre logo et renseigner les informations manquantes dans l’éditeur.',
+      },
+    ],
+  },
+  '/gestion-signatures-email-entreprise': {
+    kind: 'team',
+    metaTitle: 'Gestion des signatures email d’entreprise | Siglair',
+    metaDescription:
+      'Centralisez les signatures email de votre entreprise : modèle partagé, identité cohérente, campagnes datées, publication sans réinstallation et mesure par CTA.',
+    eyebrow: 'Gestion des signatures email',
+    title: 'Une marque cohérente dans chaque boîte mail.',
+    accent: 'Un canal piloté par l’équipe marketing.',
+    directAnswer:
+      'Siglair centralise le modèle, les profils et les campagnes de signature d’une équipe. Chaque signature est hébergée sur une URL stable : le marketing peut republier un message ou une bannière sans demander aux collaborateurs de modifier à nouveau leur client mail.',
+    heroPoints: ['Modèles partagés', 'Campagnes d’équipe', 'Historique analytics Team'],
+    preview: {
+      app: 'Espace Team',
+      status: 'Campagne publiée',
+      name: 'Camille Martin',
+      role: 'Direction commerciale · Atelier Nord',
+      message: 'Webinar produit · Jeudi à 11 h · Inscription ouverte.',
+      primaryCta: 'Réserver une place',
+      secondaryCta: 'Découvrir l’offre',
+    },
+    benefitTitle: 'La signature d’entreprise devient un système maintenable.',
+    benefits: [
+      {
+        title: 'Réduisez les versions divergentes',
+        text: 'Le logo, les couleurs et la structure partent d’un modèle partagé au lieu de circuler dans des fichiers et copier-coller différents.',
+      },
+      {
+        title: 'Diffusez le message du moment',
+        text: 'Une campagne peut porter un lancement, un événement, une offre ou un contenu dans les conversations quotidiennes de l’équipe.',
+      },
+      {
+        title: 'Mesurez sans confondre les CTA',
+        text: 'Les clics de la bannière, du site et des autres boutons restent séparés, avec un historique adapté au plan Team.',
+      },
+    ],
+    methodTitle: 'Déployer sans transformer chaque collègue en intégrateur.',
+    methodIntro:
+      'La centralisation ne supprime pas l’étape d’installation initiale. Elle évite surtout les nouvelles interventions à chaque changement de marque ou campagne.',
+    steps: [
+      {
+        title: 'Préparez le modèle de référence',
+        text: 'Définissez la structure, les zones personnalisables, les liens et la première image attendue dans vos principaux clients mail.',
+      },
+      {
+        title: 'Invitez l’équipe et complétez les profils',
+        text: 'Chaque membre conserve ses coordonnées dans une composition cohérente avec la marque et le modèle de l’organisation.',
+      },
+      {
+        title: 'Programmez puis mesurez les campagnes',
+        text: 'Choisissez la période et le CTA, laissez la signature hébergée se mettre à jour, puis comparez les clics par élément et par membre.',
+      },
+    ],
+    limitTitle: 'Une gestion centralisée reste dépendante des clients mail.',
+    limitText:
+      'Une politique informatique peut bloquer les images distantes ou imposer une méthode d’installation particulière. Testez le modèle sur le parc réel, documentez l’installation initiale et ne présentez pas les ouvertures d’image comme des lectures exactes : les clics sont un signal plus fiable.',
+    officialLinks: [
+      { href: OUTLOOK_SIGNATURE_HELP, label: 'Consulter la configuration officielle des signatures Outlook' },
+      { href: GMAIL_SIGNATURE_HELP, label: 'Consulter la configuration officielle des signatures Gmail' },
+    ],
+    useCaseTitle: 'Des usages Team reliés au travail réel.',
+    useCases: [
+      { title: 'Lancement produit', text: 'Un message et un CTA cohérents dans les emails commerciaux.' },
+      { title: 'Événement', text: 'Une campagne datée qui cesse lorsque la période se termine.' },
+      { title: 'Recrutement', text: 'Une bannière vers les postes ouverts dans les échanges quotidiens.' },
+      { title: 'Gouvernance de marque', text: 'Une structure commune même quand les profils et rôles diffèrent.' },
+    ],
+    faq: [
+      {
+        question: 'Faut-il réinstaller les signatures à chaque changement ?',
+        answer:
+          'Non après l’installation initiale de la ressource hébergée. Une republication remplace le rendu servi sur la même URL.',
+      },
+      {
+        question: 'Une campagne peut-elle être appliquée à toute l’équipe ?',
+        answer:
+          'Le plan Team est conçu pour diffuser une campagne et un modèle partagés dans l’organisation, avec des profils propres à chaque membre.',
+      },
+      {
+        question: 'Comment mesurer la performance des signatures ?',
+        answer:
+          'Siglair distingue les clics par CTA et par signature. Les ouvertures d’images restent indicatives à cause des préchargements et des protections de confidentialité des clients mail.',
       },
     ],
   },
@@ -396,6 +566,16 @@ const PAGES: Record<SeoPath, SeoPageConfig> = {
 };
 
 const RELATED: { path: SeoPath; label: string; description: string }[] = [
+  {
+    path: '/generateur-signature-email',
+    label: 'Générateur de signature email',
+    description: 'URL, marque, IA et édition complète.',
+  },
+  {
+    path: '/gestion-signatures-email-entreprise',
+    label: 'Gestion des signatures d’entreprise',
+    description: 'Modèles, équipes et campagnes centralisées.',
+  },
   {
     path: '/campagnes-signature-email',
     label: 'Campagnes de signature email',

@@ -20,6 +20,7 @@ use crate::{
     auth::{client_ip, CurrentUser, OrgAccess},
     doc::{Doc, Profile},
     error::{AppError, Result},
+    growth::{self, GrowthEvent, Visitor},
     routes::signatures,
     util::{hash_token, random_token, rate_limit},
     AppState,
@@ -447,6 +448,27 @@ async fn create_invite(
             .await;
         return Err(e);
     }
+
+    // §11.1 `team_invite` : « la boucle interne d'une organisation tourne-t-elle ». Après
+    // l'envoi réussi seulement — une invitation que Resend a refusée n'est pas partie, et
+    // la ligne vient d'être supprimée juste au-dessus.
+    let (db, salt) = (st.db.clone(), st.cfg.ip_salt.clone());
+    let (org_id, inviter_id, role) = (id, access.user_id, role.to_string());
+    tokio::spawn(async move {
+        growth::record(
+            &db,
+            org_id,
+            Some(inviter_id),
+            None,
+            GrowthEvent::TeamInvite,
+            // Le rôle, jamais l'adresse : l'invité n'a pas de compte, son e-mail n'a rien à
+            // faire dans une table de mesure (§4.1) — il est déjà dans `invites`.
+            json!({ "role": role }),
+            Visitor::unknown(&salt),
+        )
+        .await;
+    });
+
     Ok((StatusCode::CREATED, Json(row)))
 }
 

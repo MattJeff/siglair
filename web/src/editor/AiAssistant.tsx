@@ -3,6 +3,7 @@ import type { Dispatch, FormEvent } from 'react';
 import { ArrowUp, LockKeyhole, Sparkles, Undo2 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { ApiError, editSignatureWithAi } from '../lib/api';
+import { getAnalytics } from '../lib/analytics';
 import type { Plan } from '../lib/types';
 import type { Action } from './state';
 import type { Autosave } from './useAutosave';
@@ -49,15 +50,34 @@ export function AiAssistant({
     setError('');
     setPrompt('');
     setMessages((current) => [...current, { id: Date.now(), role: 'user', text: message }]);
+    const startedAt = performance.now();
+    const intent = selectedId ? 'selected_element' : 'full_canvas';
+    getAnalytics().track('ai_prompt_submitted', {
+      signature_id: signatureId,
+      intent,
+      prompt_length_bucket: message.length < 80 ? 'short' : message.length < 300 ? 'medium' : 'long',
+    });
     try {
       await save.flush();
       const result = await editSignatureWithAi(signatureId, message, selectedId);
       dispatch({ type: 'replaceDoc', doc: result.doc });
+      getAnalytics().track('ai_edit_completed', {
+        signature_id: signatureId,
+        intent,
+        latency_ms: Math.round(performance.now() - startedAt),
+        changed_elements: result.doc.elements.length,
+      });
       setMessages((current) => [
         ...current,
         { id: Date.now() + 1, role: 'assistant', text: result.reply },
       ]);
     } catch (cause) {
+      getAnalytics().track('ai_edit_failed', {
+        signature_id: signatureId,
+        intent,
+        latency_ms: Math.round(performance.now() - startedAt),
+        error_code: cause instanceof ApiError ? cause.code : 'unknown',
+      });
       setError(cause instanceof ApiError ? cause.message : 'Le copilote ne répond pas pour l’instant.');
     } finally {
       setBusy(false);

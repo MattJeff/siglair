@@ -145,6 +145,23 @@
   margin-top: 28px;
 }
 
+.legalOptOut {
+  min-height: 42px;
+  margin: 6px 10px 6px 0;
+  padding: 0 16px;
+  border: 1px solid var(--line2);
+  border-radius: 6px;
+  color: var(--text);
+  background: var(--panel2);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.legalOptOut:hover {
+  border-color: var(--blue);
+}
+
 .micro {
   display: flex;
   flex-wrap: wrap;

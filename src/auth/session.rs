@@ -165,7 +165,39 @@ pub async fn find_or_create_user(
     avatar: Option<&str>,
     provider: Option<(&str, &str)>,
 ) -> Result<Uuid> {
+    find_or_create_user_referred(db, email, email_verified, name, avatar, provider, None).await
+}
+
+/// Longueur maximale d'un code de parrainage accepté. Un slug en fait 12
+/// (`util::gen_slug`) ; au-delà de 64 c'est du bruit, et ça n'a rien à faire dans une
+/// requête SQL ni dans une colonne.
+const MAX_REFERRAL_LEN: usize = 64;
+
+/// Même chose, avec l'attribution du contrat §11.3.
+///
+/// `referral` est le code lu **dans l'URL** — `/r/{slug}` → `/?ref={code}` → `/login?ref=`,
+/// puis le corps de `POST /api/auth/magic/request` ou le paramètre de départ OAuth. Aucun
+/// cookie n'est posé sur le destinataire de l'e-mail : il n'est pas notre utilisateur, il
+/// n'a rien accepté, et un cookie d'attribution imposerait un bandeau de consentement qui
+/// ferait chuter la conversion qu'on mesure.
+///
+/// Le code n'est inscrit qu'à la **création** du compte. Une connexion ultérieure avec un
+/// autre `?ref=` ne réécrit rien : l'origine d'un compte ne change pas, et laisser un lien
+/// de parrainage réattribuer un compte existant est exactement ce qui rend une prime de
+/// parrainage fraudable.
+pub async fn find_or_create_user_referred(
+    db: &PgPool,
+    email: &str,
+    email_verified: bool,
+    name: Option<&str>,
+    avatar: Option<&str>,
+    provider: Option<(&str, &str)>,
+    referral: Option<&str>,
+) -> Result<Uuid> {
     let email = email.trim().to_lowercase();
+    let referral = referral
+        .map(str::trim)
+        .filter(|c| !c.is_empty() && c.len() <= MAX_REFERRAL_LEN);
 
     if let Some((p, uid)) = provider {
         let existing: Option<Uuid> = sqlx::query_scalar(
@@ -229,7 +261,7 @@ pub async fn find_or_create_user(
         return Ok(user_id);
     }
 
-    create_user(db, &email, email_verified, name, avatar, provider).await
+    create_user(db, &email, email_verified, name, avatar, provider, referral).await
 }
 
 /// Utilisateur + organisation personnelle + appartenance : une seule transaction. Un
@@ -241,6 +273,7 @@ async fn create_user(
     name: Option<&str>,
     avatar: Option<&str>,
     provider: Option<(&str, &str)>,
+    referral: Option<&str>,
 ) -> Result<Uuid> {
     let user_id = Uuid::new_v4();
     let display = name
@@ -249,15 +282,25 @@ async fn create_user(
 
     let mut tx = db.begin().await?;
 
+    // §11.3 : le code brut est conservé tel quel, et la signature d'origine est résolue en
+    // même temps par sous-requête. Un code inconnu (signature supprimée, lien recopié de
+    // travers) laisse simplement `referred_by_signature_id` à NULL — une inscription ne
+    // rate jamais parce qu'une attribution n'a pas abouti.
+    //
+    // Pas de filtre sur `deleted_at`, comme dans `/r/{code}` : un e-mail déjà parti
+    // continue de créditer son auteur même s'il a supprimé le brouillon depuis.
     sqlx::query(
-        "INSERT INTO users (id, email, email_verified, name, avatar_url)
-         VALUES ($1, $2::citext, $3, $4, $5)",
+        "INSERT INTO users (id, email, email_verified, name, avatar_url,
+                            referral_code, referred_by_signature_id)
+         VALUES ($1, $2::citext, $3, $4, $5, $6,
+                 (SELECT id FROM signatures WHERE public_slug = $6::citext))",
     )
     .bind(user_id)
     .bind(email)
     .bind(email_verified)
     .bind(name)
     .bind(avatar)
+    .bind(referral)
     .execute(&mut *tx)
     .await?;
 

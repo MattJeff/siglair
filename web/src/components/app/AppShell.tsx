@@ -7,6 +7,7 @@ import {
   LogOut,
   Settings2,
   Sparkles,
+  TrendingUp,
   Users,
 } from 'lucide-react';
 import { logout } from '../../lib/api';
@@ -24,6 +25,9 @@ export interface AppShellProps {
 const NAV = [
   { to: '/app', label: 'Signatures', end: true, icon: LayoutDashboard },
   { to: '/onboarding', label: 'Créer', end: false, icon: Sparkles },
+  // §11.4 : l'écran est toujours visible, y compris sur un plan qui n'y a pas droit — il
+  // affiche alors sa propre explication. Masquer l'onglet cacherait ce qu'on vend.
+  { to: '/app/growth', label: 'Croissance', end: false, icon: TrendingUp },
   { to: '/app/team', label: 'Équipe', end: false, icon: Users },
   { to: '/app/settings', label: 'Réglages', end: false, icon: Settings2 },
 ];

@@ -9,7 +9,7 @@
 Siglair héberge des signatures email animées.
 
 Le vrai produit n'est pas l'éditeur (l'éditeur est le hameçon) : c'est l'**URL hébergée**.
-L'utilisateur colle dans Gmail/Outlook un `<img src="https://siglair.app/s/{slug}.gif">`.
+L'utilisateur colle dans Gmail/Outlook un `<img src="https://siglair.com/s/{slug}.gif">`.
 Le serveur rend le GIF, le sert, compte les ouvertures, redirige et compte les clics.
 Changer sa signature = republier ; aucun besoin de recoller le HTML dans le client mail.
 
@@ -593,3 +593,108 @@ fonctionnalité ne doit pas disparaître de l'interface.
   `scripts/smoke.sh` qui échoue avec un code non nul.
 
 Pas de suite de tests exhaustive par fonction. Un test par comportement risqué.
+
+
+## 11. Croissance — la boucle virale et sa mesure
+
+Le produit n'a qu'un canal d'acquisition gratuit : les signatures gratuites, vues par des
+gens qui lisent des signatures. Cette section décrit comment il tourne et comment on le
+mesure. Elle n'existe pas pour faire joli : sans mesure, on ne sait pas si le canal marche,
+et on optimise au doigt mouillé.
+
+### 11.1 Ce qu'on mesure — six événements, pas cinquante
+
+| Événement | Quand | Question à laquelle il répond |
+|---|---|---|
+| `signature_generated` | signature créée puis publiée | Combien arrivent au bout de l'éditeur ? |
+| `signature_installed` | première ouverture depuis une IP différente du propriétaire | Combien l'ont vraiment collée dans leur client mail ? |
+| `powered_by_click` | clic sur le badge d'une signature Free | Combien de destinataires mordent ? |
+| `upgrade_started` | session Stripe créée | Combien atteignent la caisse ? |
+| `upgrade_completed` | abonnement actif | Combien paient ? |
+| `team_invite` | invitation envoyée | La boucle interne d'une organisation tourne-t-elle ? |
+
+**On n'en ajoute pas d'autres sans une question précise à laquelle ils répondent.**
+« Tracker tout ce qui est possible » a un coût réel : chaque événement est une donnée à
+conserver, à sécuriser, à purger sur demande RGPD et à justifier — pour un signal que
+personne ne lira. Quarante événements ne valent pas mieux que six : ils les noient.
+
+**Les ouvertures ne sont PAS une métrique de pilotage.** Apple Mail Privacy Protection
+précharge les images depuis ses propres serveurs, et le proxy d'images de Gmail met en
+cache : une « ouverture » peut n'être qu'une machine. On continue de les enregistrer parce
+qu'elles donnent une tendance, mais aucune décision ne s'appuie dessus. Le tableau de bord
+doit le dire à l'utilisateur, sinon on lui vend un chiffre faux.
+
+### 11.2 Le badge — du texte HTML, jamais dans le GIF
+
+```html
+<a href="{public_url}/r/{slug}">Powered by siglair.com</a>
+```
+
+Il reste **hors de l'image**, et c'est structurant :
+
+- un badge gravé dans le GIF disparaît quand le client mail bloque les images — c'est-à-dire
+  exactement quand on a le plus besoin qu'il reste visible ;
+- un badge dans l'image n'est pas cliquable séparément : tout le GIF pointerait au même
+  endroit, et on perdrait la distinction entre « il a cliqué sur le CTA du client » et
+  « il a cliqué sur notre badge » ;
+- du texte pèse zéro octet et se rend partout, Outlook 2016 compris.
+
+### 11.3 Attribution — par l'URL, sans aucun cookie
+
+```
+signature de X → /r/{slug} → /?ref={code} → /login?ref={code} → users.referred_by
+```
+
+Le clic sur `/r/{slug}` est compté côté serveur puis redirigé en 302 vers la landing, en
+conservant le paramètre. Le code traverse ensuite la connexion **dans l'URL** et n'est
+inscrit en base qu'à la création du compte.
+
+**Aucun cookie n'est posé sur le destinataire.** Ce n'est pas de la coquetterie : le
+destinataire d'un e-mail n'est pas notre utilisateur, il n'a rien accepté. Un cookie
+d'attribution sur lui relève d'ePrivacy et impose un bandeau de consentement — lequel
+ferait chuter le taux de conversion qu'on cherche précisément à mesurer. Le paramètre
+d'URL donne la même information, sans bandeau, et se supprime en fermant l'onglet.
+
+Le clic lui-même est journalisé avec un `ip_hash` tronqué et une famille de client
+(§4.1), jamais une IP ni un User-Agent brut.
+
+### 11.4 Le tableau de bord de croissance
+
+Une page, une phrase par ligne, la même que celle qu'on veut pouvoir dire à voix haute :
+
+```
+Mathis · 870 vues · 14 clics sur le badge · 3 comptes créés · 1 Pro
+```
+
+Ordre imposé : **clics et conversions en gros, vues en petit et grisées**, avec la mention
+de leur imprécision. Mettre les ouvertures en avant serait donner du crédit au chiffre le
+moins fiable du tableau.
+
+Taux affichés : clic / vue (indicatif), création / clic, payant / création. C'est le
+dernier qui décide si le canal vaut quelque chose.
+
+### 11.5 Ce qu'on ne fait pas
+
+- Pas de pixel tiers, pas de Google Analytics, pas de Segment. Tout est en première partie,
+  dans notre base. C'est moins de travail que de brancher un tiers, et ça supprime la
+  question du transfert hors UE.
+- Pas d'empreinte de navigateur, pas de recoupement entre sessions d'un destinataire.
+- Pas de conservation au-delà de la rétention du plan (§6). La suppression d'un compte
+  emporte ses événements de croissance comme le reste (§4.1).
+
+### 11.6 Télémétrie produit — distincte des événements de croissance
+
+Les six événements de `growth_events` restent les signaux métier de référence du canal
+viral. `product_events` répond à une autre question : à quel endroit précis du parcours
+landing → génération → inscription → édition → publication les utilisateurs bloquent-ils ?
+
+Cette télémétrie est first-party, bornée par une liste fermée d'événements et de propriétés,
+et ne contient ni saisie libre, ni contenu de signature, ni prompt IA, ni adresse IP ou
+User-Agent brut. Les identifiants navigateur sont des UUID aléatoires, le navigateur et
+l'appareil sont réduits à des catégories grossières, et les chemins sensibles sont masqués.
+Elle ne fait ni session replay, ni empreinte de navigateur, ni publicité comportementale.
+
+Le navigateur peut la désactiver depuis la page de confidentialité. `Sec-GPC: 1` et
+`DNT: 1` sont également honorés par le client et par l'API. Les données sont supprimées
+après 13 mois au maximum ; supprimer un compte ou une organisation supprime les événements
+authentifiés associés.

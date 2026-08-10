@@ -8,6 +8,8 @@ const distDir = join(rootDir, 'dist');
 const baseTemplate = await readFile(join(distDir, 'index.html'), 'utf8');
 
 const sharedProductLinks = [
+  ['/generateur-signature-email', 'Générateur de signature email'],
+  ['/gestion-signatures-email-entreprise', 'Gestion des signatures d’entreprise'],
   ['/campagnes-signature-email', 'Campagnes de signature email'],
   ['/signature-email-animee', 'Signature email animée'],
   ['/signature-email-outlook', 'Signature email Outlook'],
@@ -50,6 +52,44 @@ const pages = [
     schema: 'webpage',
   },
   {
+    path: '/generateur-signature-email',
+    title: 'Générateur de signature email gratuit | Siglair',
+    description:
+      'Créez gratuitement une signature email professionnelle à partir de votre site : logo, couleurs, coordonnées, CTA, aperçu Gmail et Outlook, puis édition complète.',
+    heading: 'Collez votre site. Repartez avec une vraie signature.',
+    intro:
+      'Le générateur Siglair analyse les informations publiques de votre site, prépare une composition aux couleurs de votre marque et l’ouvre dans un éditeur visuel entièrement modifiable.',
+    points: [
+      'Récupérez le nom, le logo, les couleurs et les liens publics disponibles.',
+      'Obtenez une première composition sans partir d’un canvas vide.',
+      'Importez les éléments manquants lorsqu’un site bloque l’analyse automatique.',
+      'Ajustez chaque texte, image, CTA, couleur, taille et animation.',
+      'Contrôlez une image fixe lisible avant de publier le GIF hébergé.',
+      'Installez ensuite la signature dans Gmail ou Outlook.',
+    ],
+    links: [['/', 'Siglair'], ['/signature-email-gmail', 'Installation Gmail'], ['/signature-email-outlook', 'Installation Outlook'], ['/pricing', 'Tarifs']],
+    schema: 'service',
+  },
+  {
+    path: '/gestion-signatures-email-entreprise',
+    title: 'Gestion des signatures email d’entreprise | Siglair',
+    description:
+      'Centralisez les signatures email de votre entreprise : modèle partagé, identité cohérente, campagnes datées, publication sans réinstallation et mesure par CTA.',
+    heading: 'Une marque cohérente dans chaque boîte mail.',
+    intro:
+      'Siglair centralise modèles, profils et campagnes sur des URL hébergées stables. Le marketing programme le message du moment sans demander à chaque membre de modifier à nouveau son client mail.',
+    points: [
+      'Définissez un modèle partagé au lieu de distribuer des copier-coller divergents.',
+      'Conservez les coordonnées propres à chaque membre de l’organisation.',
+      'Programmez une bannière ou un CTA pour un lancement, un contenu ou un événement.',
+      'Activez puis retirez automatiquement la campagne aux dates prévues.',
+      'Mesurez séparément les clics de la bannière, du site et des autres CTA.',
+      'Testez la première image et le rendu réel sur le parc Gmail et Outlook de l’équipe.',
+    ],
+    links: [['/', 'Siglair'], ['/campagnes-signature-email', 'Campagnes'], ['/signature-email-animee', 'Signature animée'], ['/pricing', 'Tarifs']],
+    schema: 'service',
+  },
+  {
     path: '/campagnes-signature-email',
     title: 'Campagnes de signature email et bannières | Siglair',
     description:
@@ -60,7 +100,7 @@ const pages = [
     points: [
       'Ajoutez une bannière et un CTA dans la signature.',
       'Préparez le message et ses dates depuis l\u2019éditeur de campagne.',
-      'Republiez le nouveau rendu sur la même URL hébergée.',
+      'Laissez Siglair activer puis retirer automatiquement le rendu aux dates prévues.',
       'Mesurez séparément les clics sur les appels à l\u2019action.',
     ],
     links: [['/', 'Siglair'], ['/signature-email-animee', 'Signature animée'], ['/pricing', 'Tarifs']],
@@ -180,7 +220,12 @@ function metadata(page) {
     <meta property="og:url" content="${canonical}" />
     <meta property="og:title" content="${escapeHtml(page.title)}" />
     <meta property="og:description" content="${escapeHtml(page.description)}" />
-    <meta name="twitter:card" content="summary" />
+    <meta property="og:image" content="${SITE_URL}/og/siglair-og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Aperçu de Siglair, générateur de signature email marketing" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:image" content="${SITE_URL}/og/siglair-og.png" />
     <meta name="twitter:url" content="${canonical}" />
     <meta name="twitter:title" content="${escapeHtml(page.title)}" />
     <meta name="twitter:description" content="${escapeHtml(page.description)}" />`;
@@ -193,6 +238,9 @@ function schemaFor(page) {
     '@id': `${SITE_URL}/#organization`,
     name: 'Siglair',
     url: `${SITE_URL}/`,
+    logo: `${SITE_URL}/brand/siglair-mark.png`,
+    description:
+      'SaaS français de création, d’hébergement et de pilotage de signatures email animées utilisées comme canal marketing.',
   };
   const webSite = {
     '@type': 'WebSite',
@@ -210,6 +258,15 @@ function schemaFor(page) {
         organization,
         webSite,
         {
+          '@type': 'WebPage',
+          '@id': `${SITE_URL}/#webpage`,
+          url: `${SITE_URL}/`,
+          name: page.title,
+          description: page.description,
+          inLanguage: 'fr-FR',
+          isPartOf: { '@id': `${SITE_URL}/#website` },
+        },
+        {
           '@type': 'SoftwareApplication',
           '@id': `${SITE_URL}/#software`,
           name: 'Siglair',
@@ -219,6 +276,13 @@ function schemaFor(page) {
           operatingSystem: 'Web',
           inLanguage: 'fr-FR',
           provider: { '@id': `${SITE_URL}/#organization` },
+          offers: {
+            '@type': 'Offer',
+            price: '0',
+            priceCurrency: 'EUR',
+            category: 'Free',
+            url: `${SITE_URL}/pricing`,
+          },
           featureList: [
             'Éditeur visuel de signature email',
             'Animations et première image de repli',

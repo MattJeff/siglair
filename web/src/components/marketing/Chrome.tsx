@@ -88,6 +88,12 @@ export function SiteFooter() {
               <Link to="/campagnes-signature-email">Campagnes</Link>
             </li>
             <li>
+              <Link to="/generateur-signature-email">Générateur de signature</Link>
+            </li>
+            <li>
+              <Link to="/gestion-signatures-email-entreprise">Gestion d’équipe</Link>
+            </li>
+            <li>
               <Link to="/signature-email-animee">Signature animée</Link>
             </li>
             <li>
