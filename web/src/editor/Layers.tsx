@@ -1,6 +1,8 @@
 /** Panneau de calques : l'ordre du tableau EST le z-index, index 0 = derrière (contrat §3). */
 import type { Dispatch } from 'react';
+import { LockKeyhole, Trash2 } from 'lucide-react';
 import type { Doc, ElementType, Profile } from '../lib/types';
+import { FREE_BRANDING_LABEL } from './BrandingUpsell';
 import { elementLabel } from './state';
 import type { Action } from './state';
 import s from './editor.module.css';
@@ -21,18 +23,40 @@ interface LayersProps {
   selectedId: string | null;
   dispatch: Dispatch<Action>;
   profile: Profile;
+  branding: boolean;
+  onBrandingAttempt: () => void;
 }
 
-export function Layers({ doc, selectedId, dispatch, profile }: LayersProps) {
+export function Layers({ doc, selectedId, dispatch, profile, branding, onBrandingAttempt }: LayersProps) {
   // Affichage du premier plan vers l'arrière-plan : c'est l'ordre visuel attendu.
   const rows = [...doc.elements].reverse();
 
-  if (rows.length === 0) {
+  if (rows.length === 0 && !branding) {
     return <p className={s.note}>Aucun calque. Ajoutez un élément depuis la palette ci-dessus.</p>;
   }
 
   return (
     <ul className={s.layers}>
+      {branding && (
+        <li className={`${s.layer} ${s.brandingLayer}`}>
+          <button type="button" className={s.layerSelect} onClick={onBrandingAttempt}>
+            <span className={s.layerIcon} aria-hidden="true">
+              S
+            </span>
+            <span className={s.layerName}>{FREE_BRANDING_LABEL}</span>
+            <LockKeyhole size={13} aria-label="Verrouillé sur Free" />
+          </button>
+          <button
+            type="button"
+            className={s.layerBtn}
+            aria-label="Retirer la mention Siglair"
+            title="Retirer avec Pro"
+            onClick={onBrandingAttempt}
+          >
+            <Trash2 size={14} />
+          </button>
+        </li>
+      )}
       {rows.map((element, reverseIndex) => {
         const index = doc.elements.length - 1 - reverseIndex;
         const name = elementLabel(element, profile);

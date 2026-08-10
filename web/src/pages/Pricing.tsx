@@ -38,7 +38,7 @@ const BILLING_FAQ: QA[] = [
   },
   {
     q: 'Le plan gratuit est-il limité dans le temps ?',
-    a: 'Non. Il n’expire pas et ne demande pas de carte bancaire. Il donne une signature animée, hébergée sur son URL, avec une discrète mention « Signature animée avec Siglair » sous la signature. Passer à Pro enlève cette mention et ouvre les campagnes datées et la mesure des clics.',
+    a: 'Non. Il n’expire pas et ne demande pas de carte bancaire. Il donne une signature animée, hébergée sur son URL, avec la discrète mention « Powered by siglair.com » sous la signature. Passer à Pro enlève cette mention et ouvre les campagnes datées et la mesure des clics.',
   },
   {
     q: 'Que change exactement l’offre annuelle ?',

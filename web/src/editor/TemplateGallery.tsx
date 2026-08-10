@@ -9,6 +9,7 @@ import type { Element } from '../lib/types';
 import { TEMPLATES, docFromTemplate } from './templates';
 import type { Template } from './templates';
 import type { Action } from './state';
+import { FREE_BRANDING_LABEL } from './BrandingUpsell';
 import { resolveTokens } from './state';
 import s from './editor.module.css';
 
@@ -53,7 +54,7 @@ function canvasTextColor(background: string) {
   return luminance > 164 ? '#0f172a' : '#f8fafc';
 }
 
-export function TemplatePreview({ template }: { template: Template }) {
+export function TemplatePreview({ template, branding = false }: { template: Template; branding?: boolean }) {
   return (
     <span
       className={s.templateThumb}
@@ -100,11 +101,12 @@ export function TemplatePreview({ template }: { template: Template }) {
           </span>
         );
       })}
+      {branding && <span className={s.templateBranding}>{FREE_BRANDING_LABEL}</span>}
     </span>
   );
 }
 
-export function TemplateGallery({ dispatch }: { dispatch: Dispatch<Action> }) {
+export function TemplateGallery({ dispatch, branding }: { dispatch: Dispatch<Action>; branding: boolean }) {
   return (
     <div className={s.templateGrid}>
       {TEMPLATES.map((template) => (
@@ -114,7 +116,7 @@ export function TemplateGallery({ dispatch }: { dispatch: Dispatch<Action> }) {
           className={s.template}
           onClick={() => dispatch({ type: 'replaceDoc', doc: docFromTemplate(template) })}
         >
-          <TemplatePreview template={template} />
+          <TemplatePreview template={template} branding={branding} />
           <span className={s.templateMeta}>
             <span className={s.templateTitle}>
               <b>{template.name}</b>

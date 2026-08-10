@@ -353,7 +353,7 @@ fn background_image(doc: &Doc) -> String {
 
 fn branding_link(opts: &RenderOpts) -> String {
     format!(
-        "Signature animée avec <a href=\"{}\" target=\"_blank\" style=\"color:#8a94a6;text-decoration:underline;\">Siglair</a>",
+        "<a href=\"{}\" target=\"_blank\" style=\"font-size:10px;color:#576274;text-decoration:underline;\">Powered by siglair.com</a>",
         esc(&opts.public_url)
     )
 }
@@ -363,7 +363,7 @@ fn branding_row(opts: &RenderOpts) -> String {
         return String::new();
     }
     format!(
-        "<tr><td style=\"padding:6px 0 0;font-family:{FONT};font-size:10px;color:#8a94a6;\">{}</td></tr>",
+        "<tr><td style=\"padding:6px 0 0;font-family:{FONT};font-size:10px;line-height:1.4;text-align:left;\">{}</td></tr>",
         branding_link(opts)
     )
 }
@@ -568,6 +568,26 @@ mod tests {
         // pas de slug = pas de GIF publié : on retombe sur du HTML lisible, pas une image morte
         let none = render_document(&d, &Profile::new(), RenderMode::Hosted, &opts(None));
         assert!(!none.contains("<img") && none.contains("<table"));
+    }
+
+    #[test]
+    fn free_branding_is_server_enforced_in_every_export_mode() {
+        let d = doc_with(vec![el("aaa1111")]);
+        for mode in [RenderMode::Hosted, RenderMode::Freeform, RenderMode::Safe] {
+            let mut branded = opts(Some("abcdefgh2345"));
+            branded.branding = true;
+            let free = render_document(&d, &Profile::new(), mode, &branded);
+            assert!(
+                free.contains("Powered by siglair.com"),
+                "le mode {mode:?} a perdu la marque Free"
+            );
+
+            let paid = render_document(&d, &Profile::new(), mode, &opts(Some("abcdefgh2345")));
+            assert!(
+                !paid.contains("Powered by siglair.com"),
+                "le mode {mode:?} a marqué un plan payant"
+            );
+        }
     }
 
     #[test]

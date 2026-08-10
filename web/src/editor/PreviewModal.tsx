@@ -44,9 +44,10 @@ interface PreviewModalProps {
   doc: Doc;
   profile: Profile;
   user: User | null;
+  branding: boolean;
 }
 
-export function PreviewModal({ open, onClose, doc, profile, user }: PreviewModalProps) {
+export function PreviewModal({ open, onClose, doc, profile, user, branding }: PreviewModalProps) {
   const [client, setClient] = useState<ClientId>('gmail');
   const [html, setHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -139,8 +140,8 @@ export function PreviewModal({ open, onClose, doc, profile, user }: PreviewModal
                 title="Aperçu de la signature"
                 sandbox=""
                 width={doc.canvas.width}
-                height={doc.canvas.height}
-                style={{ width: doc.canvas.width, height: doc.canvas.height }}
+                height={doc.canvas.height + (branding ? 34 : 0)}
+                style={{ width: doc.canvas.width, height: doc.canvas.height + (branding ? 34 : 0) }}
                 srcDoc={`${FRAME_RESET}${html}${client === 'outlook-legacy' ? FREEZE : ''}`}
               />
             </div>

@@ -16,6 +16,7 @@ import { useSession } from '../lib/session';
 import type { Asset, Signature } from '../lib/types';
 import { Assets } from '../editor/Assets';
 import { AiAssistant } from '../editor/AiAssistant';
+import { BrandingUpsell } from '../editor/BrandingUpsell';
 import { Campaigns } from '../editor/Campaigns';
 import { Canvas } from '../editor/Canvas';
 import { ExportModal } from '../editor/ExportModal';
@@ -117,7 +118,7 @@ function EditorShell({ signature }: { signature: Signature }) {
   const [grid, setGrid] = useState(true);
   const [playing, setPlaying] = useState(true);
   const [restartKey, setRestartKey] = useState(0);
-  const [modal, setModal] = useState<'preview' | 'export' | 'publish' | null>(null);
+  const [modal, setModal] = useState<'preview' | 'export' | 'publish' | 'branding' | null>(null);
   const [publicSlug, setPublicSlug] = useState(signature.public_slug);
   const [simulatedDate, setSimulatedDate] = useState(() => toLocalInput(new Date()));
 
@@ -329,6 +330,8 @@ function EditorShell({ signature }: { signature: Signature }) {
                   selectedId={state.selectedId}
                   dispatch={dispatch}
                   profile={signature.profile}
+                  branding={limits?.branding ?? false}
+                  onBrandingAttempt={() => setModal('branding')}
                 />
               </>
             )}
@@ -339,7 +342,7 @@ function EditorShell({ signature }: { signature: Signature }) {
                   <h3>Modèles</h3>
                   <span>1 clic</span>
                 </div>
-                <TemplateGallery dispatch={dispatch} />
+                <TemplateGallery dispatch={dispatch} branding={limits?.branding ?? false} />
                 <p className={`${s.note} ${s.gap}`}>
                   Un modèle remplace le document courant. Ctrl+Z revient en arrière.
                 </p>
@@ -413,6 +416,8 @@ function EditorShell({ signature }: { signature: Signature }) {
             grid={grid}
             playing={playing}
             restartKey={restartKey}
+            branding={limits?.branding ?? false}
+            onBrandingAttempt={() => setModal('branding')}
             onUploadFiles={(files, point) => void uploadAt(files, point)}
           />
 
@@ -452,7 +457,9 @@ function EditorShell({ signature }: { signature: Signature }) {
         doc={state.doc}
         profile={signature.profile}
         user={user}
+        branding={limits?.branding ?? false}
       />
+      <BrandingUpsell open={modal === 'branding'} onClose={() => setModal(null)} />
       <ExportModal
         open={modal === 'export'}
         onClose={() => setModal(null)}

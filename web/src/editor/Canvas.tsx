@@ -7,6 +7,7 @@
  * l'application entière se re-rendrait soixante fois par seconde pour un glissement.
  */
 import { useRef, useState } from 'react';
+import { LockKeyhole } from 'lucide-react';
 import type {
   CSSProperties,
   Dispatch,
@@ -14,6 +15,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { Asset, Doc, Element, Profile } from '../lib/types';
+import { FREE_BRANDING_LABEL } from './BrandingUpsell';
 import { TYPE_LABELS, elementLabel, isElementType, resolveTokens } from './state';
 import type { Action } from './state';
 import s from './editor.module.css';
@@ -32,6 +34,8 @@ interface CanvasProps {
   playing: boolean;
   /** Incrémenté par « Rejouer » : remonte les nœuds, donc relance les animations. */
   restartKey: number;
+  branding: boolean;
+  onBrandingAttempt: () => void;
   onUploadFiles?: (files: File[], point: { x: number; y: number }) => void;
 }
 
@@ -93,6 +97,8 @@ export function Canvas({
   grid,
   playing,
   restartKey,
+  branding,
+  onBrandingAttempt,
   onUploadFiles,
 }: CanvasProps) {
   // Le geste lit le zoom courant sans devoir se réabonner à chaque changement.
@@ -214,6 +220,9 @@ export function Canvas({
     backgroundImage: doc.canvas.bgImage
       ? `linear-gradient(rgba(0,0,0,${doc.canvas.overlay}),rgba(0,0,0,${doc.canvas.overlay})),url("${doc.canvas.bgImage}")`
       : undefined,
+  };
+  const signatureStyle: CSSProperties = {
+    width: doc.canvas.width,
     transform: `scale(${zoom})`,
   };
 
@@ -221,10 +230,11 @@ export function Canvas({
     <div className={s.canvasWrap}>
       {/* data-motion="keep" : les animations de la signature SONT le contenu, elles
           survivent à prefers-reduced-motion (docs/DESIGN.md §Accessibilité). */}
-      <div
-        className={[s.canvas, grid ? s.grid : null].filter(Boolean).join(' ')}
-        style={canvasStyle}
-        data-motion="keep"
+      <div className={s.canvasSignature} style={signatureStyle}>
+        <div
+          className={[s.canvas, grid ? s.grid : null].filter(Boolean).join(' ')}
+          style={canvasStyle}
+          data-motion="keep"
         onPointerDown={(event) => {
           if (event.target === event.currentTarget) dispatch({ type: 'select', id: null });
         }}
@@ -257,7 +267,7 @@ export function Canvas({
             y: point.y,
           });
         }}
-      >
+        >
         {dropActive && <div className={s.canvasDropHint}>Déposez vos images, GIF ou vidéos</div>}
         {doc.elements.map((element, index) => {
           if (element.hidden) return null;
@@ -384,6 +394,18 @@ export function Canvas({
             </button>
           );
         })}
+        </div>
+        {branding && (
+          <button
+            type="button"
+            className={s.freeBranding}
+            onClick={onBrandingAttempt}
+            title="Retirer la mention avec Pro"
+          >
+            <span>{FREE_BRANDING_LABEL}</span>
+            <LockKeyhole size={11} aria-hidden="true" />
+          </button>
+        )}
       </div>
     </div>
   );

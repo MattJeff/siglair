@@ -615,6 +615,17 @@
   color: var(--yellow);
 }
 
+.brandingLayer {
+  border-color: color-mix(in srgb, var(--blue2) 28%, var(--line));
+  background: color-mix(in srgb, var(--accent-soft) 54%, var(--surface-1));
+}
+
+.brandingLayer .layerIcon {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--blue2);
+}
+
 /* ---------------- Modèles ---------------- */
 
 .templateGrid {
@@ -668,6 +679,17 @@
 .templatePreviewElement[data-type='divider'] {
   min-height: 1px;
   padding: 0;
+}
+
+.templateBranding {
+  position: absolute;
+  z-index: 30;
+  bottom: 3px;
+  left: 5px;
+  font-size: 5.5px;
+  line-height: 1;
+  color: color-mix(in srgb, var(--text) 70%, transparent);
+  text-decoration: underline;
 }
 
 .templateAvatar {
@@ -979,11 +1001,47 @@
 .canvas {
   position: relative;
   overflow: hidden;
-  transform-origin: center;
   background-position: center;
   background-size: cover;
   box-shadow: var(--shadow);
   outline: 1px solid color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+.canvasSignature {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  align-items: flex-start;
+  transform-origin: center;
+}
+
+.freeBranding {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 6px;
+  margin-top: 7px;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  font-size: 10px;
+  line-height: 1.2;
+  color: #8a94a6;
+  background: color-mix(in srgb, var(--panel2) 72%, transparent);
+  cursor: pointer;
+  transition: color 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.freeBranding span {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.freeBranding:hover,
+.freeBranding:focus-visible {
+  border-color: color-mix(in srgb, var(--blue2) 52%, transparent);
+  color: var(--text);
+  background: var(--panel3);
 }
 
 .grid::after {
@@ -2129,6 +2187,88 @@
 .publishCodeDetails .exportCode {
   height: 140px;
   margin-top: 10px;
+}
+
+/* ---------------- Upsell marque Free ---------------- */
+
+.brandingUpsell {
+  display: grid;
+  grid-template-columns: 48px 1fr;
+  gap: 14px;
+  align-items: start;
+}
+
+.brandingUpsellIcon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--blue2) 38%, transparent);
+  border-radius: 8px;
+  color: var(--blue2);
+  background: var(--accent-soft);
+}
+
+.brandingUpsell h3 {
+  margin: 1px 0 5px;
+  font-size: 16px;
+  letter-spacing: 0;
+}
+
+.brandingUpsell p {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--ink-2);
+}
+
+.brandingSample {
+  display: flex;
+  grid-column: 1 / -1;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel2);
+}
+
+.brandingSample span {
+  font-size: 11px;
+  color: var(--ink-2);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.brandingSample small {
+  font-size: 11px;
+  color: var(--blue2);
+}
+
+.brandingUpsellActions {
+  display: flex;
+  grid-column: 1 / -1;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.brandingUpgrade {
+  display: inline-flex;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 16px;
+  border-radius: var(--r);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--on-primary);
+  background: var(--grad-primary);
+  text-decoration: none;
+}
+
+.brandingUpgrade:hover {
+  filter: brightness(1.08);
 }
 
 .confetti {
