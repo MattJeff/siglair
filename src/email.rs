@@ -93,7 +93,9 @@ pub async fn send_render_failed(
 
 // ---------------------------------------------------------------- envoi
 
-async fn send(
+/// `pub(crate)` pour `billing::lifecycle` : les relances d'impayé sont du texte de
+/// facturation, il vit avec la règle de facturation, pas ici.
+pub(crate) async fn send(
     st: &AppState,
     to: &str,
     subject: &str,

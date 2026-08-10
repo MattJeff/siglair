@@ -56,8 +56,17 @@ pub fn router() -> Router<AppState> {
 
 /// `GET /api/me` — contrat §5.2.
 pub async fn me(State(st): State<AppState>, user: CurrentUser) -> Result<Json<Value>> {
-    let rows = sqlx::query_as::<_, (uuid::Uuid, String, String, String, String)>(
-        "SELECT o.id, o.name, o.slug::text, o.plan, m.role
+    type OrgRow = (
+        uuid::Uuid,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<chrono::DateTime<chrono::Utc>>,
+        String,
+    );
+    let rows = sqlx::query_as::<_, OrgRow>(
+        "SELECT o.id, o.name, o.slug::text, o.plan, o.subscription_status, o.grace_until, m.role
          FROM org_members m JOIN orgs o ON o.id = m.org_id
          WHERE m.user_id = $1 ORDER BY m.created_at, o.id",
     )
@@ -65,10 +74,18 @@ pub async fn me(State(st): State<AppState>, user: CurrentUser) -> Result<Json<Va
     .fetch_all(&st.db)
     .await?;
 
+    // Même règle que partout ailleurs : le plan annoncé est celui qui donne accès. Le
+    // sélecteur d'organisation ne doit pas afficher « Pro » sur une org déjà retombée.
     let orgs: Vec<Value> = rows
         .iter()
-        .map(|(id, name, slug, plan, role)| {
-            json!({ "id": id, "name": name, "slug": slug, "plan": plan, "role": role })
+        .map(|(id, name, slug, plan, status, grace, role)| {
+            let effective =
+                crate::billing::lifecycle::effective_plan(&crate::billing::lifecycle::OrgBilling {
+                    plan: plan.clone(),
+                    subscription_status: status.clone(),
+                    grace_until: *grace,
+                });
+            json!({ "id": id, "name": name, "slug": slug, "plan": effective.id, "role": role })
         })
         .collect();
 
@@ -181,6 +198,13 @@ pub async fn accept_invite(
     .execute(&mut *tx)
     .await?;
     tx.commit().await?;
+
+    // Après le commit, jamais dedans : un aller-retour Stripe de 15 s tiendrait un verrou
+    // sur `invites` et `org_members`. Best effort — un membre entre même si Stripe est
+    // injoignable, le webhook `customer.subscription.updated` rattrape la vérité.
+    if let Err(e) = crate::billing::sync_seats(&st, org_id).await {
+        tracing::warn!(error = ?e, %org_id, "sièges non synchronisés chez Stripe");
+    }
 
     Ok(Json(json!({ "org_id": org_id, "role": role })))
 }

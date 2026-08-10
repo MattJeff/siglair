@@ -246,7 +246,8 @@ PATCH  /api/orgs/{id}                     {name?, analytics_enabled?}
 POST   /api/orgs/{id}/rollout             {template_id} → génère/republie une signature
                                           par membre à partir de son `profile`
 
-POST   /api/billing/checkout              {plan, seats?} → {url} (Stripe Checkout)
+POST   /api/billing/checkout              {plan, interval?, seats?} → {url} (Stripe Checkout)
+                                          interval = month (défaut) | year ; valeur inconnue → 422
 POST   /api/billing/portal                → {url} (Customer Portal)
 GET    /api/billing/subscription          → état courant
 POST   /api/stripe/webhook                signature vérifiée ; PAS de session
@@ -270,21 +271,26 @@ Le `message` est affichable tel quel à l'utilisateur, en français. Aucun déta
 | Prix mensuel | 0 € | **7,90 €** | **5,90 € / membre**, min. 3 sièges |
 | Prix annuel (2 mois offerts) | — | 79 € | 59 € / membre |
 | Signatures | 1 | illimité | illimité |
-| **GIF hébergé + URL** | ❌ | ✅ | ✅ |
+| **GIF hébergé + URL** | ✅ avec marque | ✅ | ✅ |
 | Presets d'animation | 4 de base | les 14 | les 14 |
-| Analytics | ❌ | 30 jours | 12 mois |
+| Analytics | ❌ | 30 jours | 365 jours |
 | Assets | 10 Mo | 500 Mo | 5 Go / org |
-| Campagnes datées | ❌ | ✅ | ✅ |
+| Campagnes datées | ❌ | sur ses signatures | poussées à toute l'équipe |
 | Membres, rôles, modèle verrouillé | ❌ | ❌ | ✅ |
 | Déploiement en masse (rollout) | ❌ | ❌ | ✅ |
 | Marque Siglair dans l'export | ✅ imposée | ❌ | ❌ |
 
 Logique de la grille, à ne pas défaire sans y réfléchir :
 
-- Le verrou Free → Pro est le **GIF hébergé**, c'est-à-dire le produit. Limiter Free à
-  « 10 signatures » aurait l'air mesquin sans rien protéger : personne n'a besoin de dix
-  signatures personnelles. Une seule signature complète et parfaitement fonctionnelle, mais
-  en export statique.
+- Le verrou Free → Pro est la **marque imposée**, pas l'accès au produit. Free héberge
+  une vraie signature animée à son URL : sans ça l'utilisateur gratuit n'a jamais vécu ce
+  qu'on lui vend, et chaque email gratuit qui porte la marque est le seul canal viral du
+  produit. Une seule signature, complète et parfaitement fonctionnelle.
+  (Écart assumé avec la version initiale de ce tableau, qui coupait le GIF hébergé sur
+  Free ; `src/plans.rs` fait foi et le dit dans son commentaire.)
+- Le verrou Pro → Team côté campagnes est la **portée** (`CampaignScope`), pas un quota :
+  Pro programme une bannière sur SES signatures, Team la pousse sur celles de tous les
+  membres. C'est cette diffusion qui fait du produit un canal marketing.
 - La marque imposée sur Free n'est pas une punition, c'est le canal d'acquisition : chaque
   email gratuit porte le produit vers un public déjà qualifié. C'est le seul canal viral
   gratuit dont dispose ce produit.
@@ -554,7 +560,9 @@ GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY   # .p8, PEM
 RESEND_API_KEY, RESEND_FROM
 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
-STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM
+STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM                # plusieurs ids séparés par une virgule
+STRIPE_PRICE_PRO_YEARLY, STRIPE_PRICE_TEAM_YEARLY  # facultatif ; absent → Checkout annuel 501
+SIGLAIR_LEGAL_NAME, SIGLAIR_LEGAL_SIREN, SIGLAIR_LEGAL_VAT   # pied de facture, défauts fournis
 AI_BASE_URL                  # défaut https://api.x.ai/v1 (xAI Grok, compatible OpenAI)
 AI_MODEL                     # nom exact du modèle — AUCUNE valeur par défaut codée en dur
 AI_API_KEY                   # absent → repli déterministe du §6bis.5, jamais une panne

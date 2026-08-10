@@ -73,7 +73,11 @@ assert.match(llms, /restent sous leur contrôle/i);
 
 const pricing = await readFile(htmlPath('/pricing'), 'utf8');
 assert.match(pricing, /<title>Tarifs des signatures et campagnes email \| Siglair<\/title>/);
-assert.match(pricing, /<h1>Activez le canal\. Étendez‑le à toute l’équipe\.<\/h1>/);
-assert.match(pricing, /Pro ajoute les campagnes datées/);
+assert.match(pricing, /<h1>Gratuit pour signer\. Payant pour diffuser\.<\/h1>/);
+// La grille servie aux crawlers doit être celle de src/plans.rs : Free héberge le GIF,
+// le verrou Pro est la marque et les campagnes. L'ancienne assertion décrivait la grille
+// abandonnée (« Free exporte du HTML statique ») et la verrouillait dans les résultats.
+assert.match(pricing, /Pro enlève la marque, ouvre les campagnes datées/);
+assert.match(pricing, /Free héberge une signature animée/);
 
 console.log(`SEO smoke: ${indexablePages.length} pages indexables et ${legalPages.length} pages noindex validées.`);

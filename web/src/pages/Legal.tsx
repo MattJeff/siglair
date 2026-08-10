@@ -78,7 +78,7 @@ function Mentions() {
       <dl>
         <dt>Raison sociale et forme juridique</dt>
         <dd>
-          <Todo>dénomination sociale et forme (SAS, SASU, EI…)</Todo>
+          KAIROS, société par actions simplifiée (SAS)
         </dd>
         <dt>Capital social</dt>
         <dd>
@@ -86,15 +86,15 @@ function Mentions() {
         </dd>
         <dt>Siège social</dt>
         <dd>
-          <Todo>adresse postale complète</Todo>
+          Placette Jean-Sébastien Bach, 35135 Chantepie, France
         </dd>
         <dt>Immatriculation</dt>
         <dd>
-          <Todo>SIREN / SIRET, ville du RCS</Todo>
+          SIREN 887 948 818 — SIRET du siège 887 948 818 00018 — <Todo>ville du RCS (Rennes ?), à recopier depuis l’extrait Kbis</Todo>
         </dd>
         <dt>Numéro de TVA intracommunautaire</dt>
         <dd>
-          <Todo>numéro de TVA, ou mention « non assujetti »</Todo>
+          FR68 887 948 818
         </dd>
         <dt>Directeur de la publication</dt>
         <dd>
@@ -122,15 +122,15 @@ function Mentions() {
       <dl>
         <dt>Raison sociale</dt>
         <dd>
-          <Todo>nom de l’hébergeur</Todo>
+          Hetzner Online GmbH
         </dd>
         <dt>Adresse</dt>
         <dd>
-          <Todo>adresse postale de l’hébergeur</Todo>
+          Industriestr. 25, 91710 Gunzenhausen, Allemagne
         </dd>
         <dt>Téléphone</dt>
         <dd>
-          <Todo>téléphone de l’hébergeur</Todo>
+          +49 9831 505-0
         </dd>
         <dt>Localisation des serveurs</dt>
         <dd>

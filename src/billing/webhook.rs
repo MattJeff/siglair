@@ -18,6 +18,7 @@ use sqlx::PgPool;
 use subtle::ConstantTimeEq;
 use uuid::Uuid;
 
+use super::lifecycle;
 use super::stripe::{plan_for_price, Stripe, Subscription};
 use crate::{config::StripeConfig, AppState};
 
@@ -41,7 +42,21 @@ pub async fn handle(State(state): State<AppState>, headers: HeaderMap, body: Byt
     }
 
     match process(&state, cfg, &body).await {
-        Ok(()) => StatusCode::OK.into_response(),
+        Ok(()) => {
+            // ponytail : le balayage des impayés (relances J+1/J+3/J+6 et bascule vers
+            // Free) roule sur le trafic webhook plutôt que sur un cron — et ce trafic est
+            // précisément dense pendant un impayé, puisque Stripe réessaie. Détaché : ni
+            // le délai ni l'échec du balayage ne doivent changer la réponse à Stripe, qui
+            // rejouerait l'événement. Plafond connu, remplacement en une ligne :
+            // `tokio::spawn` d'une boucle horaire sur `lifecycle::sweep` dans bin/api.rs.
+            let st = state.clone();
+            tokio::spawn(async move {
+                if let Err(e) = lifecycle::sweep(&st).await {
+                    tracing::error!(error = ?e, "balayage des impayés en échec");
+                }
+            });
+            StatusCode::OK.into_response()
+        }
         // 500 = Stripe réessaiera. C'est voulu : un échec transitoire de la DB ne doit pas
         // perdre l'activation d'un abonnement payé.
         Err(e) => {
@@ -144,11 +159,27 @@ struct SessionObject {
     client_reference_id: Option<String>,
 }
 
-/// Objet `invoice` — on ne lit que le client : le plan ne bouge pas sur un impayé.
+/// Objet `invoice` — le plan ne bouge pas sur un impayé, on ne lit donc que de quoi
+/// retrouver l'org et, pour le 3-D Secure, la page où le client s'authentifie.
 #[derive(Deserialize)]
 struct InvoiceObject {
     #[serde(default)]
     customer: Option<String>,
+    /// Page Stripe hébergée portant le bouton d'authentification bancaire.
+    #[serde(default)]
+    hosted_invoice_url: Option<String>,
+}
+
+/// Objet `dispute`. Il ne porte **pas** de `customer` : remonter à l'organisation
+/// demanderait un aller-retour de plus chez Stripe, pour une alerte qui se traite de
+/// toute façon dans le tableau de bord Stripe.
+#[derive(Deserialize)]
+struct DisputeObject {
+    id: String,
+    #[serde(default)]
+    amount: i64,
+    #[serde(default)]
+    reason: Option<String>,
 }
 
 async fn process(state: &AppState, cfg: &StripeConfig, body: &[u8]) -> anyhow::Result<()> {
@@ -247,21 +278,94 @@ async fn apply(state: &AppState, cfg: &StripeConfig, event: Event) -> anyhow::Re
             .await?;
         }
 
+        // Le portail Stripe autorise la pause : sans ces deux branches, un client qui met
+        // son abonnement en pause continue d'être servi, et celui qui le reprend reste
+        // bloqué au plan Free.
+        "customer.subscription.paused" => {
+            let sub: Subscription = serde_json::from_value(event.data.object)?;
+            let Some(org) = sub_org(state, &sub).await? else {
+                return unknown_org(&event.kind);
+            };
+            lifecycle::pause(state, org).await?;
+        }
+
+        "customer.subscription.resumed" => {
+            let sub: Subscription = serde_json::from_value(event.data.object)?;
+            let Some(org) = sub_org(state, &sub).await? else {
+                return unknown_org(&event.kind);
+            };
+            // Le plan est relu depuis le price id, comme partout ailleurs.
+            apply_subscription(state, cfg, org, &sub).await?;
+            lifecycle::clear_dunning(state, org).await?;
+        }
+
+        "customer.subscription.trial_will_end" => {
+            let sub: Subscription = serde_json::from_value(event.data.object)?;
+            let Some(org) = sub_org(state, &sub).await? else {
+                return unknown_org(&event.kind);
+            };
+            lifecycle::trial_will_end(state, org).await?;
+        }
+
         "invoice.payment_failed" => {
             let inv: InvoiceObject = serde_json::from_value(event.data.object)?;
             let Some(org) = resolve_org(&state.db, inv.customer.as_deref(), None).await? else {
                 return unknown_org(&event.kind);
             };
-            // Impayé ≠ résiliation : le plan et les données restent, Stripe relance.
-            sqlx::query("UPDATE orgs SET subscription_status = 'past_due' WHERE id = $1")
-                .bind(org)
-                .execute(&state.db)
-                .await?;
+            // Impayé ≠ résiliation : le plan et les données restent, l'accès aussi
+            // pendant sept jours (lifecycle.rs), et Stripe relance de son côté.
+            lifecycle::begin_grace(state, org, "past_due").await?;
+        }
+
+        // 3-D Secure. Obligatoire en Europe, donc ce cas arrive dès les premiers clients :
+        // le paiement n'est ni accepté ni refusé, il attend le client, qui ne sait pas
+        // qu'on l'attend.
+        "invoice.payment_action_required" => {
+            let inv: InvoiceObject = serde_json::from_value(event.data.object)?;
+            let Some(org) = resolve_org(&state.db, inv.customer.as_deref(), None).await? else {
+                return unknown_org(&event.kind);
+            };
+            lifecycle::require_action(state, org, inv.hosted_invoice_url.as_deref()).await?;
+        }
+
+        // Sortie propre de l'impayé : c'est le seul événement qui referme la période de
+        // grâce. `invoice.payment_succeeded` ne suffirait pas — une facture peut être
+        // soldée hors carte (virement, avoir).
+        "invoice.paid" => {
+            let inv: InvoiceObject = serde_json::from_value(event.data.object)?;
+            let Some(org) = resolve_org(&state.db, inv.customer.as_deref(), None).await? else {
+                return unknown_org(&event.kind);
+            };
+            lifecycle::clear_dunning(state, org).await?;
+        }
+
+        // On ne coupe rien : une contestation est le plus souvent un client qui ne
+        // reconnaît pas un libellé. Mais ignorée, elle est perdue d'office.
+        "charge.dispute.created" => {
+            let d: DisputeObject = serde_json::from_value(event.data.object)?;
+            lifecycle::dispute_opened(
+                state,
+                &d.id,
+                d.amount,
+                d.reason.as_deref().unwrap_or("non précisé"),
+            )
+            .await;
         }
 
         _ => {}
     }
     Ok(())
+}
+
+/// Org d'un événement d'abonnement. Les métadonnées ne servent qu'à identifier, jamais à
+/// accorder un plan (contrat §8).
+async fn sub_org(state: &AppState, sub: &Subscription) -> anyhow::Result<Option<Uuid>> {
+    resolve_org(
+        &state.db,
+        Some(&sub.customer),
+        sub.metadata.get("org_id").map(String::as_str),
+    )
+    .await
 }
 
 async fn apply_subscription(
@@ -271,7 +375,15 @@ async fn apply_subscription(
     sub: &Subscription,
 ) -> anyhow::Result<()> {
     let priced = sub.price_id().and_then(|p| plan_for_price(cfg, p));
-    let active = matches!(sub.status.as_str(), "active" | "trialing" | "past_due");
+    // `unpaid` est dans la liste — ce n'est pas un oubli inversé. Stripe y passe quand SA
+    // politique de relance est épuisée, et cette politique est réglable dans son tableau
+    // de bord : réglée à trois jours, elle couperait un client à qui l'on vient de
+    // promettre sept jours par e-mail. C'est `grace_until` qui tranche, et c'est
+    // `lifecycle::sweep` qui bascule le plan à l'échéance.
+    let active = matches!(
+        sub.status.as_str(),
+        "active" | "trialing" | "past_due" | "unpaid"
+    );
 
     let plan = match (active, priced) {
         (true, Some(p)) => Some(p),
@@ -297,6 +409,14 @@ async fn apply_subscription(
     .bind(sub.period_end())
     .execute(&state.db)
     .await?;
+
+    // Filet : un `customer.subscription.updated` peut annoncer l'impayé sans qu'aucun
+    // `invoice.payment_failed` ne nous soit parvenu (webhook manqué, abonnement importé).
+    // Sans fenêtre de grâce, `sweep` ne verrait jamais cette org et le client garderait
+    // son plan payant indéfiniment. `begin_grace` est idempotent : elle ne repousse rien.
+    if matches!(sub.status.as_str(), "past_due" | "unpaid") {
+        lifecycle::begin_grace(state, org, &sub.status).await?;
+    }
     Ok(())
 }
 

@@ -11,10 +11,30 @@ use crate::error::{AppError, Result};
 /// pas une coquetterie : `tsc` ne type pas une réponse réseau, donc un désaccord de nom
 /// entre Rust et TypeScript ne se voit ni à la compilation, ni aux tests — seulement à
 /// l'écran, sous la forme d'un tarif vide. C'est exactement ce qui s'était produit ici.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CampaignScope {
+    /// Aucune campagne.
+    None,
+    /// Ses propres signatures uniquement.
+    Own,
+    /// Poussée à tous les membres de l'organisation.
+    Team,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct Limits {
     /// `None` = illimité.
     pub signatures: Option<u32>,
+    /// Portée des campagnes datées.
+    ///
+    /// Ce n'est pas un quota déguisé : « diffuser à toute une équipe » n'est pas
+    /// « la même chose en plus grand ». Sur Pro on programme une bannière sur SA
+    /// signature ; sur Team le marketing en pousse une sur celles de tous les
+    /// membres d'un coup, sans que personne ne touche à son client mail. C'est
+    /// cette diffusion qui fait passer le produit d'un outil de design à un canal
+    /// marketing, et c'est ce qui justifie Team.
+    pub campaigns: CampaignScope,
     pub assets_bytes: u64,
     /// `0` = pas d'analytics.
     pub analytics_days: u32,
@@ -52,6 +72,18 @@ impl Plan {
         (self.price_eur_month * 10.0 * 100.0).round() / 100.0
     }
 
+    /// Prix mensuel écrit en toutes lettres — « 7,90 € », « 79 € ». Le seul moyen de
+    /// mettre un prix dans une phrase sans le recopier : un message de quota qui cite
+    /// « 7,90 € » en dur survit à un changement de tarif et ment au client.
+    pub fn price_label(&self) -> String {
+        let p = self.price_eur_month;
+        if (p - p.round()).abs() < 0.005 {
+            format!("{p:.0} €")
+        } else {
+            format!("{p:.2} €").replace('.', ",")
+        }
+    }
+
     /// Ce que coûte réellement le plan à `seats` membres, sièges minimum appliqués.
     pub fn monthly_total(&self, seats: u32) -> f32 {
         let billed = seats.max(self.min_seats);
@@ -68,9 +100,20 @@ pub const FREE: Plan = Plan {
     min_seats: 1,
     limits: Limits {
         signatures: Some(1),
+        // Le GIF hébergé est INCLUS sur Free, avec la marque imposée. Sans lui,
+        // l'utilisateur gratuit ne peut jamais se servir du produit : il voit une
+        // animation dans l'éditeur et repart avec du HTML statique. Il n'a donc
+        // jamais vécu ce qu'on lui vend.
+        // Le badge n'est pas une punition, c'est le canal d'acquisition : chaque
+        // email gratuit affiche Siglair devant des gens qui, par définition, lisent
+        // des signatures. Coût réel : quelques secondes de CPU par publication et
+        // ~600 Mo de bande passante par mois et par utilisateur actif, sur 20 To
+        // inclus. Le verrou Free → Pro devient « enlever le badge », qui est
+        // viscéral, plutôt que « pouvoir utiliser le produit », qui est bloquant.
+        campaigns: CampaignScope::None,
+        hosted_gif: true,
         assets_bytes: 10 * 1024 * 1024,
         analytics_days: 0,
-        hosted_gif: false,
         org_templates: false,
         branding: true,
     },
@@ -89,6 +132,7 @@ pub const PRO: Plan = Plan {
         // Contrat §6 : « Signatures : Pro = illimité ». Le verrou Free → Pro est le GIF
         // hébergé, pas un compte de signatures.
         signatures: None,
+        campaigns: CampaignScope::Own,
         assets_bytes: 500 * 1024 * 1024,
         analytics_days: 30,
         hosted_gif: true,
@@ -109,6 +153,7 @@ pub const TEAM: Plan = Plan {
     min_seats: 3,
     limits: Limits {
         signatures: None,
+        campaigns: CampaignScope::Team,
         assets_bytes: 5 * 1024 * 1024 * 1024,
         analytics_days: 365,
         hosted_gif: true,
@@ -142,11 +187,12 @@ pub fn check_signature_quota(plan: &Plan, current: u32) -> Result<()> {
     }
     // Seul Free est plafonné (§6) : les deux plans payants ont `max_signatures: None` et
     // n'atteignent jamais cette ligne.
-    Err(AppError::QuotaExceeded(
-        "Le plan Free est limité à 1 signature. Passez à Pro (7,90 €/mois) pour créer autant \
-         de signatures que vous voulez, héberger vos GIF animés et suivre vos ouvertures."
-            .to_string(),
-    ))
+    Err(AppError::QuotaExceeded(format!(
+        "Le plan Free est limité à {max} signature. Passez à Pro ({prix}/mois) pour créer \
+         autant de signatures que vous voulez, héberger vos GIF animés et suivre vos \
+         ouvertures.",
+        prix = PRO.price_label()
+    )))
 }
 
 #[cfg(test)]
@@ -198,6 +244,7 @@ mod tests {
                 "analytics_days",
                 "assets_bytes",
                 "branding",
+                "campaigns",
                 "hosted_gif",
                 "org_templates",
                 "signatures"
@@ -238,6 +285,16 @@ mod tests {
         // Deux mois offerts sur l'annuel, dérivés — jamais saisis une seconde fois.
         assert_eq!(PRO.price_eur_year(), 79.0);
         assert_eq!(TEAM.price_eur_year(), 59.0);
+
+        // Les messages de quota citent le prix par cette fonction, jamais en dur : sinon
+        // un changement de tarif laisse trois phrases qui mentent au client.
+        assert_eq!(PRO.price_label(), "7,90 €");
+        assert_eq!(TEAM.price_label(), "5,90 €");
+        assert_eq!(
+            FREE.price_label(),
+            "0 €",
+            "pas de centimes sur un prix rond"
+        );
     }
 
     #[test]
@@ -250,10 +307,22 @@ mod tests {
         // §6 : Pro et Team sont illimités en signatures — le verrou Free → Pro est le GIF
         // hébergé (`hosted_gif`), pas un compte de signatures.
         assert!(check_signature_quota(&PRO, 10_000).is_ok());
-        // le verrou Free → Pro est le GIF hébergé (via ALL : clippy replierait un && de consts)
+        // Le GIF hébergé est désormais sur TOUS les plans, Free compris : sans lui,
+        // l'utilisateur gratuit ne peut pas se servir du produit. Le verrou Free → Pro
+        // est la marque imposée, pas l'accès au rendu.
         assert_eq!(
             ALL.iter().map(|p| p.limits.hosted_gif).collect::<Vec<_>>(),
-            vec![false, true, true]
+            vec![true, true, true]
+        );
+        assert_eq!(
+            ALL.iter().map(|p| p.limits.branding).collect::<Vec<_>>(),
+            vec![true, false, false],
+            "la marque imposée est le seul verrou Free → Pro sur le rendu"
+        );
+        // La diffusion à l'équipe est ce qui distingue Team, pas un quota.
+        assert_eq!(
+            ALL.iter().map(|p| p.limits.campaigns).collect::<Vec<_>>(),
+            vec![CampaignScope::None, CampaignScope::Own, CampaignScope::Team]
         );
         assert!(check_signature_quota(&TEAM, 10_000).is_ok());
         // plan inconnu (colonne corrompue, nouveau plan pas encore déployé) = Free

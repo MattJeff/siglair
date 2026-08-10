@@ -418,10 +418,11 @@ export default function Landing() {
         <section id="tarifs" className={`${s.wrap} ${s.section}`}>
           <div className={s.sectionHead}>
             <span className={s.kicker}>Tarifs</span>
-            <h2>Commencez gratuitement. Passez au Pro quand vous activez le canal.</h2>
+            <h2>Gratuit pour signer. Payant pour diffuser.</h2>
             <p className={s.lead}>
-              Le plan gratuit crée une signature complète, animée dans l’éditeur, exportable en
-              HTML. Ce qui se paie, c’est l’URL hébergée.
+              Le plan gratuit donne la vraie signature : animée, hébergée sur son URL, avec une
+              discrète mention Siglair sous le bloc. Pro l’enlève et ouvre les campagnes datées.
+              Team les pousse sur les signatures de toute l’équipe et compte les clics.
             </p>
           </div>
           <PlanCards />

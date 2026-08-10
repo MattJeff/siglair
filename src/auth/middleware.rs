@@ -99,7 +99,8 @@ impl OrgAccess {
 
 pub async fn load_org(db: &PgPool, user_id: Uuid, org_id: Uuid) -> Result<OrgAccess> {
     let row = sqlx::query(
-        "SELECT o.name, o.slug::text AS slug, o.plan, o.seats, o.analytics_enabled, m.role
+        "SELECT o.name, o.slug::text AS slug, o.plan, o.seats, o.analytics_enabled, m.role,
+                o.subscription_status, o.grace_until
          FROM org_members m JOIN orgs o ON o.id = m.org_id
          WHERE m.org_id = $1 AND m.user_id = $2",
     )
@@ -111,14 +112,20 @@ pub async fn load_org(db: &PgPool, user_id: Uuid, org_id: Uuid) -> Result<OrgAcc
     // Non-membre et org inexistante donnent la même réponse : sinon l'API confirme
     // l'existence d'organisations qui ne regardent pas l'appelant.
     let row = row.ok_or(AppError::Forbidden)?;
-    let plan: String = row.try_get("plan")?;
+    // Le droit d'accès se lit, il ne s'écrit pas : une org dont le statut se dégrade sans
+    // qu'un webhook n'arrive garderait son plan si on lisait `o.plan` seul (§6).
+    let billing = crate::billing::lifecycle::OrgBilling {
+        plan: row.try_get("plan")?,
+        subscription_status: row.try_get("subscription_status")?,
+        grace_until: row.try_get("grace_until")?,
+    };
 
     Ok(OrgAccess {
         org_id,
         user_id,
         name: row.try_get("name")?,
         slug: row.try_get("slug")?,
-        plan: Plan::get(&plan),
+        plan: crate::billing::lifecycle::effective_plan(&billing),
         seats: row.try_get("seats")?,
         analytics_enabled: row.try_get("analytics_enabled")?,
         role: row.try_get("role")?,

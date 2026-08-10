@@ -80,9 +80,16 @@ export function planFeatures(l: Limits): PlanFeature[] {
       on: true,
     },
     { label: 'GIF animé hébergé sur une URL stable', on: l.hosted_gif },
-    // L'API des campagnes utilise exactement ce verrou : sans URL hébergée, une bannière
-    // programmée ne pourrait pas changer dans les signatures déjà installées.
-    { label: 'Campagnes datées et CTA republiables', on: l.hosted_gif },
+    // La PORTÉE, pas `hosted_gif` : Free a désormais le GIF hébergé, et ce verrou-ci
+    // affichait donc « Campagnes datées ✓ » sur un plan à qui l'API répond 402.
+    // C'est exactement le même test que `require_paid_plan` dans routes/campaigns.rs.
+    {
+      label:
+        l.campaigns === 'team'
+          ? 'Campagnes poussées à toute l’équipe'
+          : 'Campagnes datées sur vos signatures',
+      on: l.campaigns !== 'none',
+    },
     {
       label:
         l.analytics_days > 0

@@ -253,6 +253,11 @@ async fn remove_member(
     if n == 0 {
         return Err(AppError::NotFound);
     }
+    // Après le garde `n == 0` : un retrait qui n'a rien supprimé ne doit pas déclencher
+    // d'écriture Stripe. Best effort, le retrait aboutit même si Stripe est injoignable.
+    if let Err(e) = crate::billing::sync_seats(&st, id).await {
+        tracing::warn!(error = ?e, org_id = %id, "sièges non synchronisés chez Stripe");
+    }
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -356,11 +361,13 @@ async fn create_invite(
     let org = load_org(&st.db, id).await?;
     let plan = access.plan;
     if !plan.limits.org_templates {
-        return Err(AppError::QuotaExceeded(
-            "Les membres et les rôles sont inclus dans le plan Team (5,90 €/membre, 3 sièges \
-             minimum). Passez à Team pour inviter votre équipe."
-                .into(),
-        ));
+        // Le prix vient de `plans.rs` : recopié ici, il survivrait à un changement de tarif.
+        return Err(AppError::QuotaExceeded(format!(
+            "Les membres et les rôles sont inclus dans le plan Team ({prix}/membre, {min} \
+             sièges minimum). Passez à Team pour inviter votre équipe.",
+            prix = crate::plans::TEAM.price_label(),
+            min = crate::plans::TEAM.min_seats,
+        )));
     }
 
     let email = clean_email(&req.email)?;

@@ -13,20 +13,31 @@ import type { ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { Spinner } from '../Spinner';
 import { formatBytes, formatPrice, formatRetention, planFeatures } from '../app/helpers';
+import type { PlanFeature } from '../app/helpers';
 import { useSession } from '../../lib/session';
-import type { PlanInfo } from '../../lib/types';
+import type { CampaignScope, PlanInfo } from '../../lib/types';
 import { START_HREF } from './Chrome';
 import s from './plans.module.css';
 
 export type Cycle = 'monthly' | 'yearly';
 
-/** Lien de souscription : /app/billing après connexion (contrat §5.3). */
-const planHref = (plan: string): string =>
-  `/login?next=${encodeURIComponent('/app/billing')}&plan=${encodeURIComponent(plan)}`;
+/**
+ * Lien de souscription : /app/billing après connexion (contrat §5.3).
+ *
+ * `cycle` voyage avec le plan pour que la périodicité choisie ici soit celle envoyée au
+ * Checkout (`CheckoutReq.interval`, src/billing/mod.rs). /app/billing ne le lit pas encore :
+ * signalé dans le rapport, l'annuel part donc en mensuel tant que ce n'est pas branché.
+ */
+const billingQuery = (plan: string, cycle: Cycle): string =>
+  `plan=${encodeURIComponent(plan)}&cycle=${cycle}`;
 
-/** ponytail : deux mois offerts sur l'année (contrat §6). À déplacer dans
- *  PlanInfo le jour où l'API sert un `price_eur_year`. */
+const planHref = (plan: string, cycle: Cycle): string =>
+  `/login?next=${encodeURIComponent('/app/billing')}&${billingQuery(plan, cycle)}`;
+
+/** ponytail : deux mois offerts sur l'année (contrat §6, `Plan::price_eur_year`).
+ *  À déplacer dans PlanInfo le jour où l'API sert un `price_eur_year`. */
 const MONTHS_BILLED_YEARLY = 10;
+const MONTHS_FREE_YEARLY = 12 - MONTHS_BILLED_YEARLY;
 
 /** Première lettre en capitale : les mêmes formateurs servent en milieu de phrase. */
 const cap = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
@@ -36,10 +47,24 @@ const formatSignatures = (n: number | null): string =>
 
 /** Argumentaire par plan. Aucun quota ici : seulement à qui il s'adresse. */
 const PITCH: Record<string, string> = {
-  free: 'Pour composer votre première signature et l’exporter en HTML statique.',
-  pro: 'Pour piloter les campagnes de votre signature et mesurer chaque CTA.',
-  team: 'Pour transformer les emails de toute votre équipe en canal marketing piloté.',
+  free: 'Une vraie signature animée, hébergée sur son URL, collée dans votre client mail. Elle porte une discrète mention Siglair.',
+  pro: 'La même signature sans notre marque, avec des campagnes datées et la mesure des clics.',
+  team: 'Les emails que votre équipe envoie déjà deviennent un canal : une campagne, poussée sur toutes les signatures, mesurée.',
 };
+
+/** Libellés du comparatif — la même distinction de portée, colonne par colonne. */
+const CAMPAIGN_CELL: Record<CampaignScope, string> = {
+  none: 'Non incluses',
+  own: 'Sur vos signatures',
+  team: 'Poussées à toute l’équipe',
+};
+
+/**
+ * `planFeatures` formule désormais la ligne « campagnes » par portée (`limits.campaigns`),
+ * comme `require_paid_plan` côté serveur. Le `map` sur le libellé exact qui vivait ici
+ * n'a plus lieu d'être : un couplage par chaîne de moins.
+ */
+const features = (plan: PlanInfo): PlanFeature[] => planFeatures(plan.limits);
 
 function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
   if (plan.price_eur_month === 0) {
@@ -58,8 +83,11 @@ function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
   const per = plan.per_seat ? ' / membre' : '';
   const unit = yearly ? `${per} / an` : `${per} / mois`;
 
+  // L'économie en euros, dérivée du même 10 : « 2 mois offerts » ne dit pas combien.
+  const saved = plan.price_eur_month * MONTHS_FREE_YEARLY;
+  const seatFloor = plan.per_seat ? ` ${plan.min_seats} membres minimum.` : '';
   const sub = yearly
-    ? `Soit ${formatPrice(amount / 12)} par mois${plan.per_seat ? ' et par membre' : ''}.`
+    ? `Soit ${formatPrice(amount / 12)} par mois${plan.per_seat ? ' et par membre' : ''}. Vous économisez ${formatPrice(saved)}${plan.per_seat ? ' par membre' : ''} sur l’année.${seatFloor}`
     : plan.per_seat
       ? `À partir de ${formatPrice(plan.price_eur_month * plan.min_seats)} par mois (${plan.min_seats} membres minimum).`
       : 'Résiliable à tout moment.';
@@ -85,8 +113,8 @@ function PlanCard({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
       ? '/app'
       : START_HREF
     : status === 'authenticated'
-      ? `/app/billing?plan=${plan.plan}`
-      : planHref(plan.plan);
+      ? `/app/billing?${billingQuery(plan.plan, cycle)}`
+      : planHref(plan.plan, cycle);
 
   return (
     <div className={`${s.card} ${featured ? s.featured : ''}`}>
@@ -95,7 +123,7 @@ function PlanCard({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
       <PlanPrice plan={plan} cycle={cycle} />
       <p className={s.pitch}>{PITCH[plan.plan] ?? ''}</p>
       <ul className={s.features}>
-        {planFeatures(plan.limits).map((f) => (
+        {features(plan).map((f) => (
           <li key={f.label} className={f.on ? undefined : s.off}>
             {f.label}
           </li>
@@ -211,10 +239,17 @@ export function PlanComparison() {
 
   const rows: { label: string; cell: (p: PlanInfo) => ReactNode }[] = [
     { label: 'Prix mensuel', cell: (p) => (p.price_eur_month === 0 ? 'Gratuit' : `${formatPrice(p.price_eur_month)}${p.per_seat ? ' / membre' : ''}`) },
+    {
+      label: 'Prix annuel (2 mois offerts)',
+      cell: (p) =>
+        p.price_eur_month === 0
+          ? 'Gratuit'
+          : `${formatPrice(p.price_eur_month * MONTHS_BILLED_YEARLY)}${p.per_seat ? ' / membre' : ''}`,
+    },
     { label: 'Membres minimum facturés', cell: (p) => (p.per_seat ? `${p.min_seats}` : '1') },
     { label: 'Signatures', cell: (p) => formatSignatures(p.limits.signatures) },
     { label: 'GIF animé hébergé sur une URL', cell: (p) => (p.limits.hosted_gif ? yes : no) },
-    { label: 'Campagnes datées et CTA republiables', cell: (p) => (p.limits.hosted_gif ? yes : no) },
+    { label: 'Campagnes datées', cell: (p) => (p.limits.campaigns === 'none' ? no : CAMPAIGN_CELL[p.limits.campaigns]) },
     { label: 'Historique des ouvertures et des clics', cell: (p) => cap(formatRetention(p.limits.analytics_days)) },
     { label: 'Espace pour les images et les GIF', cell: (p) => formatBytes(p.limits.assets_bytes) },
     { label: 'Modèles d’organisation et déploiement en masse', cell: (p) => (p.limits.org_templates ? yes : no) },

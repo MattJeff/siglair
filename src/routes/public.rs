@@ -23,7 +23,6 @@ use crate::{
     db,
     doc::{resolve_tokens, safe_href, Doc, Profile},
     error::{AppError, Result},
-    plans::Plan,
     util::{hash_ip, ua_family},
     AppState,
 };
@@ -82,18 +81,44 @@ async fn ready(State(st): State<AppState>) -> Response {
 struct ImageRow {
     id: Uuid,
     plan: String,
+    subscription_status: Option<String>,
+    grace_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Nombre de signatures de l'org plus anciennes que celle-ci. 0 = la plus ancienne.
+    /// C'est le rang qui décide quelles signatures survivent à une bascule vers Free.
+    older: i64,
     analytics_enabled: bool,
     render_id: Option<Uuid>,
     gif_key: Option<String>,
     png_key: Option<String>,
 }
 
-const IMAGE_SQL: &str = "SELECT s.id, o.plan, o.analytics_enabled, \
+// ponytail : la sous-requête `older` est corrélée, mais elle porte sur `signatures(org_id)`
+// qui est indexé et sur des orgs à quelques dizaines de lignes. Si le plan d'exécution
+// devient un problème, matérialiser le rang dans une colonne au moment de la publication.
+const IMAGE_SQL: &str = "SELECT s.id, o.plan, o.subscription_status, o.grace_until, \
+                                o.analytics_enabled, \
+                                (SELECT count(*) FROM signatures s2 \
+                                  WHERE s2.org_id = s.org_id AND s2.deleted_at IS NULL \
+                                    AND (s2.created_at, s2.id) < (s.created_at, s.id)) AS older, \
                                 r.id AS render_id, r.gif_key, r.png_key \
                          FROM signatures s \
                          JOIN orgs o ON o.id = s.org_id \
                          LEFT JOIN renders r ON r.id = s.published_render_id \
                          WHERE s.public_slug = $1::citext AND s.deleted_at IS NULL";
+
+/// Cette signature doit-elle encore être servie ?
+///
+/// `older` est son rang d'ancienneté dans l'org (0 = la plus ancienne). Après une bascule
+/// vers Free, les signatures au-delà du quota cessent d'être servies : c'est précisément
+/// ce que les e-mails de relance annoncent, et sans ça la menace était vide — un ex-Pro
+/// aux douze signatures continuait d'être servi sur les douze, gratuitement.
+fn servable(plan: &crate::plans::Plan, older: i64) -> bool {
+    plan.limits.hosted_gif
+        && plan
+            .limits
+            .signatures
+            .is_none_or(|max| older < i64::from(max))
+}
 
 async fn image(
     State(st): State<AppState>,
@@ -124,7 +149,15 @@ async fn image(
         return AppError::NotFound.into_response();
     };
 
-    if !Plan::get(&row.plan).limits.hosted_gif {
+    // Le droit de servir se lit au moment de la requête : une org en grâce garde ses GIF,
+    // une org basculée les perd sans attendre qu'un webhook réécrive une colonne.
+    let plan = crate::billing::lifecycle::effective_plan(&crate::billing::lifecycle::OrgBilling {
+        plan: row.plan.clone(),
+        subscription_status: row.subscription_status.clone(),
+        grace_until: row.grace_until,
+    });
+
+    if !servable(&plan, row.older) {
         // 402 exact pour nos propres outils, pixel neutre pour le client mail
         return blank(StatusCode::PAYMENT_REQUIRED, ext);
     }
@@ -386,6 +419,41 @@ fn client_ip(headers: &HeaderMap) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Ce qui est servi, et à qui. Faux dans un sens, on héberge gratuitement un client
+    /// qui ne paie plus ; faux dans l'autre, on casse les signatures d'un client à jour.
+    #[test]
+    fn le_quota_du_plan_effectif_decide_de_ce_qui_est_servi() {
+        use crate::plans::{FREE, PRO};
+        // Free : la plus ancienne signature reste en ligne, les suivantes non. C'est la
+        // conséquence annoncée par les e-mails de relance.
+        assert!(servable(&FREE, 0));
+        assert!(!servable(&FREE, 1));
+        assert!(!servable(&FREE, 11), "ex-Pro basculé, 12e signature");
+        // Payant : illimité, aucun rang ne coupe.
+        assert!(servable(&PRO, 0));
+        assert!(servable(&PRO, 999));
+    }
+
+    /// Le droit de servir se lit à la requête : la grâce protège, la bascule coupe, sans
+    /// dépendre d'une tâche de fond qui aurait ou non réécrit `orgs.plan`.
+    #[test]
+    fn la_grace_garde_le_gif_en_ligne_la_bascule_le_coupe() {
+        use crate::billing::lifecycle::{effective_plan_at, OrgBilling};
+        let now = chrono::Utc::now();
+        let org = |grace: Option<chrono::DateTime<chrono::Utc>>| OrgBilling {
+            plan: "pro".into(),
+            subscription_status: Some("past_due".into()),
+            grace_until: grace,
+        };
+        // en grâce : 3e signature d'un Pro impayé, toujours servie
+        let en_grace = effective_plan_at(&org(Some(now + chrono::Duration::days(2))), now);
+        assert!(servable(&en_grace, 2));
+        // grâce échue : Free, seule la plus ancienne survit
+        let echue = effective_plan_at(&org(Some(now - chrono::Duration::seconds(1))), now);
+        assert!(servable(&echue, 0));
+        assert!(!servable(&echue, 2));
+    }
 
     #[test]
     fn etag_matching_handles_lists_and_weak_tags() {

@@ -6,11 +6,15 @@ import { describe, expect, it } from 'vitest';
 import { formatBytes, formatPrice, formatRetention, planFeatures } from './helpers';
 import type { Limits } from '../../lib/types';
 
+// Le VRAI plan Free de src/plans.rs : le GIF hébergé y est inclus (avec la marque
+// imposée), c'est la portée des campagnes qui verrouille. La fixture disait l'inverse
+// et le test passait en décrivant un plan qui n'existe plus.
 const FREE: Limits = {
   signatures: 1,
   assets_bytes: 10 * 1024 ** 2,
   analytics_days: 0,
-  hosted_gif: false,
+  campaigns: 'none',
+  hosted_gif: true,
   org_templates: false,
   branding: true,
 };
@@ -19,6 +23,7 @@ const TEAM: Limits = {
   signatures: null,
   assets_bytes: 5 * 1024 ** 3,
   analytics_days: 365,
+  campaigns: 'team',
   hosted_gif: true,
   org_templates: true,
   branding: false,
@@ -49,8 +54,15 @@ describe('planFeatures', () => {
     const off = planFeatures(FREE)
       .filter((f) => !f.on)
       .map((f) => f.label);
-    expect(off).toContain('Campagnes datées et CTA republiables');
-    expect(off).toHaveLength(5); // GIF, campagnes, analytics, modèle d'équipe, sans marque
+    expect(off).toContain('Campagnes datées sur vos signatures');
+    // Free garde le GIF hébergé : restent éteintes les campagnes, les analytics, le
+    // modèle d'équipe et l'export sans marque.
+    expect(off).toEqual([
+      'Campagnes datées sur vos signatures',
+      'Ouvertures et clics',
+      'Modèle d’équipe et déploiement en masse',
+      'Export sans la marque Siglair',
+    ]);
     expect(planFeatures(TEAM).every((f) => f.on)).toBe(true);
   });
 

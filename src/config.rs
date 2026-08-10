@@ -57,6 +57,11 @@ pub struct StripeConfig {
     pub webhook_secret: String,
     pub price_pro: Option<String>,
     pub price_team: Option<String>,
+    /// Tarif annuel (§6, deux mois offerts). Facultatif : absent, seul le mensuel est
+    /// proposé, et le Checkout annuel répond 501 — jamais un repli silencieux sur le
+    /// mensuel, facturer une périodicité non choisie est un litige.
+    pub price_pro_yearly: Option<String>,
+    pub price_team_yearly: Option<String>,
 }
 
 /// Ce que renvoie `GET /api/config`.
@@ -121,6 +126,8 @@ impl Config {
                     webhook_secret,
                     price_pro: env("STRIPE_PRICE_PRO"),
                     price_team: env("STRIPE_PRICE_TEAM"),
+                    price_pro_yearly: env("STRIPE_PRICE_PRO_YEARLY"),
+                    price_team_yearly: env("STRIPE_PRICE_TEAM_YEARLY"),
                 },
             ),
             chrome_path: env("CHROME_PATH"),

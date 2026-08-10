@@ -268,9 +268,17 @@ export interface PublishResult {
 /* §6 — Plans, quotas, usage                                           */
 /* ------------------------------------------------------------------ */
 
+/** Portée des campagnes datées — cf. plans.rs, source unique. */
+export type CampaignScope = 'none' | 'own' | 'team';
+
 export interface Limits {
   /** null = illimité */
   signatures: number | null;
+  /**
+   * `own` = programmer une bannière sur ses propres signatures.
+   * `team` = la pousser sur celles de tous les membres d'un coup.
+   */
+  campaigns: CampaignScope;
   assets_bytes: number;
   /** 0 = pas d'analytics */
   analytics_days: number;
@@ -407,11 +415,25 @@ export interface AnalyticsSeries {
   top_elements: AnalyticsElement[];
 }
 
-/** GET /api/billing/subscription */
+/**
+ * GET /api/billing/subscription — la forme RÉELLE de `src/billing/mod.rs::subscription`.
+ *
+ * Ce type mentait sur trois champs : `plan` est l'objet `PlanInfo` sérialisé (le serveur
+ * envoie `Plan::get(...)`, pas son identifiant), `cancel_at_period_end` n'a jamais existé
+ * ni dans la réponse ni dans la table `orgs`, et `has_subscription` / `min_seats`
+ * manquaient. `tsc` ne type pas une réponse réseau : le désaccord ne se voyait qu'à
+ * l'écran, sous la forme d'une formule « — » et d'un bandeau jamais rendu.
+ *
+ * `normalizeSubscription` (components/app/billing/compute.ts) reste le garde-fou côté
+ * exécution ; ce type dit simplement la vérité au lecteur.
+ */
 export interface Subscription {
-  plan: Plan;
+  plan: PlanInfo;
   status: string | null;
   seats: number;
   current_period_end: string | null;
-  cancel_at_period_end: boolean;
+  /** Fin de la période de grâce d'un impayé (migration 0005). null = aucune en cours. */
+  grace_until: string | null;
+  has_subscription: boolean;
+  min_seats: number;
 }

@@ -352,9 +352,12 @@ fn quota_message(plan: &Plan) -> String {
          D'ici là, l'éditeur reste entièrement à vous."
             .to_string()
     } else {
-        "Envie d'une autre direction ? Passez à Pro (7,90 €/mois) : 30 générations par mois, \
-         le GIF hébergé à votre URL et le suivi des ouvertures."
-            .to_string()
+        format!(
+            "Envie d'une autre direction ? Passez à Pro ({prix}/mois) : {n} générations par \
+             mois, le GIF hébergé à votre URL et le suivi des ouvertures.",
+            prix = crate::plans::PRO.price_label(),
+            n = crate::plans::PRO.ai_generations.unwrap_or(0),
+        )
     }
 }
 

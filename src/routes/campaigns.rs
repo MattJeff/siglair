@@ -19,7 +19,7 @@ use crate::{
     auth::OrgAccess,
     doc::{Doc, Element, ElementType},
     error::{AppError, Result},
-    plans::Plan,
+    plans::{CampaignScope, Plan},
     AppState,
 };
 
@@ -83,15 +83,18 @@ async fn fetch(db: &PgPool, org_id: Uuid, id: Uuid) -> Result<Campaign> {
 /// et ce n'est pas un hasard — une bannière programmée n'a d'intérêt que sur une signature
 /// hébergée, celle qui se met à jour sans que personne ne recolle son HTML.
 fn require_paid_plan(plan: &Plan) -> Result<()> {
-    if plan.limits.hosted_gif {
+    // `hosted_gif` ne verrouille plus rien : Free l'a désormais à `true` (§6), ce qui
+    // ouvrait la création de campagnes à Free par l'API alors que sa portée est `None`.
+    // C'est la PORTÉE qui décide, et elle seule.
+    if plan.limits.campaigns != CampaignScope::None {
         return Ok(());
     }
-    Err(AppError::QuotaExceeded(
-        "Les campagnes datées sont incluses à partir du plan Pro (7,90 €/mois) : programmez \
-         une bannière une fois, elle apparaît et disparaît toute seule dans les signatures \
-         déjà collées dans les emails de votre équipe."
-            .into(),
-    ))
+    Err(AppError::QuotaExceeded(format!(
+        "Les campagnes datées sont incluses à partir du plan Pro ({prix}/mois) : programmez \
+         une bannière une fois, posez-la sur vos signatures et republiez — l'URL hébergée \
+         se met à jour sans que personne ne recolle son HTML.",
+        prix = crate::plans::PRO.price_label(),
+    )))
 }
 
 /// `starts_at <= now < ends_at`. Si plusieurs se chevauchent, la plus récemment démarrée
@@ -318,6 +321,17 @@ async fn remove(
 mod tests {
     use super::*;
     use chrono::Duration;
+
+    /// Le verrou porte sur la PORTÉE, pas sur `hosted_gif` : Free l'a désormais à `true`,
+    /// et le verrou d'avant laissait donc Free créer des campagnes par l'API alors que
+    /// l'interface les lui présente comme éteintes (§6 : un bouton grisé n'est pas un quota).
+    #[test]
+    fn free_ne_peut_pas_creer_de_campagne() {
+        use crate::plans::{FREE, PRO, TEAM};
+        assert!(require_paid_plan(&FREE).is_err());
+        assert!(require_paid_plan(&PRO).is_ok());
+        assert!(require_paid_plan(&TEAM).is_ok());
+    }
 
     fn at(minutes: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(1_700_000_000, 0).unwrap() + Duration::minutes(minutes)

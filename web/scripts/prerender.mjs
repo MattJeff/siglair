@@ -37,14 +37,14 @@ const pages = [
     path: '/pricing',
     title: 'Tarifs des signatures et campagnes email | Siglair',
     description:
-      'Free pour composer, Pro pour piloter les campagnes et mesurer les CTA, Team pour transformer les emails de toute votre équipe en canal marketing.',
-    heading: 'Activez le canal. Étendez\u2011le à toute l\u2019équipe.',
+      'Le plan gratuit héberge votre signature animée. Pro enlève la marque et ouvre les campagnes datées. Team fait des emails de votre équipe un canal marketing piloté.',
+    heading: 'Gratuit pour signer. Payant pour diffuser.',
     intro:
-      'Composer une signature reste gratuit. Pro ajoute l\u2019URL hébergée, les campagnes et la mesure des CTA. Team applique le même pilotage marketing aux signatures de toute votre équipe.',
+      'Le plan gratuit héberge une vraie signature animée sur son URL, avec une discrète mention Siglair. Pro enlève la marque, ouvre les campagnes datées sur vos signatures et mesure les clics. Team pousse une campagne sur les signatures de toute l\u2019équipe.',
     points: [
-      'Free permet de composer une signature et de l\u2019exporter en HTML statique.',
-      'Pro ajoute les campagnes datées, la republication et la mesure de chaque CTA.',
-      'Team déploie un modèle cohérent sur les signatures de toute l\u2019équipe.',
+      'Free héberge une signature animée sur son URL, avec une mention Siglair.',
+      'Pro enlève la marque, ouvre les campagnes datées sur ses signatures et mesure les clics.',
+      'Team pousse une campagne sur les signatures de toute l\u2019équipe en un clic.',
     ],
     links: [['/', 'Découvrir Siglair'], ...sharedProductLinks.slice(0, 4)],
     schema: 'webpage',
