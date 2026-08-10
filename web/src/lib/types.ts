@@ -139,6 +139,13 @@ export const PROFILE_KEYS = [
   'whatsapp',
   'tagline',
   'company',
+  'portfolio',
+  'github',
+  'cv',
+  'availability',
+  'location',
+  'university',
+  'graduation',
 ] as const;
 export type ProfileKey = (typeof PROFILE_KEYS)[number];
 /** Clé absente = jeton résolu en "" côté serveur. */
@@ -173,7 +180,7 @@ export interface ApiErrorBody {
 export type Plan = 'free' | 'pro' | 'team';
 export type Role = 'owner' | 'admin' | 'member';
 export type SignatureKind = 'personal' | 'org_template';
-export type AssetKind = 'image' | 'video';
+export type AssetKind = 'image' | 'video' | 'document';
 export type JobStatus = 'queued' | 'running' | 'done' | 'failed';
 export type ExportMode = 'hosted' | 'freeform' | 'safe';
 

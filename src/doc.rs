@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 use crate::error::{AppError, Result};
 
-/// Jetons `{{clé}}` : name, role, email, phone, website, linkedin, whatsapp, tagline, company.
+/// Jetons `{{clé}}` résolus depuis le profil. Les parcours spécialisés peuvent ajouter leurs
+/// propres clés validées ; un jeton inconnu disparaît au rendu.
 pub type Profile = BTreeMap<String, String>;
 
 pub const MAX_ELEMENTS: usize = 100;

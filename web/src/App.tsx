@@ -13,6 +13,7 @@ import { useSession } from './lib/session';
 const Landing = lazyPage(() => import('./pages/Landing'));
 const Pricing = lazyPage(() => import('./pages/Pricing'));
 const SeoPages = lazyPage(() => import('./pages/SeoPages'));
+const JobSeekers = lazyPage(() => import('./pages/JobSeekers'));
 const Legal = lazyPage(() => import('./pages/Legal'));
 const Login = lazyPage(() => import('./pages/Login'));
 const Invite = lazyPage(() => import('./pages/Invite'));
@@ -71,6 +72,7 @@ export default function App() {
           <Route path="/signature-email-animee" element={<SeoPages />} />
           <Route path="/signature-email-outlook" element={<SeoPages />} />
           <Route path="/signature-email-gmail" element={<SeoPages />} />
+          <Route path="/signature-email-recherche-emploi" element={<JobSeekers />} />
           <Route path="/login" element={<Login />} />
           <Route path="/invite/:token" element={<Invite />} />
           {/* Legal gère ses sous-pages (CGU, confidentialité, mentions) via useParams()['*']. */}

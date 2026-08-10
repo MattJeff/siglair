@@ -48,6 +48,9 @@ export function SiteHeader() {
             <Link to="/campagnes-signature-email" className={s.navWide}>
               Campagnes
             </Link>
+            <Link to="/signature-email-recherche-emploi" className={s.navWide}>
+              Candidature
+            </Link>
             <Link to="/#fonctionnalites" className={s.navWide}>
               Fonctionnalités
             </Link>
@@ -89,6 +92,9 @@ export function SiteFooter() {
             </li>
             <li>
               <Link to="/generateur-signature-email">Générateur de signature</Link>
+            </li>
+            <li>
+              <Link to="/signature-email-recherche-emploi">Signature pour candidater</Link>
             </li>
             <li>
               <Link to="/gestion-signatures-email-entreprise">Gestion d’équipe</Link>

@@ -192,7 +192,11 @@ function EditorShell({ signature }: { signature: Signature }) {
 
   async function uploadAt(files: File[], point: { x: number; y: number }) {
     const uploaded = await uploadFiles(files);
-    uploaded.forEach((asset, index) => {
+    uploaded
+      .filter(
+        (asset): asset is Asset & { kind: 'image' | 'video' } => asset.kind !== 'document',
+      )
+      .forEach((asset, index) => {
       const ratio = asset.width && asset.height ? asset.width / asset.height : asset.kind === 'video' ? 16 / 9 : 1;
       const maxWidth = asset.kind === 'video' ? 200 : 160;
       const maxHeight = asset.kind === 'video' ? 120 : 150;
@@ -211,7 +215,7 @@ function EditorShell({ signature }: { signature: Signature }) {
         w: Math.max(40, Math.round(width)),
         h: Math.max(40, Math.round(height)),
       });
-    });
+      });
   }
 
   // Raccourcis clavier. L'état courant passe par une ref : réabonner la fenêtre

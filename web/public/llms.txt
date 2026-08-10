@@ -17,6 +17,7 @@ Les pages sous `/app`, `/onboarding`, `/login`, `/invite` et `/api` ne sont pas 
 - [Signature email animée](https://siglair.com/signature-email-animee): Création, rendu serveur, GIF optimisé et première image de repli.
 - [Signature email Outlook](https://siglair.com/signature-email-outlook): Comportement des GIF et précautions de conception pour Outlook.
 - [Signature email Gmail](https://siglair.com/signature-email-gmail): Création et installation d'une signature hébergée dans Gmail.
+- [Signature email pour recherche d'emploi](https://siglair.com/signature-email-recherche-emploi): Générateur candidat avec CV, LinkedIn, portfolio, GitHub, disponibilité et modèles adaptés au métier recherché.
 
 ## Offres
 

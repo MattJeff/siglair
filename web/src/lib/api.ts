@@ -277,6 +277,14 @@ export const getGrowth = async (days: number): Promise<GrowthReport> =>
 export const previewDoc = (doc: Doc, profile: Profile): Promise<{ html: string }> =>
   api<{ html: string }>('/api/preview', { method: 'POST', body: json({ doc, profile }) });
 
+/** Aperçu public limité aux modèles candidature, avec le branding Free forcé côté serveur. */
+export const previewJobSeekerDoc = (doc: Doc, profile: Profile): Promise<{ html: string }> =>
+  api<{ html: string }>('/api/onboarding/job-preview', {
+    method: 'POST',
+    body: json({ doc, profile }),
+    redirectOn401: false,
+  });
+
 /**
  * Vignette du tableau de bord. **Jamais `/s/{slug}.png`** : cette URL-là est le pixel
  * d'ouverture (§5.1), et l'afficher dans l'application ferait compter une ouverture à
@@ -302,6 +310,23 @@ export const createOnboardingDraft = (brand: Brand): Promise<OnboardingDraftResu
     body: json({ brand }),
     redirectOn401: false,
   });
+
+/** Prépare une signature de candidature exacte, avec un CV PDF temporaire facultatif. */
+export function createJobSeekerDraft(
+  doc: Doc,
+  profile: Profile,
+  name: string,
+  cv?: File | null,
+): Promise<OnboardingDraftResult> {
+  const form = new FormData();
+  form.append('payload', JSON.stringify({ doc, profile, name }));
+  if (cv) form.append('cv', cv);
+  return api<OnboardingDraftResult>('/api/onboarding/job-draft', {
+    method: 'POST',
+    body: form,
+    redirectOn401: false,
+  });
+}
 
 /** Après connexion, transforme le brouillon en signature puis ouvre directement l'éditeur. */
 export const claimOnboardingDraft = (handoff: string): Promise<OnboardingClaimResult> =>

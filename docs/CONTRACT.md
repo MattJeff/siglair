@@ -114,7 +114,7 @@ au client mail. Les médias vivent dans la table `assets` et sont servis par URL
 
 ### 3.1 Jetons de profil
 
-`{{name}} {{role}} {{email}} {{phone}} {{website}} {{linkedin}} {{whatsapp}} {{tagline}} {{company}}`
+`{{name}} {{role}} {{email}} {{phone}} {{website}} {{linkedin}} {{whatsapp}} {{tagline}} {{company}} {{portfolio}} {{github}} {{cv}} {{availability}} {{location}} {{university}} {{graduation}}`
 
 Résolus depuis `signature.profile` (jsonb, mêmes clés). Un jeton inconnu est remplacé par `""`.
 La résolution se fait **côté serveur** au rendu. Un jeton inconnu ne doit jamais laisser
@@ -157,7 +157,7 @@ signatures       id, org_id→orgs, owner_user_id→users null, name,
                  doc jsonb, profile jsonb, kind (personal|org_template),
                  public_slug citext unique null, published_render_id→renders null,
                  created_at, updated_at, deleted_at
-assets           id, org_id→orgs, kind (image|video), filename, content_type,
+assets           id, org_id→orgs, kind (image|video|document), filename, content_type,
                  bytes bigint, sha256 bytea, storage_key, width int, height int,
                  created_at, unique(org_id, sha256)
 render_jobs      id, signature_id→signatures, status (queued|running|done|failed),
@@ -491,7 +491,34 @@ C'est l'entonnoir d'activation : on ne fait pas payer pour *essayer* l'IA, on fa
 celui qui a déjà vu ce qu'elle sait faire de sa marque. Le message d'atteinte de quota le
 dit dans ce sens — « Envie d'une autre direction ? » — jamais « quota dépassé ».
 
-### 6bis.7 Plus tard, pas maintenant
+### 6bis.7 Parcours recherche d’emploi
+
+`/signature-email-recherche-emploi` est une entrée publique spécialisée, pas un produit séparé.
+Elle compose une signature déterministe avec les vrais documents de l’éditeur et les jetons de
+profil candidat : métier recherché, CV, LinkedIn, portfolio, GitHub, disponibilité, localisation,
+université et diplôme.
+
+```
+POST /api/onboarding/job-preview JSON {doc, profile} → {html}
+POST /api/onboarding/job-draft   multipart {payload: {doc, profile, name}, cv?: PDF}
+                                 → {handoff, source}
+```
+
+- Les deux routes sont publiques et limitées par IP. `job-draft` accepte au plus un PDF de 5 Mo.
+- `job-preview` utilise le moteur Rust canonique, ne résout aucun média et force la mention Free.
+- Le document et le profil sont validés par des listes fermées. Aucune URL autre que HTTP(S),
+  aucun `assetId` arbitraire et aucun jeton inconnu ne sont acceptés.
+- Le brouillon et l’éventuel PDF expirent après 24 heures si aucun compte ne les réclame.
+- Le handoff signé traverse la connexion magic link ou OAuth. Une fois authentifié, le document
+  exact est créé dans l’organisation et le PDF temporaire lui est rattaché.
+- Le profil candidat et le CV ne sont jamais envoyés au fournisseur d’IA. Ce parcours utilise les
+  modèles déterministes du produit et ne consomme pas le quota de générations IA.
+- Un PDF lié depuis une signature est public et servi en téléchargement. Le produit doit le dire
+  avant l’import.
+- Free conserve la mention « Powered by siglair.com ». Les analytics restent soumis au plan :
+  aucun historique sur Free, 30 jours sur Pro, 12 mois sur Team.
+
+### 6bis.8 Plus tard, pas maintenant
 
 `acme.com` + un CSV de 34 collaborateurs → 34 signatures cohérentes. La brique existe déjà
 (`POST /api/orgs/{id}/rollout`, §5.3) : il ne manquera qu'un import CSV. À faire quand un

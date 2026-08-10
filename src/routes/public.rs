@@ -334,9 +334,15 @@ async fn media(
     }
     // `Storage::get` refuse les clés qui sortent de la racine ; rien à revalider ici
     let bytes = st.storage.get(&key).await?;
+    let content_type = content_type_of(&key);
+    let disposition = if content_type == "application/pdf" {
+        "attachment"
+    } else {
+        "inline"
+    };
     Ok((
         [
-            (header::CONTENT_TYPE, content_type_of(&key).to_string()),
+            (header::CONTENT_TYPE, content_type.to_string()),
             // la clé contient le sha256 du contenu : le média ne changera jamais
             (
                 header::CACHE_CONTROL,
@@ -344,7 +350,7 @@ async fn media(
             ),
             (header::ETAG, etag),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff".to_string()),
-            (header::CONTENT_DISPOSITION, "inline".to_string()),
+            (header::CONTENT_DISPOSITION, disposition.to_string()),
         ],
         bytes,
     )
@@ -365,6 +371,7 @@ fn content_type_of(key: &str) -> &'static str {
         Some("webp") => "image/webp",
         Some("mp4") => "video/mp4",
         Some("webm") => "video/webm",
+        Some("pdf") => "application/pdf",
         _ => "application/octet-stream",
     }
 }
@@ -514,6 +521,7 @@ mod tests {
     fn only_known_extensions_get_a_real_content_type() {
         assert_eq!(content_type_of("assets/x/ab.png"), "image/png");
         assert_eq!(content_type_of("assets/x/ab.JPEG"), "image/jpeg");
+        assert_eq!(content_type_of("assets/x/cv.pdf"), "application/pdf");
         for bad in [
             "assets/x/ab.svg",
             "assets/x/ab.html",

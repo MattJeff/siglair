@@ -28,6 +28,12 @@ pub struct Draft {
     pub profile: Profile,
     pub name: String,
     pub source: VariantSource,
+    /// Fichiers temporaires autres que les médias déjà référencés par `doc.asset_id`.
+    #[serde(default)]
+    pub temporary_asset_ids: Vec<Uuid>,
+    /// Une verticale explicite peut fournir un profil final avant la connexion.
+    #[serde(default)]
+    pub preserve_profile: bool,
 }
 
 #[derive(Serialize, Deserialize)]

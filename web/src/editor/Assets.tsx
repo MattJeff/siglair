@@ -4,7 +4,7 @@
  */
 import { useRef, useState } from 'react';
 import type { Dispatch } from 'react';
-import { Film, ImagePlus, Upload } from 'lucide-react';
+import { ExternalLink, FileText, Film, ImagePlus, Upload } from 'lucide-react';
 import { Button } from '../components/Button';
 import { useToast } from '../components/Toast';
 import { formatBytes } from '../components/app/helpers';
@@ -26,6 +26,7 @@ export function Assets({ assets, onAssetsChange, onUploadFiles, dispatch }: Asse
   const { limits, usage, refresh } = useSession();
   const imageInput = useRef<HTMLInputElement>(null);
   const videoInput = useRef<HTMLInputElement>(null);
+  const documentInput = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -83,14 +84,17 @@ export function Assets({ assets, onAssetsChange, onUploadFiles, dispatch }: Asse
         >
           <Upload size={20} aria-hidden="true" />
           <strong>Déposez vos fichiers ici</strong>
-          <span>PNG, JPG, WebP, GIF ou vidéo</span>
+          <span>PNG, JPG, WebP, GIF, vidéo ou PDF</span>
         </div>
-        <div className={s.row2}>
+        <div className={s.row3}>
           <Button variant="ghost" loading={busy} disabled={full} onClick={() => imageInput.current?.click()}>
             <ImagePlus size={15} aria-hidden="true" /> Image / GIF
           </Button>
           <Button variant="ghost" loading={busy} disabled={full} onClick={() => videoInput.current?.click()}>
             <Film size={15} aria-hidden="true" /> Vidéo
+          </Button>
+          <Button variant="ghost" loading={busy} disabled={full} onClick={() => documentInput.current?.click()}>
+            <FileText size={15} aria-hidden="true" /> PDF
           </Button>
         </div>
         <input
@@ -109,6 +113,16 @@ export function Assets({ assets, onAssetsChange, onUploadFiles, dispatch }: Asse
           type="file"
           accept="video/*"
           multiple
+          hidden
+          onChange={(event) => {
+            void upload(Array.from(event.target.files ?? []));
+            event.target.value = '';
+          }}
+        />
+        <input
+          ref={documentInput}
+          type="file"
+          accept="application/pdf"
           hidden
           onChange={(event) => {
             void upload(Array.from(event.target.files ?? []));
@@ -151,20 +165,34 @@ export function Assets({ assets, onAssetsChange, onUploadFiles, dispatch }: Asse
         <div className={s.assetList}>
           {assets.map((asset) => (
             <div key={asset.id} className={s.asset}>
-              <button
-                type="button"
-                className={s.assetPick}
-                onClick={() => dispatch({ type: 'add', kind: asset.kind, assetId: asset.id })}
-              >
-                <span className={s.srOnly}>Insérer {asset.filename}</span>
-                {asset.kind === 'video' ? (
-                  <video src={asset.url} muted playsInline />
-                ) : (
-                  <img src={asset.url} alt="" />
-                )}
-              </button>
+              {asset.kind === 'document' ? (
+                <a className={s.assetPick} href={asset.url} target="_blank" rel="noreferrer">
+                  <span className={s.srOnly}>Ouvrir {asset.filename}</span>
+                  <FileText size={30} aria-hidden="true" />
+                  <ExternalLink size={13} aria-hidden="true" />
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  className={s.assetPick}
+                  onClick={() =>
+                    dispatch({
+                      type: 'add',
+                      kind: asset.kind === 'video' ? 'video' : 'image',
+                      assetId: asset.id,
+                    })
+                  }
+                >
+                  <span className={s.srOnly}>Insérer {asset.filename}</span>
+                  {asset.kind === 'video' ? (
+                    <video src={asset.url} muted playsInline />
+                  ) : (
+                    <img src={asset.url} alt="" />
+                  )}
+                </button>
+              )}
               <span className={s.assetKind} aria-hidden="true">
-                {asset.kind === 'video' ? 'VIDÉO' : 'IMG'}
+                {asset.kind === 'video' ? 'VIDÉO' : asset.kind === 'document' ? 'PDF' : 'IMG'}
               </span>
               <button
                 type="button"

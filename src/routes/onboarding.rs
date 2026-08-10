@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 use axum::{
-    extract::State,
+    extract::{DefaultBodyLimit, Multipart, State},
     http::{HeaderMap, StatusCode},
     routing::post,
     Json, Router,
@@ -28,6 +28,7 @@ use crate::{
     doc::{Doc, Profile},
     error::{AppError, Result},
     plans::{check_signature_quota, Plan},
+    render::{html::render_document, RenderMode, RenderOpts},
     util::rate_limit,
     AppState,
 };
@@ -38,6 +39,9 @@ const HOUR: Duration = Duration::from_secs(3600);
 const ANALYZE_PER_HOUR: usize = 10;
 /// Une génération publique coûte un appel au modèle : plus stricte que l'analyse seule.
 const DRAFT_PER_HOUR: usize = 3;
+const JOB_DRAFT_PER_HOUR: usize = 5;
+const JOB_PREVIEW_PER_HOUR: usize = 300;
+const MAX_CV_BYTES: usize = 5 * 1024 * 1024;
 /// Le logo d'un visiteur qui n'a pas encore de compte : aucune organisation, purgé après 24 h.
 const TEMP_HOURS: i32 = 24;
 
@@ -45,6 +49,11 @@ pub fn router() -> Router<AppState> {
     Router::new()
         .route("/onboarding/analyze", post(analyze))
         .route("/onboarding/draft", post(create_draft))
+        .route("/onboarding/job-preview", post(preview_job_draft))
+        .route(
+            "/onboarding/job-draft",
+            post(create_job_draft).layer(DefaultBodyLimit::max(MAX_CV_BYTES + 128 * 1024)),
+        )
         .route("/onboarding/claim", post(claim_draft))
         .route("/onboarding/generate", post(generate_variants))
         .route("/onboarding/pick", post(pick))
@@ -240,7 +249,7 @@ async fn purge_expired(st: &AppState) {
     for key in keys {
         // un objet orphelin sur le disque est moins grave qu'une ligne pointant dans le vide
         if let Err(e) = st.storage.delete(&key).await {
-            tracing::warn!(error = ?e, key = %key, "logo temporaire non supprimé du stockage");
+            tracing::warn!(error = ?e, key = %key, "fichier temporaire non supprimé du stockage");
         }
     }
 }
@@ -305,11 +314,312 @@ async fn create_draft(
             profile,
             name: spec.name.chars().take(120).collect(),
             source: out.source,
+            temporary_asset_ids: Vec::new(),
+            preserve_profile: false,
         },
     )
     .await?;
 
     Ok(Json(json!({ "handoff": token, "source": out.source })))
+}
+
+#[derive(Deserialize)]
+struct JobDraftReq {
+    #[serde(default)]
+    doc: Doc,
+    #[serde(default)]
+    profile: Profile,
+    #[serde(default)]
+    name: String,
+}
+
+#[derive(Deserialize)]
+struct JobPreviewReq {
+    #[serde(default)]
+    doc: Doc,
+    #[serde(default)]
+    profile: Profile,
+}
+
+/// Aperçu public strictement limité aux modèles de candidature. Le branding Free est forcé et
+/// aucun média arbitraire n'est résolu, ce qui garde `/api/preview` privé pour l'éditeur.
+async fn preview_job_draft(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    Json(req): Json<JobPreviewReq>,
+) -> Result<Json<Value>> {
+    let ip = client_ip(&headers);
+    let key = format!("onboarding:job-preview:{}", ip.as_deref().unwrap_or("?"));
+    if !rate_limit(&key, JOB_PREVIEW_PER_HOUR, HOUR) {
+        return Err(AppError::RateLimited);
+    }
+
+    req.doc.validate()?;
+    validate_job_doc(&req.doc)?;
+    let profile = validate_job_profile(req.profile)?;
+    let opts = RenderOpts {
+        public_url: st.cfg.public_url.clone(),
+        branding: true,
+        ..Default::default()
+    };
+    Ok(Json(json!({
+        "html": render_document(&req.doc, &profile, RenderMode::Freeform, &opts)
+    })))
+}
+
+/// Verticale candidature : le profil et le document exact sont préparés avant la connexion.
+/// Aucun fournisseur IA ne reçoit le CV ou les coordonnées.
+async fn create_job_draft(
+    State(st): State<AppState>,
+    headers: HeaderMap,
+    mut form: Multipart,
+) -> Result<Json<Value>> {
+    let ip = client_ip(&headers);
+    let key = format!("onboarding:job-draft:{}", ip.as_deref().unwrap_or("?"));
+    if !rate_limit(&key, JOB_DRAFT_PER_HOUR, HOUR) {
+        return Err(AppError::RateLimited);
+    }
+
+    let mut payload = None;
+    let mut cv = None;
+    while let Some(field) = form
+        .next_field()
+        .await
+        .map_err(|_| AppError::validation("Le formulaire de candidature est illisible."))?
+    {
+        match field.name() {
+            Some("payload") => {
+                payload = Some(field.text().await.map_err(|_| {
+                    AppError::validation("Les informations de candidature sont illisibles.")
+                })?);
+            }
+            Some("cv") => {
+                let filename = field.file_name().unwrap_or("cv.pdf").to_string();
+                let bytes = field
+                    .bytes()
+                    .await
+                    .map_err(|_| AppError::validation("Le CV n'a pas pu être lu."))?
+                    .to_vec();
+                cv = Some((filename, bytes));
+            }
+            _ => {}
+        }
+    }
+
+    let raw = payload.ok_or_else(|| {
+        AppError::validation("Les informations de candidature sont obligatoires.")
+    })?;
+    let mut req: JobDraftReq = serde_json::from_str(&raw)
+        .map_err(|_| AppError::validation("Les informations de candidature sont invalides."))?;
+    req.doc.validate()?;
+    validate_job_doc(&req.doc)?;
+    req.profile = validate_job_profile(req.profile)?;
+
+    let mut temporary_asset_ids = Vec::new();
+    if let Some((filename, bytes)) = cv {
+        let (id, url) = store_temp_cv(&st, &filename, bytes).await?;
+        req.profile.insert("cv".into(), url);
+        temporary_asset_ids.push(id);
+    }
+
+    let name = clean_job_draft_name(&req.name, &req.profile);
+    let token = handoff::store(
+        &st,
+        &handoff::Draft {
+            signature_id: Uuid::new_v4(),
+            brand: Brand::default(),
+            doc: req.doc,
+            profile: req.profile,
+            name,
+            source: VariantSource::Fallback,
+            temporary_asset_ids,
+            preserve_profile: true,
+        },
+    )
+    .await?;
+
+    Ok(Json(json!({ "handoff": token, "source": "fallback" })))
+}
+
+fn clean_job_draft_name(raw: &str, profile: &Profile) -> String {
+    let value = raw.trim();
+    if !value.is_empty() && value.len() <= 120 && !value.chars().any(char::is_control) {
+        return value.to_string();
+    }
+    let role = profile
+        .get("role")
+        .map(String::as_str)
+        .unwrap_or("Recherche d'emploi");
+    format!("Candidature - {role}").chars().take(120).collect()
+}
+
+fn validate_job_profile(profile: Profile) -> Result<Profile> {
+    const ALLOWED: [&str; 16] = [
+        "name",
+        "role",
+        "email",
+        "phone",
+        "website",
+        "linkedin",
+        "tagline",
+        "company",
+        "portfolio",
+        "github",
+        "cv",
+        "availability",
+        "location",
+        "university",
+        "graduation",
+        "whatsapp",
+    ];
+    const URLS: [&str; 5] = ["website", "linkedin", "portfolio", "github", "cv"];
+
+    if profile.len() > ALLOWED.len() {
+        return Err(AppError::validation("Le profil contient trop de champs."));
+    }
+    let mut out = Profile::new();
+    for (key, value) in profile {
+        if !ALLOWED.contains(&key.as_str()) {
+            return Err(AppError::validation(
+                "Un champ du profil n'est pas autorisé.",
+            ));
+        }
+        let value = value.trim();
+        if value.is_empty() {
+            continue;
+        }
+        if value.len() > 300 || value.chars().any(char::is_control) || value.contains("{{") {
+            return Err(AppError::validation(
+                "Une valeur du profil est invalide ou trop longue.",
+            ));
+        }
+        if URLS.contains(&key.as_str()) {
+            let url = url::Url::parse(value)
+                .map_err(|_| AppError::validation("Un lien du profil n'est pas valide."))?;
+            if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+                return Err(AppError::validation(
+                    "Les liens du profil doivent utiliser HTTP ou HTTPS.",
+                ));
+            }
+        }
+        out.insert(key, value.to_string());
+    }
+    for required in ["name", "role", "email"] {
+        if out
+            .get(required)
+            .is_none_or(|value| value.trim().is_empty())
+        {
+            return Err(AppError::validation(
+                "Nom, métier recherché et email sont obligatoires.",
+            ));
+        }
+    }
+    let email = out.get("email").expect("email vérifié juste au-dessus");
+    let valid_email = email.len() <= 254
+        && !email.contains(char::is_whitespace)
+        && matches!(email.split_once('@'), Some((local, domain)) if !local.is_empty() && domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.') && !domain.contains('@'));
+    if !valid_email {
+        return Err(AppError::validation("L'adresse email n'est pas valide."));
+    }
+    Ok(out)
+}
+
+fn validate_job_doc(doc: &Doc) -> Result<()> {
+    const TOKENS: [&str; 16] = [
+        "name",
+        "role",
+        "email",
+        "phone",
+        "website",
+        "linkedin",
+        "tagline",
+        "company",
+        "portfolio",
+        "github",
+        "cv",
+        "availability",
+        "location",
+        "university",
+        "graduation",
+        "whatsapp",
+    ];
+    if !(500.0..=700.0).contains(&doc.canvas.width)
+        || !(140.0..=320.0).contains(&doc.canvas.height)
+        || !doc.canvas.bg_image.is_empty()
+        || doc.elements.len() > 30
+        || doc
+            .elements
+            .iter()
+            .any(|element| element.asset_id.is_some())
+    {
+        return Err(AppError::validation(
+            "Ce modèle de candidature n'est pas accepté.",
+        ));
+    }
+    for element in &doc.elements {
+        for value in [&element.content, &element.href] {
+            let mut cleaned = value.clone();
+            for token in TOKENS {
+                cleaned = cleaned.replace(&format!("{{{{{token}}}}}"), "");
+            }
+            if cleaned.contains("{{") || cleaned.contains("}}") {
+                return Err(AppError::validation("Le modèle contient un jeton inconnu."));
+            }
+        }
+        let known_token_href = TOKENS
+            .iter()
+            .any(|token| element.href == format!("{{{{{token}}}}}"));
+        if !element.href.is_empty() && !known_token_href && element.href != "mailto:{{email}}" {
+            return Err(AppError::validation(
+                "Un lien du modèle n'est pas autorisé.",
+            ));
+        }
+    }
+    Ok(())
+}
+
+async fn store_temp_cv(st: &AppState, filename: &str, bytes: Vec<u8>) -> Result<(Uuid, String)> {
+    if bytes.is_empty() || bytes.len() > MAX_CV_BYTES {
+        return Err(AppError::validation(
+            "Le CV doit être un PDF de 5 Mo maximum.",
+        ));
+    }
+    let detected = infer::get(&bytes)
+        .filter(|kind| kind.mime_type() == "application/pdf")
+        .ok_or_else(|| AppError::validation("Le CV doit être un véritable fichier PDF."))?;
+    purge_expired(st).await;
+    let id = Uuid::new_v4();
+    let key = format!("assets/tmp/{id}.{}", detected.extension());
+    st.storage
+        .put(&key, bytes.clone(), "application/pdf")
+        .await?;
+    let clean_filename: String = filename
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or("cv.pdf")
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    sqlx::query(
+        "INSERT INTO assets (id, org_id, kind, filename, content_type, bytes, sha256, \
+                             storage_key, expires_at) \
+         VALUES ($1, NULL, 'document', $2, 'application/pdf', $3, $4, $5, \
+                 now() + make_interval(hours => $6))",
+    )
+    .bind(id)
+    .bind(if clean_filename.is_empty() {
+        "cv.pdf"
+    } else {
+        &clean_filename
+    })
+    .bind(bytes.len() as i64)
+    .bind(Sha256::digest(&bytes).to_vec())
+    .bind(&key)
+    .bind(TEMP_HOURS)
+    .execute(&st.db)
+    .await?;
+    Ok((id, st.storage.url(&key)))
 }
 
 #[derive(Deserialize)]
@@ -328,21 +638,27 @@ async fn claim_draft(
 ) -> Result<(StatusCode, Json<Value>)> {
     let (draft_id, mut draft) = handoff::load(&st, req.handoff.trim()).await?;
 
-    if let Some((name,)) =
-        sqlx::query_as::<_, (Option<String>,)>("SELECT name FROM users WHERE id = $1")
-            .bind(access.user_id)
-            .fetch_optional(&st.db)
-            .await?
-    {
-        if let Some(name) = name.filter(|value| !value.trim().is_empty()) {
-            draft.profile.insert("name".into(), name);
+    if !draft.preserve_profile {
+        if let Some((name,)) =
+            sqlx::query_as::<_, (Option<String>,)>("SELECT name FROM users WHERE id = $1")
+                .bind(access.user_id)
+                .fetch_optional(&st.db)
+                .await?
+        {
+            if let Some(name) = name.filter(|value| !value.trim().is_empty()) {
+                draft.profile.insert("name".into(), name);
+            }
         }
     }
     let email: String = sqlx::query_scalar("SELECT email::text FROM users WHERE id = $1")
         .bind(access.user_id)
         .fetch_one(&st.db)
         .await?;
-    draft.profile.insert("email".into(), email.clone());
+    if !draft.preserve_profile {
+        draft.profile.insert("email".into(), email.clone());
+    } else {
+        fill_profile(&mut draft.profile, "email", &email);
+    }
     if draft
         .profile
         .get("name")
@@ -389,6 +705,7 @@ async fn claim_draft(
         }
         return Err(error);
     }
+    attach_temporary_documents(&st, access.org_id, &mut draft).await?;
 
     let inserted = sqlx::query(
         "INSERT INTO signatures (id, org_id, owner_user_id, name, kind, doc, profile) \
@@ -418,6 +735,57 @@ async fn claim_draft(
         StatusCode::CREATED,
         Json(json!({ "id": draft.signature_id, "name": draft.name })),
     ))
+}
+
+async fn attach_temporary_documents(
+    st: &AppState,
+    org_id: Uuid,
+    draft: &mut handoff::Draft,
+) -> Result<()> {
+    for id in draft.temporary_asset_ids.clone() {
+        let temp = sqlx::query_as::<_, (Vec<u8>, String)>(
+            "SELECT sha256, storage_key FROM assets \
+             WHERE id = $1 AND org_id IS NULL AND expires_at > now()",
+        )
+        .bind(id)
+        .fetch_optional(&st.db)
+        .await?
+        .ok_or_else(|| AppError::validation("Le CV temporaire a expiré. Importez-le à nouveau."))?;
+
+        if let Some(existing_key) = sqlx::query_scalar::<_, String>(
+            "SELECT storage_key FROM assets WHERE org_id = $1 AND sha256 = $2",
+        )
+        .bind(org_id)
+        .bind(&temp.0)
+        .fetch_optional(&st.db)
+        .await?
+        {
+            draft
+                .profile
+                .insert("cv".into(), st.storage.url(&existing_key));
+            sqlx::query("DELETE FROM assets WHERE id = $1 AND org_id IS NULL")
+                .bind(id)
+                .execute(&st.db)
+                .await?;
+            let _ = st.storage.delete(&temp.1).await;
+        } else {
+            let moved = sqlx::query(
+                "UPDATE assets SET org_id = $1, expires_at = NULL \
+                 WHERE id = $2 AND org_id IS NULL AND expires_at > now()",
+            )
+            .bind(org_id)
+            .bind(id)
+            .execute(&st.db)
+            .await?
+            .rows_affected();
+            if moved != 1 {
+                return Err(AppError::validation(
+                    "Le CV temporaire n'est plus disponible.",
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 // ------------------------------------------------------------------ generate
@@ -775,5 +1143,74 @@ mod tests {
             out.get("linkedin").map(String::as_str),
             Some("https://linkedin.com/company/acme")
         );
+    }
+
+    #[test]
+    fn le_profil_candidat_n_accepte_que_les_champs_et_urls_prevus() {
+        let valid = Profile::from([
+            ("name".into(), "Lucas Martin".into()),
+            ("role".into(), "Développeur React".into()),
+            ("email".into(), "lucas@example.com".into()),
+            ("github".into(), "https://github.com/lucas".into()),
+            ("availability".into(), "Dès septembre".into()),
+        ]);
+        assert!(validate_job_profile(valid).is_ok());
+
+        let unknown = Profile::from([
+            ("name".into(), "Lucas".into()),
+            ("role".into(), "Designer".into()),
+            ("email".into(), "lucas@example.com".into()),
+            ("admin".into(), "true".into()),
+        ]);
+        assert!(validate_job_profile(unknown).is_err());
+
+        let unsafe_url = Profile::from([
+            ("name".into(), "Lucas".into()),
+            ("role".into(), "Designer".into()),
+            ("email".into(), "lucas@example.com".into()),
+            ("portfolio".into(), "javascript:alert(1)".into()),
+        ]);
+        assert!(validate_job_profile(unsafe_url).is_err());
+
+        let invalid_email = Profile::from([
+            ("name".into(), "Lucas".into()),
+            ("role".into(), "Designer".into()),
+            ("email".into(), "lucas@localhost".into()),
+        ]);
+        assert!(validate_job_profile(invalid_email).is_err());
+    }
+
+    #[test]
+    fn le_modele_candidat_refuse_les_jetons_et_liens_arbitraires() {
+        let mut valid = Doc::default();
+        valid.elements.push(crate::doc::Element {
+            id: "profil1".into(),
+            content: "{{name}} · {{role}}".into(),
+            href: "{{portfolio}}".into(),
+            ..Default::default()
+        });
+        assert!(validate_job_doc(&valid).is_ok());
+
+        let mut unknown_token = valid.clone();
+        unknown_token.elements[0].content = "{{secret}}".into();
+        assert!(validate_job_doc(&unknown_token).is_err());
+
+        let mut arbitrary_link = valid;
+        arbitrary_link.elements[0].href = "https://attacker.example".into();
+        assert!(validate_job_doc(&arbitrary_link).is_err());
+    }
+
+    #[test]
+    fn le_nom_du_brouillon_candidat_est_borne_et_a_un_repli() {
+        let profile = Profile::from([("role".into(), "Product Designer".into())]);
+        assert_eq!(
+            clean_job_draft_name("  Candidature design  ", &profile),
+            "Candidature design"
+        );
+        assert_eq!(
+            clean_job_draft_name("", &profile),
+            "Candidature - Product Designer"
+        );
+        assert!(clean_job_draft_name(&"x".repeat(500), &profile).len() <= 120);
     }
 }

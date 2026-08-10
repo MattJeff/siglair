@@ -35,7 +35,10 @@ type EntryPoint =
   | 'editor'
   | 'settings'
   | 'upgrade_modal'
+  | 'job_seeker'
   | 'unknown';
+
+type GenerationOrigin = 'landing' | 'editor' | 'job_seeker';
 
 type EmailClient = 'gmail' | 'outlook' | 'apple_mail' | 'other' | 'unknown';
 
@@ -51,22 +54,22 @@ export interface AnalyticsEventMap {
   url_submitted: { placement: EntryPoint; had_protocol: boolean };
 
   // URL-to-signature generation
-  generation_started: IdProperties & { origin: 'landing' | 'editor'; attempt: number };
+  generation_started: IdProperties & { origin: GenerationOrigin; attempt: number };
   generation_completed: IdProperties & {
-    origin: 'landing' | 'editor';
+    origin: GenerationOrigin;
     latency_ms: number;
     logo_detected: boolean;
     colors_detected: boolean;
     contacts_detected: boolean;
   };
   generation_failed: IdProperties & {
-    origin: 'landing' | 'editor';
+    origin: GenerationOrigin;
     latency_ms?: number;
     error_code: string;
     recoverable: boolean;
   };
   generation_regenerated: IdProperties & { reason: 'user_request' | 'error_recovery' };
-  preview_viewed: IdProperties & { origin: 'landing' | 'editor' };
+  preview_viewed: IdProperties & { origin: GenerationOrigin };
   claim_clicked: IdProperties & { placement: EntryPoint };
 
   // Signup and handoff
@@ -92,7 +95,11 @@ export interface AnalyticsEventMap {
       | 'redo';
     element_type?: string;
   };
-  template_selected: IdProperties & { template_id: string; previous_template_id?: string };
+  template_selected: IdProperties & {
+    template_id: string;
+    previous_template_id?: string;
+    origin?: GenerationOrigin;
+  };
   animation_selected: IdProperties & { animation_id: string; element_type?: string };
   editor_preview_opened: IdProperties & { mode: 'desktop' | 'mobile'; client?: EmailClient };
   signature_saved: IdProperties & { edit_count?: number; duration_ms?: number };

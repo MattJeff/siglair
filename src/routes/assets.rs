@@ -79,11 +79,13 @@ fn out(st: &AppState, a: AssetRow) -> AssetOut {
     }
 }
 
-/// Types acceptés, liste fermée. Tout le reste (SVG, PDF, HTML, archives) est refusé.
+/// Types acceptés, liste fermée. Les PDF sont des documents téléchargeables, jamais des
+/// éléments de canvas. Tout le reste (SVG, HTML, archives) est refusé.
 fn kind_for(mime: &str) -> Option<&'static str> {
     match mime {
         "image/png" | "image/jpeg" | "image/gif" | "image/webp" => Some("image"),
         "video/mp4" | "video/webm" => Some("video"),
+        "application/pdf" => Some("document"),
         _ => None,
     }
 }
@@ -221,7 +223,7 @@ async fn upload(
     Ok((StatusCode::CREATED, Json(out(&st, row))))
 }
 
-const FORMAT_MSG: &str = "Format non accepté. Utilisez PNG, JPEG, GIF, WebP, MP4 ou WebM. \
+const FORMAT_MSG: &str = "Format non accepté. Utilisez PNG, JPEG, GIF, WebP, MP4, WebM ou PDF. \
                           Le SVG est refusé pour des raisons de sécurité.";
 
 async fn remove(
@@ -423,13 +425,8 @@ mod tests {
     fn only_email_safe_types_pass() {
         assert_eq!(kind_for("image/png"), Some("image"));
         assert_eq!(kind_for("video/mp4"), Some("video"));
-        for bad in [
-            "image/svg+xml",
-            "text/html",
-            "application/pdf",
-            "application/zip",
-            "",
-        ] {
+        assert_eq!(kind_for("application/pdf"), Some("document"));
+        for bad in ["image/svg+xml", "text/html", "application/zip", ""] {
             assert!(kind_for(bad).is_none(), "{bad} aurait dû être refusé");
         }
     }

@@ -13,6 +13,7 @@ const indexablePages = [
   '/signature-email-animee',
   '/signature-email-outlook',
   '/signature-email-gmail',
+  '/signature-email-recherche-emploi',
 ];
 
 const legalPages = ['/legal/cgu', '/legal/confidentialite', '/legal/mentions'];
@@ -230,6 +231,7 @@ for (const fact of [
   'Powered by siglair.com',
   '30 jours',
   '12 mois',
+  'recherche d’emploi',
 ]) {
   assert.ok(llmsFull.includes(fact), `contexte détaillé incomplet: ${fact}`);
 }

@@ -14,6 +14,7 @@ const sharedProductLinks = [
   ['/signature-email-animee', 'Signature email animée'],
   ['/signature-email-outlook', 'Signature email Outlook'],
   ['/signature-email-gmail', 'Signature email Gmail'],
+  ['/signature-email-recherche-emploi', 'Signature email pour candidater'],
   ['/pricing', 'Tarifs'],
 ];
 
@@ -155,6 +156,25 @@ const pages = [
       'Mettez à jour le rendu sur la même URL hébergée.',
     ],
     links: [['/', 'Siglair'], ['/signature-email-animee', 'Signature animée'], ['/signature-email-outlook', 'Signature Outlook']],
+    schema: 'service',
+  },
+  {
+    path: '/signature-email-recherche-emploi',
+    title: "Signature email pour recherche d'emploi | Siglair",
+    description:
+      'Créez une signature de candidature avec CV, LinkedIn, portfolio ou GitHub. Aperçu réel, PDF facultatif, édition complète et installation Gmail ou Outlook.',
+    heading: 'Chaque candidature mérite une fin d’email professionnelle.',
+    intro:
+      'Siglair réunit les preuves utiles à votre recherche d’emploi dans une signature claire, adaptée à votre profil et modifiable avant son installation dans Gmail ou Outlook.',
+    points: [
+      'Présentez le métier recherché, votre disponibilité et votre localisation.',
+      'Donnez un accès direct à votre CV, LinkedIn, portfolio ou GitHub.',
+      'Choisissez un modèle pensé pour un profil généraliste, développeur ou créatif.',
+      'Prévisualisez le vrai rendu avant de créer gratuitement votre compte.',
+      'Retrouvez exactement la signature préparée dans l’éditeur après votre connexion.',
+      'Mesurez avec Pro les clics vers les preuves consultées par les recruteurs.',
+    ],
+    links: [['/', 'Siglair'], ['/generateur-signature-email', 'Générateur pour une marque'], ['/signature-email-gmail', 'Installation Gmail'], ['/signature-email-outlook', 'Installation Outlook'], ['/pricing', 'Tarifs']],
     schema: 'service',
   },
   {

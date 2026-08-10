@@ -28,6 +28,13 @@ const EMPTY: Values = {
   whatsapp: '',
   tagline: '',
   company: '',
+  portfolio: '',
+  github: '',
+  cv: '',
+  availability: '',
+  location: '',
+  university: '',
+  graduation: '',
 };
 
 const FIELDS: { key: ProfileKey; label: string; type: string; placeholder: string }[] = [
@@ -40,6 +47,13 @@ const FIELDS: { key: ProfileKey; label: string; type: string; placeholder: strin
   { key: 'whatsapp', label: 'WhatsApp', type: 'tel', placeholder: '+33 6 12 34 56 78' },
   { key: 'tagline', label: 'Accroche', type: 'text', placeholder: 'On répond en moins d’une heure' },
   { key: 'company', label: 'Entreprise', type: 'text', placeholder: 'Exemple SAS' },
+  { key: 'portfolio', label: 'Portfolio', type: 'url', placeholder: 'https://portfolio.fr' },
+  { key: 'github', label: 'GitHub', type: 'url', placeholder: 'https://github.com/…' },
+  { key: 'cv', label: 'CV public', type: 'url', placeholder: 'https://exemple.fr/cv.pdf' },
+  { key: 'availability', label: 'Disponibilité', type: 'text', placeholder: 'Disponible dès septembre' },
+  { key: 'location', label: 'Localisation', type: 'text', placeholder: 'Paris · hybride' },
+  { key: 'university', label: 'École ou université', type: 'text', placeholder: 'Université Paris-Saclay' },
+  { key: 'graduation', label: 'Diplôme et promotion', type: 'text', placeholder: 'Master Design · 2026' },
 ];
 
 export default function Settings() {

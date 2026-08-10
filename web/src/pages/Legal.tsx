@@ -232,11 +232,20 @@ function Privacy() {
 
       <h3>Contenu que vous créez</h3>
       <p>
-        Signatures, documents de mise en page, images et GIF importés, profils de membres (nom,
-        fonction, email, téléphone, liens) utilisés pour remplir les modèles d’équipe.{' '}
+        Signatures, documents de mise en page, images, GIF et PDF importés, profils de membres ou
+        de candidature (nom, fonction, email, téléphone, formation et liens) utilisés pour remplir
+        les modèles.{' '}
         <strong>Base légale&nbsp;: exécution du contrat.</strong> Si ces profils contiennent les
         données de vos collaborateurs, c’est vous qui en êtes responsable&nbsp;; nous les
         conservons pour vous.
+      </p>
+      <p>
+        Sur le générateur pour la recherche d’emploi, le brouillon et l’éventuel CV sont conservés
+        au maximum 24 heures avant la création du compte. Après connexion, ils sont rattachés au
+        compte et conservés comme les autres contenus. Le profil candidat et le CV ne sont pas
+        envoyés au prestataire d’intelligence artificielle dans ce parcours. Lorsqu’un CV est lié
+        depuis une signature, son URL est nécessairement publique afin que le destinataire puisse
+        le télécharger&nbsp;: n’importez qu’une version destinée à être partagée.
       </p>
 
       <h3>Mesure d’audience du site et du produit</h3>
@@ -318,6 +327,9 @@ function Privacy() {
         </li>
         <li>
           <strong>Liens de connexion&nbsp;:</strong> quinze minutes, usage unique.
+        </li>
+        <li>
+          <strong>Brouillon candidat sans compte&nbsp;:</strong> 24 heures au maximum, CV compris.
         </li>
         <li>
           <strong>Sessions&nbsp;:</strong> jusqu’à expiration ou déconnexion.

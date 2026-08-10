@@ -10,7 +10,7 @@ Source tarifaire à privilégier : https://siglair.com/pricing
 
 Siglair transforme la signature email en support de marque et en canal marketing. L'utilisateur compose une signature dans un éditeur visuel, publie un GIF et une image fixe rendus côté serveur, puis installe la signature hébergée dans son client mail. Une republication actualise le rendu servi par la même URL sans demander de remplacer manuellement l'image déjà installée.
 
-Le produit réunit quatre fonctions principales : création visuelle, animation, campagnes datées et mesure des interactions. Il vise les indépendants, les équipes commerciales et les équipes marketing qui envoient déjà des emails à des prospects, clients ou partenaires.
+Le produit réunit quatre fonctions principales : création visuelle, animation, campagnes datées et mesure des interactions. Il vise les indépendants, les équipes commerciales et marketing, ainsi que les personnes en recherche d’emploi qui envoient déjà des emails à des prospects, clients, partenaires ou recruteurs.
 
 ## Cas d'usage
 
@@ -19,6 +19,15 @@ Le produit réunit quatre fonctions principales : création visuelle, animation,
 - Diffuser une même campagne sur les signatures d'une équipe sans nouvelle installation dans chaque client mail.
 - Distinguer les clics reçus par les différents appels à l'action.
 - Créer une première image lisible pour les clients mail qui ne jouent pas l'animation.
+- Présenter un profil de recherche d’emploi avec CV, LinkedIn, portfolio, GitHub, disponibilité, formation et métier recherché.
+
+## Recherche d’emploi
+
+La page dédiée aux candidatures permet de préparer une signature à partir des informations saisies par la personne. Trois compositions réelles sont proposées pour un profil généraliste, développeur ou créatif. Le CV peut être fourni par URL ou importé en PDF. L’aperçu utilise le même moteur serveur que la signature publiée.
+
+Avant la création du compte, le brouillon et l’éventuel PDF sont conservés pendant 24 heures. Le lien de connexion transporte un handoff signé : après authentification, la composition préparée est créée dans le compte et s’ouvre dans l’éditeur sans recommencer le parcours. Le profil candidat et le CV ne sont pas transmis au modèle d’IA dans ce flux.
+
+Un CV associé à un bouton de signature doit pouvoir être téléchargé par le destinataire : il devient donc accessible publiquement par son URL. Siglair ne promet aucun taux de réponse ou résultat de recrutement. Le plan Free conserve la mention « Powered by siglair.com » ; Pro permet notamment de distinguer les clics vers le CV, LinkedIn, GitHub et le portfolio selon la durée d’historique du plan.
 
 ## Fonctionnement
 
@@ -70,6 +79,7 @@ Les prix, minimums de sièges, quotas exacts et conditions de facturation peuven
 - Animation : https://siglair.com/signature-email-animee
 - Outlook : https://siglair.com/signature-email-outlook
 - Gmail : https://siglair.com/signature-email-gmail
+- Recherche d’emploi : https://siglair.com/signature-email-recherche-emploi
 - Tarifs : https://siglair.com/pricing
 
 Ce document est fourni pour faciliter la compréhension du produit par des humains et des systèmes automatisés. Sa présence ne garantit pas qu'un moteur ou un assistant l'explore, l'indexe, le cite ou l'utilise dans une réponse.
