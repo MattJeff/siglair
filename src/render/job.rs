@@ -49,6 +49,10 @@ pub struct Job {
     pub id: Uuid,
     pub signature_id: Uuid,
     pub attempts: i32,
+    pub doc: Option<serde_json::Value>,
+    pub profile: Option<serde_json::Value>,
+    pub campaign_id: Option<Uuid>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
 /// Réclamation atomique. Un `SELECT` suivi d'un `UPDATE` ferait traiter le même job par
@@ -59,7 +63,7 @@ pub async fn claim(db: &PgPool) -> sqlx::Result<Option<Job>> {
          WHERE id = (SELECT id FROM render_jobs \
                      WHERE status = 'queued' AND run_after <= now() \
                      ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED) \
-         RETURNING *",
+         RETURNING id, signature_id, attempts, doc, profile, campaign_id, created_at",
     )
     .fetch_optional(db)
     .await
@@ -170,17 +174,21 @@ async fn execute(state: &AppState, job: &Job) -> Result<(), RenderError> {
     .map_err(db_err)?
     .ok_or_else(|| RenderError::msg("Cette signature a été supprimée avant d'être publiée."))?;
 
-    let doc: Doc = serde_json::from_value(row.doc).map_err(|e| {
+    // Les nouveaux jobs emportent l'instantané exact demandé. Les colonnes restent
+    // optionnelles pour terminer proprement les jobs créés avant la migration 0006.
+    let doc_value = job.doc.clone().unwrap_or(row.doc);
+    let profile_value = job.profile.clone().unwrap_or(row.profile);
+    let doc: Doc = serde_json::from_value(doc_value).map_err(|e| {
         RenderError::new(
             "Cette signature est illisible. Rouvrez-la dans l'éditeur et réenregistrez-la.",
             e,
         )
     })?;
-    let profile: Profile = serde_json::from_value(row.profile).unwrap_or_default();
+    let profile: Profile = serde_json::from_value(profile_value).unwrap_or_default();
 
-    // Le document a pu changer depuis la mise en file : c'est le couple (doc, profil) courant
-    // qui fait foi, et son hash sert à la fois de clé de cache et de nom de fichier. Le profil
-    // en fait partie : ses jetons sont rasterisés dans le GIF (§3.1).
+    // Le couple (doc, profil) figé dans le job fait foi. Son hash sert à la fois de clé de
+    // cache et de nom de fichier ; le profil en fait partie car ses jetons sont rasterisés
+    // dans le GIF (§3.1).
     let hash = util::doc_hash(&doc, &profile);
 
     // Contrat §7 : rejouer un job doit redonner le même résultat, sans recalculer.
@@ -194,7 +202,10 @@ async fn execute(state: &AppState, job: &Job) -> Result<(), RenderError> {
     .await
     .map_err(db_err)?;
     if let Some((render_id,)) = existing {
-        return publish(state, job.signature_id, render_id).await;
+        if superseded(&state.db, job).await.map_err(db_err)? {
+            return Ok(());
+        }
+        return publish(state, job.signature_id, render_id, job.campaign_id).await;
     }
 
     let assets = load_assets(state, row.org_id, &doc).await?;
@@ -254,16 +265,43 @@ async fn execute(state: &AppState, job: &Job) -> Result<(), RenderError> {
     .await
     .map_err(db_err)?;
 
-    publish(state, job.signature_id, render_id).await
+    if superseded(&state.db, job).await.map_err(db_err)? {
+        return Ok(());
+    }
+    publish(state, job.signature_id, render_id, job.campaign_id).await
 }
 
-async fn publish(state: &AppState, signature_id: Uuid, render_id: Uuid) -> Result<(), RenderError> {
-    sqlx::query("UPDATE signatures SET published_render_id = $2 WHERE id = $1")
-        .bind(signature_id)
-        .bind(render_id)
-        .execute(&state.db)
-        .await
-        .map_err(db_err)?;
+/// Un rendu lent ne doit jamais écraser une publication demandée après lui.
+async fn superseded(db: &PgPool, job: &Job) -> sqlx::Result<bool> {
+    sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM render_jobs \
+         WHERE signature_id = $1 AND (created_at, id) > ($2, $3))",
+    )
+    .bind(job.signature_id)
+    .bind(job.created_at)
+    .bind(job.id)
+    .fetch_one(db)
+    .await
+}
+
+async fn publish(
+    state: &AppState,
+    signature_id: Uuid,
+    render_id: Uuid,
+    campaign_id: Option<Uuid>,
+) -> Result<(), RenderError> {
+    sqlx::query(
+        "UPDATE signatures SET published_render_id = $2, published_campaign_id = $3, \
+           campaign_base_doc = CASE WHEN $3::uuid IS NULL THEN NULL ELSE campaign_base_doc END, \
+           campaign_base_profile = CASE WHEN $3::uuid IS NULL THEN NULL ELSE campaign_base_profile END \
+         WHERE id = $1",
+    )
+    .bind(signature_id)
+    .bind(render_id)
+    .bind(campaign_id)
+    .execute(&state.db)
+    .await
+    .map_err(db_err)?;
     Ok(())
 }
 

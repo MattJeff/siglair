@@ -42,6 +42,10 @@ async fn main() -> anyhow::Result<()> {
     let port = cfg.port;
     let state = AppState::new(pool, cfg, storage);
 
+    // Les fenêtres de campagne et les fins de grâce sont des promesses temporelles : elles
+    // ne doivent pas dépendre d'un clic utilisateur ou de l'arrivée d'un webhook.
+    tokio::spawn(maintenance(state.clone()));
+
     let app = Router::new()
         .merge(routes::public::router()) // /s /c /f /health /ready
         .merge(routes::meta::router()) // /api/config
@@ -137,4 +141,26 @@ async fn shutdown() {
         tokio::time::sleep(Duration::from_millis(900)).await;
         std::process::exit(0);
     });
+}
+
+async fn maintenance(state: AppState) {
+    let mut campaigns = tokio::time::interval(Duration::from_secs(30));
+    campaigns.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    let mut billing_tick = tokio::time::interval(Duration::from_secs(60 * 60));
+    billing_tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+    loop {
+        tokio::select! {
+            _ = campaigns.tick() => match routes::campaigns::sweep(&state).await {
+                Ok(n) if n > 0 => tracing::info!(signatures = n, "campagnes synchronisées"),
+                Ok(_) => {}
+                Err(error) => tracing::error!(?error, "balayage des campagnes impossible"),
+            },
+            _ = billing_tick.tick() => {
+                if let Err(error) = billing::lifecycle::sweep(&state).await {
+                    tracing::error!(?error, "balayage de facturation impossible");
+                }
+            },
+        }
+    }
 }

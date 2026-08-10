@@ -10,16 +10,22 @@ use axum::{
     routing::get,
     Json, Router,
 };
+use std::collections::HashMap;
+
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use sqlx::PgPool;
 use uuid::Uuid;
 
 use crate::{
     auth::OrgAccess,
-    doc::{Doc, Element, ElementType},
+    billing::lifecycle::{effective_plan_at, OrgBilling},
+    doc::{Anim, AnimPreset, Doc, Element, ElementType, Profile},
     error::{AppError, Result},
     plans::{CampaignScope, Plan},
+    routes::signatures,
+    util::doc_hash,
     AppState,
 };
 
@@ -32,7 +38,7 @@ pub fn router() -> Router<AppState> {
         .route("/campaigns/{id}", get(get_one).patch(update).delete(remove))
 }
 
-const COLS: &str = "id, org_id, name, message, cta, href, color, \
+const COLS: &str = "id, org_id, owner_user_id, name, message, cta, href, color, \
                     starts_at, ends_at, created_at, updated_at";
 
 /// La plus récemment démarrée d'abord. `created_at, id` départagent deux campagnes qui
@@ -46,6 +52,7 @@ const DEFAULT_COLOR: &str = "#2563eb";
 pub struct Campaign {
     pub id: Uuid,
     pub org_id: Uuid,
+    pub owner_user_id: Option<Uuid>,
     pub name: String,
     pub message: String,
     pub cta: String,
@@ -57,21 +64,27 @@ pub struct Campaign {
     pub updated_at: DateTime<Utc>,
 }
 
-async fn load_all(db: &PgPool, org_id: Uuid) -> Result<Vec<Campaign>> {
+async fn load_all(db: &PgPool, access: &OrgAccess) -> Result<Vec<Campaign>> {
     Ok(sqlx::query_as::<_, Campaign>(&format!(
-        "SELECT {COLS} FROM campaigns WHERE org_id = $1 {ORDER}"
+        "SELECT {COLS} FROM campaigns WHERE org_id = $1 \
+         AND ($2::bool OR owner_user_id = $3) {ORDER}"
     ))
-    .bind(org_id)
+    .bind(access.org_id)
+    .bind(access.plan.limits.campaigns == CampaignScope::Team)
+    .bind(access.user_id)
     .fetch_all(db)
     .await?)
 }
 
-async fn fetch(db: &PgPool, org_id: Uuid, id: Uuid) -> Result<Campaign> {
+async fn fetch(db: &PgPool, access: &OrgAccess, id: Uuid) -> Result<Campaign> {
     sqlx::query_as::<_, Campaign>(&format!(
-        "SELECT {COLS} FROM campaigns WHERE id = $1 AND org_id = $2"
+        "SELECT {COLS} FROM campaigns WHERE id = $1 AND org_id = $2 \
+         AND ($3::bool OR owner_user_id = $4)"
     ))
     .bind(id)
-    .bind(org_id)
+    .bind(access.org_id)
+    .bind(access.plan.limits.campaigns == CampaignScope::Team)
+    .bind(access.user_id)
     .fetch_optional(db)
     .await?
     .ok_or(AppError::NotFound)
@@ -106,6 +119,102 @@ fn pick_active(rows: &[Campaign], now: DateTime<Utc>) -> Option<&Campaign> {
     rows.iter()
         .filter(|c| c.starts_at <= now && now < c.ends_at)
         .max_by_key(|c| (c.starts_at, c.created_at, c.id))
+}
+
+/// Document effectif d'une campagne. Le document enregistré reste intact : quand la fenêtre
+/// se ferme, le scheduler republie simplement cette source sans bannière injectée.
+pub(crate) fn apply_to_doc(doc: &mut Doc, campaign: &Campaign) {
+    let content = if campaign.cta.trim().is_empty() {
+        campaign.message.clone()
+    } else {
+        format!("{}  {} →", campaign.message, campaign.cta)
+    };
+    if let Some(banner) = doc
+        .elements
+        .iter_mut()
+        .find(|element| element.kind == ElementType::Banner)
+    {
+        banner.content = content;
+        banner.href = campaign.href.clone();
+        banner.background = campaign.color.clone();
+        return;
+    }
+
+    let primary: String = campaign.id.simple().to_string().chars().take(7).collect();
+    let id = std::iter::once(primary)
+        .chain((1..=99).map(|n| format!("cmpgn{n:02}")))
+        .find(|id| !doc.elements.iter().any(|element| element.id == *id))
+        .unwrap_or_else(|| "cmpgn99".into());
+    doc.elements.push(Element {
+        id,
+        kind: ElementType::Banner,
+        x: 25.0,
+        y: (doc.canvas.height - 72.0).max(10.0),
+        w: (doc.canvas.width - 50.0).max(120.0),
+        h: 50.0,
+        content,
+        href: campaign.href.clone(),
+        color: "#ffffff".into(),
+        background: campaign.color.clone(),
+        radius: 12.0,
+        align: "center".into(),
+        anim: Anim {
+            preset: AnimPreset::Shimmer,
+            duration: 3.0,
+            delay: 0.3,
+            intensity: 0.7,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+}
+
+/// Fige le document publié sur lequel la campagne vient se superposer. Les sauvegardes
+/// automatiques de l'éditeur peuvent ensuite continuer sans partir en production.
+pub(crate) async fn remember_base(
+    db: &PgPool,
+    signature_id: Uuid,
+    doc: &Doc,
+    profile: &Profile,
+    overwrite: bool,
+) -> Result<()> {
+    sqlx::query(
+        "UPDATE signatures SET \
+           campaign_base_doc = CASE WHEN $4 OR campaign_base_doc IS NULL THEN $2 ELSE campaign_base_doc END, \
+           campaign_base_profile = CASE WHEN $4 OR campaign_base_profile IS NULL THEN $3 ELSE campaign_base_profile END \
+         WHERE id = $1",
+    )
+    .bind(signature_id)
+    .bind(serde_json::to_value(doc)?)
+    .bind(serde_json::to_value(profile)?)
+    .bind(overwrite)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
+/// Campagne à inclure lors d'une publication manuelle.
+pub(crate) async fn active_for_signature(
+    db: &PgPool,
+    access: &OrgAccess,
+    owner_user_id: Option<Uuid>,
+    now: DateTime<Utc>,
+) -> Result<Option<Campaign>> {
+    if access.plan.limits.campaigns == CampaignScope::None {
+        return Ok(None);
+    }
+    let rows = load_all(db, access).await?;
+    Ok(pick_active(
+        &rows
+            .into_iter()
+            .filter(|campaign| {
+                access.plan.limits.campaigns == CampaignScope::Team
+                    || campaign.owner_user_id == owner_user_id
+            })
+            .collect::<Vec<_>>(),
+        now,
+    )
+    .cloned())
 }
 
 fn text(label: &str, raw: &str, min: usize, max: usize) -> Result<String> {
@@ -155,7 +264,7 @@ fn clean(c: &mut Campaign) -> Result<()> {
 // ------------------------------------------------------------------ lecture
 
 async fn list(State(st): State<AppState>, access: OrgAccess) -> Result<Json<Vec<Campaign>>> {
-    Ok(Json(load_all(&st.db, access.org_id).await?))
+    Ok(Json(load_all(&st.db, &access).await?))
 }
 
 async fn get_one(
@@ -163,7 +272,7 @@ async fn get_one(
     access: OrgAccess,
     Path(id): Path<Uuid>,
 ) -> Result<Json<Campaign>> {
-    Ok(Json(fetch(&st.db, access.org_id, id).await?))
+    Ok(Json(fetch(&st.db, &access, id).await?))
 }
 
 /// `GET /api/campaigns/active` — la campagne active maintenant, ou `null`. Une seule.
@@ -172,7 +281,7 @@ async fn get_one(
 /// Rust. Le jour où il y en a des milliers, la même clause devient un `WHERE starts_at <=
 /// now() AND ends_at > now() {ORDER} LIMIT 1`.
 async fn active(State(st): State<AppState>, access: OrgAccess) -> Result<Json<Option<Campaign>>> {
-    let rows = load_all(&st.db, access.org_id).await?;
+    let rows = load_all(&st.db, &access).await?;
     Ok(Json(pick_active(&rows, Utc::now()).cloned()))
 }
 
@@ -201,6 +310,7 @@ async fn create(
     let mut c = Campaign {
         id: Uuid::new_v4(),
         org_id: access.org_id,
+        owner_user_id: Some(access.user_id),
         name: req.name,
         message: req.message,
         cta: req.cta.unwrap_or_default(),
@@ -214,11 +324,12 @@ async fn create(
     clean(&mut c)?;
 
     let row = sqlx::query_as::<_, Campaign>(&format!(
-        "INSERT INTO campaigns (id, org_id, name, message, cta, href, color, starts_at, ends_at) \
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING {COLS}"
+        "INSERT INTO campaigns (id, org_id, owner_user_id, name, message, cta, href, color, starts_at, ends_at) \
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING {COLS}"
     ))
     .bind(c.id)
     .bind(c.org_id)
+    .bind(c.owner_user_id)
     .bind(&c.name)
     .bind(&c.message)
     .bind(&c.cta)
@@ -253,7 +364,7 @@ async fn update(
 
     // lecture puis écriture complète : les bornes se vérifient sur la campagne entière
     // (`ends_at > starts_at` n'a pas de sens sur un champ isolé).
-    let mut c = fetch(&st.db, access.org_id, id).await?;
+    let mut c = fetch(&st.db, &access, id).await?;
     if let Some(v) = req.name {
         c.name = v;
     }
@@ -305,6 +416,7 @@ async fn remove(
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
     access.require_admin()?;
+    fetch(&st.db, &access, id).await?;
     let n = sqlx::query("DELETE FROM campaigns WHERE id = $1 AND org_id = $2")
         .bind(id)
         .bind(access.org_id)
@@ -315,6 +427,152 @@ async fn remove(
         return Err(AppError::NotFound);
     }
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ------------------------------------------------------------------ automatisation
+
+#[derive(sqlx::FromRow)]
+struct ScheduledSignature {
+    id: Uuid,
+    org_id: Uuid,
+    owner_user_id: Option<Uuid>,
+    doc: Value,
+    profile: Value,
+    public_slug: String,
+    published_campaign_id: Option<Uuid>,
+    campaign_base_doc: Option<Value>,
+    campaign_base_profile: Option<Value>,
+    published_doc: Option<Value>,
+    published_profile: Option<Value>,
+    published_hash: Option<Vec<u8>>,
+    plan: String,
+    subscription_status: Option<String>,
+    grace_until: Option<DateTime<Utc>>,
+}
+
+/// Applique les ouvertures/fermetures de fenêtres aux signatures déjà publiées.
+///
+/// La comparaison `(campaign_id, doc_hash)` rend la passe idempotente : elle peut tourner
+/// toutes les 30 secondes, redémarrer ou s'exécuter sur deux API sans republier inutilement.
+pub async fn sweep(state: &AppState) -> anyhow::Result<u64> {
+    let now = Utc::now();
+    let rows: Vec<ScheduledSignature> = sqlx::query_as(
+        "SELECT s.id, s.org_id, s.owner_user_id, s.doc, s.profile, \
+                s.public_slug::text AS public_slug, s.published_campaign_id, \
+                s.campaign_base_doc, s.campaign_base_profile, r.doc AS published_doc, \
+                r.profile AS published_profile, r.doc_hash AS published_hash, \
+                o.plan, o.subscription_status, o.grace_until \
+         FROM signatures s \
+         JOIN orgs o ON o.id = s.org_id \
+         LEFT JOIN renders r ON r.id = s.published_render_id \
+         WHERE s.deleted_at IS NULL AND s.kind = 'personal' AND s.public_slug IS NOT NULL \
+           AND (o.plan IN ('pro', 'team') OR s.published_campaign_id IS NOT NULL)",
+    )
+    .fetch_all(&state.db)
+    .await?;
+
+    let campaigns: Vec<Campaign> = sqlx::query_as(&format!(
+        "SELECT {COLS} FROM campaigns WHERE starts_at <= $1 AND ends_at > $1 {ORDER}"
+    ))
+    .bind(now)
+    .fetch_all(&state.db)
+    .await?;
+    let mut by_org: HashMap<Uuid, Vec<Campaign>> = HashMap::new();
+    for campaign in campaigns {
+        by_org.entry(campaign.org_id).or_default().push(campaign);
+    }
+
+    let mut queued = 0;
+    for row in rows {
+        let plan = effective_plan_at(
+            &OrgBilling {
+                plan: row.plan,
+                subscription_status: row.subscription_status,
+                grace_until: row.grace_until,
+            },
+            now,
+        );
+        let candidates = by_org.get(&row.org_id).map(Vec::as_slice).unwrap_or(&[]);
+        let active: Option<Campaign> = match plan.limits.campaigns {
+            CampaignScope::None => None,
+            CampaignScope::Team => pick_active(candidates, now).cloned(),
+            CampaignScope::Own => pick_active(
+                &candidates
+                    .iter()
+                    .filter(|campaign| campaign.owner_user_id == row.owner_user_id)
+                    .cloned()
+                    .collect::<Vec<_>>(),
+                now,
+            )
+            .cloned(),
+        };
+
+        // Pas de campagne et aucun état automatisé à retirer : ne jamais publier un brouillon
+        // simplement parce que le scheduler l'a remarqué.
+        if active.is_none()
+            && row.published_campaign_id.is_none()
+            && row.campaign_base_doc.is_none()
+        {
+            continue;
+        }
+
+        let (base_doc, base_profile) = if active.is_some() {
+            match (row.campaign_base_doc, row.campaign_base_profile) {
+                (Some(doc), Some(profile)) => (doc, profile),
+                _ => (
+                    row.published_doc.unwrap_or(row.doc),
+                    row.published_profile.unwrap_or(row.profile),
+                ),
+            }
+        } else {
+            (
+                row.campaign_base_doc.unwrap_or(row.doc),
+                row.campaign_base_profile.unwrap_or(row.profile),
+            )
+        };
+        let mut doc: Doc = match serde_json::from_value(base_doc) {
+            Ok(doc) => doc,
+            Err(error) => {
+                tracing::error!(signature = %row.id, ?error, "campagne ignorée : document illisible");
+                continue;
+            }
+        };
+        let profile: Profile = serde_json::from_value(base_profile).unwrap_or_default();
+        if let Some(campaign) = active.as_ref() {
+            if let Err(error) = remember_base(&state.db, row.id, &doc, &profile, false).await {
+                tracing::error!(signature = %row.id, ?error, "base de campagne non mémorisée");
+                continue;
+            }
+            apply_to_doc(&mut doc, campaign);
+        }
+        if let Err(error) = doc.validate() {
+            tracing::error!(signature = %row.id, ?error, "campagne ignorée : document invalide");
+            continue;
+        }
+        let desired_campaign = active.as_ref().map(|campaign| campaign.id);
+        let desired_hash = doc_hash(&doc, &profile);
+        if row.published_campaign_id == desired_campaign
+            && row.published_hash.as_deref() == Some(desired_hash.as_slice())
+        {
+            continue;
+        }
+
+        if let Err(error) = signatures::publish_snapshot(
+            &state.db,
+            row.id,
+            Some(row.public_slug),
+            &doc,
+            &profile,
+            desired_campaign,
+        )
+        .await
+        {
+            tracing::error!(signature = %row.id, ?error, "campagne non mise en file");
+            continue;
+        }
+        queued += 1;
+    }
+    Ok(queued)
 }
 
 #[cfg(test)]
@@ -341,6 +599,7 @@ mod tests {
         Campaign {
             id: Uuid::new_v4(),
             org_id: Uuid::nil(),
+            owner_user_id: Some(Uuid::nil()),
             name: name.into(),
             message: "✨ Une nouveauté".into(),
             cta: String::new(),
@@ -351,6 +610,25 @@ mod tests {
             created_at: at(0),
             updated_at: at(0),
         }
+    }
+
+    #[test]
+    fn campaign_overlay_does_not_mutate_the_saved_document() {
+        let base = Doc::default();
+        let mut effective = base.clone();
+        let mut c = campaign("Lancement", 0, 100);
+        c.message = "Nouveau guide".into();
+        c.cta = "Télécharger".into();
+        c.href = "https://siglair.com/guide".into();
+
+        apply_to_doc(&mut effective, &c);
+
+        assert!(base.elements.is_empty());
+        assert_eq!(effective.elements.len(), 1);
+        assert_eq!(effective.elements[0].kind, ElementType::Banner);
+        assert!(effective.elements[0].content.contains("Télécharger"));
+        assert_eq!(effective.elements[0].href, c.href);
+        assert!(effective.validate().is_ok());
     }
 
     /// Deux campagnes qui se chevauchent ne doivent pas donner une bannière différente

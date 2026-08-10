@@ -10,11 +10,10 @@
  * message français, on l'affiche tel quel.
  */
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, listSignatures, updateSignature } from '../lib/api';
+import { ApiError } from '../lib/api';
 import { useSession } from '../lib/session';
-import type { ApiErrorBody, CampaignScope, Doc } from '../lib/types';
-import { initialEditorState, reducer, toLocalInput } from './state';
-import type { Campaign as BannerSource } from './state';
+import type { ApiErrorBody, CampaignScope } from '../lib/types';
+import { toLocalInput } from './state';
 
 /** `routes::campaigns::Campaign`, tel quel. Les dates sont en RFC 3339 UTC. */
 export interface Campaign {
@@ -35,6 +34,7 @@ export interface Campaign {
 export interface CampaignInput {
   name: string;
   message: string;
+  cta: string;
   href: string;
   color: string;
   starts_at: string;
@@ -77,25 +77,6 @@ export function windowError(startLocal: string, endLocal: string): string | null
   if (end <= start) return 'La fin de la campagne doit être postérieure à son début.';
   return null;
 }
-
-/** Ce que le réducteur attend pour poser la bannière. La campagne en est la source. */
-export const bannerSource = (campaign: Campaign): BannerSource => ({
-  id: campaign.id,
-  name: campaign.name,
-  message: campaign.message,
-  href: campaign.href,
-  color: campaign.color,
-  start: isoToInput(campaign.starts_at),
-  end: isoToInput(campaign.ends_at),
-});
-
-/**
- * Insertion ou mise à jour de la bannière dans un document quelconque, via le réducteur
- * de l'éditeur. Une deuxième implémentation de la même règle finirait par diverger : la
- * signature de l'auteur aurait une bannière, celles de l'équipe une autre.
- */
-const withBanner = (doc: Doc, campaign: Campaign): Doc =>
-  reducer(initialEditorState(doc), { type: 'applyCampaign', campaign: bannerSource(campaign) }).doc;
 
 /* ------------------------------------------------------------------ */
 /* Appels HTTP                                                         */
@@ -144,11 +125,6 @@ const bySchedule = (a: Campaign, b: Campaign): number =>
 /** Le badge doit vieillir tout seul : un onglet ouvert une heure mentirait sinon. */
 const TICK_MS = 30_000;
 
-export interface TeamPushResult {
-  updated: number;
-  failed: number;
-}
-
 export interface UseCampaigns {
   /** `limits.campaigns`. `none` = panneau en démonstration. */
   scope: CampaignScope;
@@ -160,13 +136,9 @@ export interface UseCampaigns {
   error: string | null;
   /** Horloge de référence des pastilles d'état, rafraîchie toute seule. */
   now: number;
-  /** Nombre de signatures de l'organisation, pour le récapitulatif du plan Team. */
-  teamSignatures: number | null;
   create: (input: CampaignInput) => Promise<Campaign>;
   update: (id: string, input: CampaignInput) => Promise<Campaign>;
   remove: (id: string) => Promise<void>;
-  /** Pose la bannière sur toutes les signatures de l'organisation. Action de masse. */
-  pushToTeam: (campaign: Campaign) => Promise<TeamPushResult>;
 }
 
 export function useCampaigns(): UseCampaigns {
@@ -177,7 +149,6 @@ export function useCampaigns(): UseCampaigns {
   const [items, setItems] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(scope !== 'none');
   const [error, setError] = useState<string | null>(null);
-  const [teamSignatures, setTeamSignatures] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
@@ -210,19 +181,6 @@ export function useCampaigns(): UseCampaigns {
     };
   }, [scope]);
 
-  // Le nombre affiché sur le bouton de déploiement : promettre « toute l'équipe » sans
-  // dire combien de signatures ça touche, c'est demander une confirmation à l'aveugle.
-  useEffect(() => {
-    if (scope !== 'team') return;
-    let alive = true;
-    listSignatures()
-      .then((rows) => alive && setTeamSignatures(rows.length))
-      .catch(() => alive && setTeamSignatures(null));
-    return () => {
-      alive = false;
-    };
-  }, [scope]);
-
   const create = useCallback(async (input: CampaignInput) => {
     const created = await request<Campaign>('/api/campaigns', { method: 'POST', body: body(input) });
     setItems((list) => [...list, created].sort(bySchedule));
@@ -240,19 +198,6 @@ export function useCampaigns(): UseCampaigns {
     setItems((list) => list.filter((c) => c.id !== id));
   }, []);
 
-  const pushToTeam = useCallback(async (campaign: Campaign): Promise<TeamPushResult> => {
-    const signatures = await listSignatures();
-    setTeamSignatures(signatures.length);
-    // ponytail : un PATCH par signature. Une organisation en a quelques dizaines ; au-delà,
-    // c'est une route serveur `POST /api/campaigns/{id}/rollout` qu'il faudra, pas une
-    // boucle plus maligne ici.
-    const results = await Promise.allSettled(
-      signatures.map((sig) => updateSignature(sig.id, { doc: withBanner(sig.doc, campaign) })),
-    );
-    const failed = results.filter((r) => r.status === 'rejected').length;
-    return { updated: results.length - failed, failed };
-  }, []);
-
   return {
     scope,
     canWrite,
@@ -260,10 +205,8 @@ export function useCampaigns(): UseCampaigns {
     loading,
     error,
     now,
-    teamSignatures,
     create,
     update,
     remove,
-    pushToTeam,
   };
 }

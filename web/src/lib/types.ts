@@ -302,6 +302,9 @@ export interface PlanInfo {
   /** true = prix par membre (Team) */
   per_seat: boolean;
   min_seats: number;
+  /** null = illimité ; Free est à vie, Pro et Team sont remis à zéro chaque mois. */
+  ai_generations: number | null;
+  ai_generations_monthly: boolean;
   limits: Limits;
 }
 

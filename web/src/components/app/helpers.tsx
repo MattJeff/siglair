@@ -3,7 +3,7 @@
  * Aucun composant ici : formatage (Intl, pas de librairie de dates) et lecture d'erreur API.
  */
 import { ApiError } from '../../lib/api';
-import type { Limits } from '../../lib/types';
+import type { PlanInfo } from '../../lib/types';
 
 const DATE = new Intl.DateTimeFormat('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
 const DAY = new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: '2-digit' });
@@ -70,7 +70,9 @@ export interface PlanFeature {
  * Une seule liste pour /pricing, la landing et /app/billing : trois listes finiraient
  * par vendre trois grilles différentes.
  */
-export function planFeatures(l: Limits): PlanFeature[] {
+export function planFeatures(plan: PlanInfo): PlanFeature[] {
+  const l = plan.limits;
+  const ai = plan.ai_generations;
   return [
     {
       label:
@@ -80,6 +82,13 @@ export function planFeatures(l: Limits): PlanFeature[] {
       on: true,
     },
     { label: 'GIF animé hébergé sur une URL stable', on: l.hosted_gif },
+    {
+      label:
+        ai === null
+          ? 'Générations IA illimitées'
+          : `${ai} génération${ai > 1 ? 's' : ''} IA ${plan.ai_generations_monthly ? '/ mois' : 'à vie'}`,
+      on: ai === null || ai > 0,
+    },
     // La PORTÉE, pas `hosted_gif` : Free a désormais le GIF hébergé, et ce verrou-ci
     // affichait donc « Campagnes datées ✓ » sur un plan à qui l'API répond 402.
     // C'est exactement le même test que `require_paid_plan` dans routes/campaigns.rs.

@@ -59,10 +59,8 @@ pub struct Plan {
     pub min_seats: u32,
     pub limits: Limits,
     /// Générations IA (§6bis.6). `None` = illimité — aucun plan ne l'est aujourd'hui.
-    #[serde(skip)]
     pub ai_generations: Option<u32>,
     /// `false` = quota à vie (Free), `true` = remis à zéro chaque mois (Pro, Team).
-    #[serde(skip)]
     pub ai_generations_monthly: bool,
 }
 
@@ -221,6 +219,8 @@ mod tests {
         assert_eq!(
             keys,
             vec![
+                "ai_generations",
+                "ai_generations_monthly",
                 "limits",
                 "min_seats",
                 "name",
@@ -252,9 +252,8 @@ mod tests {
             "la forme de Limits a changé sans que web/src/lib/types.ts suive"
         );
 
-        // Les quotas IA ne sortent pas : le front ne les affiche pas, et une limite non
-        // affichée exposée au client est une information interne de trop.
-        assert!(!obj.contains_key("ai_generations"));
+        assert_eq!(obj["ai_generations"], 30);
+        assert_eq!(obj["ai_generations_monthly"], true);
     }
 
     /// Les prix du contrat §6, et le fait qu'ils ne vivent qu'ici.

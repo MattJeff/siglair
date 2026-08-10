@@ -4,29 +4,47 @@
  */
 import { describe, expect, it } from 'vitest';
 import { formatBytes, formatPrice, formatRetention, planFeatures } from './helpers';
-import type { Limits } from '../../lib/types';
+import type { PlanInfo } from '../../lib/types';
 
 // Le VRAI plan Free de src/plans.rs : le GIF hébergé y est inclus (avec la marque
 // imposée), c'est la portée des campagnes qui verrouille. La fixture disait l'inverse
 // et le test passait en décrivant un plan qui n'existe plus.
-const FREE: Limits = {
-  signatures: 1,
-  assets_bytes: 10 * 1024 ** 2,
-  analytics_days: 0,
-  campaigns: 'none',
-  hosted_gif: true,
-  org_templates: false,
-  branding: true,
+const FREE: PlanInfo = {
+  plan: 'free',
+  name: 'Free',
+  price_eur_month: 0,
+  per_seat: false,
+  min_seats: 1,
+  ai_generations: 1,
+  ai_generations_monthly: false,
+  limits: {
+    signatures: 1,
+    assets_bytes: 10 * 1024 ** 2,
+    analytics_days: 0,
+    campaigns: 'none',
+    hosted_gif: true,
+    org_templates: false,
+    branding: true,
+  },
 };
 
-const TEAM: Limits = {
-  signatures: null,
-  assets_bytes: 5 * 1024 ** 3,
-  analytics_days: 365,
-  campaigns: 'team',
-  hosted_gif: true,
-  org_templates: true,
-  branding: false,
+const TEAM: PlanInfo = {
+  plan: 'team',
+  name: 'Team',
+  price_eur_month: 5.9,
+  per_seat: true,
+  min_seats: 3,
+  ai_generations: 100,
+  ai_generations_monthly: true,
+  limits: {
+    signatures: null,
+    assets_bytes: 5 * 1024 ** 3,
+    analytics_days: 365,
+    campaigns: 'team',
+    hosted_gif: true,
+    org_templates: true,
+    branding: false,
+  },
 };
 
 describe('formatage partagé', () => {
@@ -64,6 +82,9 @@ describe('planFeatures', () => {
       'Export sans la marque Siglair',
     ]);
     expect(planFeatures(TEAM).every((f) => f.on)).toBe(true);
+    expect(planFeatures(FREE).find((f) => f.label.includes('IA'))?.label).toBe(
+      '1 génération IA à vie',
+    );
   });
 
   it('dérive ses libellés des limites servies par l’API', () => {

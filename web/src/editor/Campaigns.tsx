@@ -9,7 +9,7 @@
  * `own` la donne, `team` y ajoute le déploiement sur toutes les signatures.
  */
 import { useMemo, useState } from 'react';
-import type { Dispatch, FormEvent } from 'react';
+import type { FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { Field } from '../components/Field';
@@ -20,10 +20,8 @@ import { apiMessage, formatPrice } from '../components/app/helpers';
 import { useToast } from '../components/Toast';
 import { useSession } from '../lib/session';
 import { defaultCampaigns, isCampaignActive, toLocalInput } from './state';
-import type { Action, Campaign as LocalCampaign } from './state';
 import {
   PHASE_LABELS,
-  bannerSource,
   campaignPhase,
   inputToIso,
   isoToInput,
@@ -36,6 +34,7 @@ import s from './editor.module.css';
 interface Draft {
   name: string;
   message: string;
+  cta: string;
   href: string;
   color: string;
   start: string;
@@ -47,6 +46,7 @@ const inDays = (offset: number): string => toLocalInput(new Date(Date.now() + of
 const emptyDraft = (): Draft => ({
   name: '',
   message: '',
+  cta: '',
   href: '',
   color: '#2563eb',
   start: toLocalInput(new Date()),
@@ -56,6 +56,7 @@ const emptyDraft = (): Draft => ({
 const draftOf = (campaign: Campaign): Draft => ({
   name: campaign.name,
   message: campaign.message,
+  cta: campaign.cta,
   href: campaign.href,
   color: campaign.color,
   start: isoToInput(campaign.starts_at),
@@ -65,6 +66,7 @@ const draftOf = (campaign: Campaign): Draft => ({
 const toInput = (draft: Draft): CampaignInput => ({
   name: draft.name,
   message: draft.message,
+  cta: draft.cta,
   href: draft.href,
   color: draft.color,
   starts_at: inputToIso(draft.start),
@@ -81,24 +83,17 @@ const humanDates = (campaign: Campaign): string => {
 export interface CampaignsProps {
   simulatedDate: string;
   onSimulatedDateChange: (value: string) => void;
-  dispatch: Dispatch<Action>;
-  /** @deprecated Les campagnes viennent de l'API. Props conservées le temps que Editor.tsx les retire. */
-  campaigns?: LocalCampaign[];
-  onCampaignsChange?: (campaigns: LocalCampaign[]) => void;
-  enabled?: boolean;
-  onEnabledChange?: (value: boolean) => void;
 }
 
-export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: CampaignsProps) {
+export function Campaigns({ simulatedDate, onSimulatedDateChange }: CampaignsProps) {
   const toast = useToast();
-  const { scope, canWrite, items, loading, error, now, teamSignatures, create, update, remove, pushToTeam } =
-    useCampaigns();
+  const { scope, canWrite, items, loading, error, now, create, update, remove } = useCampaigns();
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [editing, setEditing] = useState<Campaign | null>(null);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
-  const [confirm, setConfirm] = useState<{ kind: 'delete' | 'push'; campaign: Campaign } | null>(null);
+  const [confirm, setConfirm] = useState<Campaign | null>(null);
   const [busy, setBusy] = useState(false);
 
   const set = <K extends keyof Draft>(key: K, value: Draft[K]) =>
@@ -146,27 +141,12 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
     }
   }
 
-  function apply(campaign: Campaign) {
-    dispatch({ type: 'applyCampaign', campaign: bannerSource(campaign) });
-    toast('Bannière appliquée à cette signature.', 'success');
-  }
-
   async function runConfirm() {
     if (!confirm) return;
     setBusy(true);
     try {
-      if (confirm.kind === 'delete') {
-        await remove(confirm.campaign.id);
-        toast('Campagne supprimée.', 'success');
-      } else {
-        const { updated, failed } = await pushToTeam(confirm.campaign);
-        toast(
-          failed === 0
-            ? `Bannière posée sur ${updated} signature${updated > 1 ? 's' : ''}. Republiez-les pour que l'e-mail change.`
-            : `${updated} signature${updated > 1 ? 's' : ''} mise${updated > 1 ? 's' : ''} à jour, ${failed} en échec. Réessayez.`,
-          failed === 0 ? 'success' : 'error',
-        );
-      }
+      await remove(confirm.id);
+      toast('Campagne supprimée. Les signatures reviennent automatiquement à leur design normal.', 'success');
       setConfirm(null);
     } catch (e) {
       toast(apiMessage(e), 'error');
@@ -186,7 +166,7 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
 
       <p className={s.note}>
         Une bannière programmée s’affiche et disparaît toute seule, à la date près, dans les
-        signatures de {scope === 'team' ? 'toute votre organisation' : 'votre organisation'}.
+        signatures {scope === 'team' ? 'publiées de toute votre organisation' : 'que vous avez publiées'}.
       </p>
 
       <div className={`${s.sectionHead} ${s.gap}`}>
@@ -228,32 +208,15 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
             </div>
             <p>{campaign.message}</p>
             <p className={s.campaignDates}>{humanDates(campaign)}</p>
-            <div className={s.row2}>
-              <button type="button" className={s.tinyBtn} onClick={() => apply(campaign)}>
-                Appliquer à ma signature
-              </button>
-              {canWrite && (
+            {canWrite && (
+              <div className={s.row2}>
                 <button type="button" className={s.tinyBtn} onClick={() => openEdit(campaign)}>
                   Modifier
                 </button>
-              )}
-            </div>
-            {canWrite && (
-              <div className={s.row2}>
-                {scope === 'team' && (
-                  <button
-                    type="button"
-                    className={s.tinyBtn}
-                    onClick={() => setConfirm({ kind: 'push', campaign })}
-                  >
-                    Pousser à toute l’équipe
-                    {teamSignatures !== null && ` (${teamSignatures})`}
-                  </button>
-                )}
                 <button
                   type="button"
                   className={s.tinyBtn}
-                  onClick={() => setConfirm({ kind: 'delete', campaign })}
+                  onClick={() => setConfirm(campaign)}
                 >
                   Supprimer
                 </button>
@@ -280,6 +243,14 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
                 maxLength={300}
                 required
                 onChange={(e) => set('message', e.currentTarget.value)}
+              />
+            </Field>
+            <Field label="Bouton" hint="Ex. Télécharger, Réserver, Découvrir. Vide = aucun libellé.">
+              <Input
+                value={draft.cta}
+                maxLength={60}
+                placeholder="Découvrir"
+                onChange={(e) => set('cta', e.currentTarget.value)}
               />
             </Field>
             <Field label="Lien" hint="Vide = bannière non cliquable. http(s), mailto: ou tel:">
@@ -335,7 +306,7 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
       {!canWrite && (
         <p className={`${s.note} ${s.gap}`}>
           Seuls les administrateurs de l’organisation créent et modifient les campagnes. Vous
-          pouvez appliquer une bannière existante à votre signature.
+          pouvez consulter le planning qui s’applique automatiquement à votre signature.
         </p>
       )}
 
@@ -350,12 +321,12 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
       </div>
 
       <p className={`${s.note} ${s.gap}`}>
-        La bannière est servie par l’URL hébergée : vous changez la campagne, la signature déjà
-        collée dans les emails se met à jour après republication.
+        La bannière est servie par l’URL hébergée. Début, fin et modification sont propagés en
+        moins d’une minute, sans republier ni recoller la signature dans le client mail.
       </p>
 
       <ConfirmDialog
-        open={confirm?.kind === 'delete'}
+        open={confirm !== null}
         title="Supprimer la campagne"
         confirmLabel="Supprimer"
         danger
@@ -364,38 +335,8 @@ export function Campaigns({ simulatedDate, onSimulatedDateChange, dispatch }: Ca
         onClose={() => setConfirm(null)}
       >
         <p>
-          « {confirm?.campaign.name} » sera définitivement supprimée. Les bannières déjà posées
-          dans les documents restent en place : retirez-les depuis le panneau Calques.
-        </p>
-      </ConfirmDialog>
-
-      <ConfirmDialog
-        open={confirm?.kind === 'push'}
-        title="Pousser la campagne à toute l’équipe"
-        confirmLabel={
-          teamSignatures === null
-            ? 'Pousser la bannière'
-            : `Pousser sur ${teamSignatures} signature${teamSignatures > 1 ? 's' : ''}`
-        }
-        loading={busy}
-        onConfirm={() => void runConfirm()}
-        onClose={() => setConfirm(null)}
-      >
-        <p>
-          La bannière « {confirm?.campaign.name} » sera ajoutée — ou mise à jour si elle existe
-          déjà — dans{' '}
-          <strong>
-            {teamSignatures === null
-              ? 'toutes les signatures'
-              : `${teamSignatures} signature${teamSignatures > 1 ? 's' : ''}`}{' '}
-            de l’organisation
-          </strong>
-          , y compris celles des autres membres.
-        </p>
-        <p>{confirm ? humanDates(confirm.campaign) : null}</p>
-        <p>
-          Les documents sont modifiés immédiatement. Chaque signature doit ensuite être republiée
-          pour que le changement parte dans les emails déjà envoyés.
+          « {confirm?.name} » sera définitivement supprimée. Si elle est en cours, les signatures
+          publiées reviennent automatiquement à leur design normal en moins d’une minute.
         </p>
       </ConfirmDialog>
     </>

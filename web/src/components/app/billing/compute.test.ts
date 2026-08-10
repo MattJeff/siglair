@@ -9,6 +9,8 @@ const TEAM: PlanInfo = {
   price_eur_month: 5.9,
   per_seat: true,
   min_seats: 3,
+  ai_generations: 100,
+  ai_generations_monthly: true,
   limits: {
     signatures: null,
     campaigns: 'team',

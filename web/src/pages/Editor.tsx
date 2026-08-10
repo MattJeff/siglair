@@ -30,13 +30,11 @@ import {
   canRedo,
   canUndo,
   compatibility,
-  defaultCampaigns,
   initialEditorState,
   reducer,
   selectedElement,
   toLocalInput,
 } from '../editor/state';
-import type { Campaign } from '../editor/state';
 import { useAutosave } from '../editor/useAutosave';
 import s from '../editor/editor.module.css';
 /*
@@ -119,8 +117,6 @@ function EditorShell({ signature }: { signature: Signature }) {
   const [restartKey, setRestartKey] = useState(0);
   const [modal, setModal] = useState<'preview' | 'export' | 'publish' | null>(null);
   const [publicSlug, setPublicSlug] = useState(signature.public_slug);
-  const [campaigns, setCampaigns] = useState<Campaign[]>(defaultCampaigns);
-  const [campaignsEnabled, setCampaignsEnabled] = useState(true);
   const [simulatedDate, setSimulatedDate] = useState(() => toLocalInput(new Date()));
 
   const patch = useMemo(() => ({ doc: state.doc, name }), [state.doc, name]);
@@ -348,13 +344,8 @@ function EditorShell({ signature }: { signature: Signature }) {
 
             {tab === 'campaigns' && (
               <Campaigns
-                campaigns={campaigns}
-                onCampaignsChange={setCampaigns}
                 simulatedDate={simulatedDate}
                 onSimulatedDateChange={setSimulatedDate}
-                enabled={campaignsEnabled}
-                onEnabledChange={setCampaignsEnabled}
-                dispatch={dispatch}
               />
             )}
           </div>

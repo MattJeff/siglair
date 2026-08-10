@@ -64,7 +64,7 @@ const CAMPAIGN_CELL: Record<CampaignScope, string> = {
  * comme `require_paid_plan` côté serveur. Le `map` sur le libellé exact qui vivait ici
  * n'a plus lieu d'être : un couplage par chaîne de moins.
  */
-const features = (plan: PlanInfo): PlanFeature[] => planFeatures(plan.limits);
+const features = (plan: PlanInfo): PlanFeature[] => planFeatures(plan);
 
 function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
   if (plan.price_eur_month === 0) {
@@ -249,6 +249,13 @@ export function PlanComparison() {
     { label: 'Membres minimum facturés', cell: (p) => (p.per_seat ? `${p.min_seats}` : '1') },
     { label: 'Signatures', cell: (p) => formatSignatures(p.limits.signatures) },
     { label: 'GIF animé hébergé sur une URL', cell: (p) => (p.limits.hosted_gif ? yes : no) },
+    {
+      label: 'Générations par intelligence artificielle',
+      cell: (p) =>
+        p.ai_generations === null
+          ? 'Illimitées'
+          : `${p.ai_generations}${p.ai_generations_monthly ? ' / mois' : ' à vie'}`,
+    },
     { label: 'Campagnes datées', cell: (p) => (p.limits.campaigns === 'none' ? no : CAMPAIGN_CELL[p.limits.campaigns]) },
     { label: 'Historique des ouvertures et des clics', cell: (p) => cap(formatRetention(p.limits.analytics_days)) },
     { label: 'Espace pour les images et les GIF', cell: (p) => formatBytes(p.limits.assets_bytes) },

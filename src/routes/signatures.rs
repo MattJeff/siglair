@@ -73,6 +73,24 @@ async fn fetch(db: &PgPool, org_id: Uuid, id: Uuid) -> Result<SignatureRow> {
     .ok_or(AppError::NotFound)
 }
 
+/// Une signature personnelle appartient à son auteur. L'administration transversale est
+/// une capacité Team : owner/admin peut alors gérer les signatures et modèles de l'org.
+fn can_mutate(access: &OrgAccess, row: &SignatureRow) -> bool {
+    let team_admin = access.plan.id == "team" && matches!(access.role.as_str(), "owner" | "admin");
+    if row.kind == "org_template" {
+        return team_admin;
+    }
+    row.owner_user_id == Some(access.user_id) || team_admin
+}
+
+fn require_mutation(access: &OrgAccess, row: &SignatureRow) -> Result<()> {
+    if can_mutate(access, row) {
+        Ok(())
+    } else {
+        Err(AppError::Forbidden)
+    }
+}
+
 fn doc_of(row: &SignatureRow) -> Result<Doc> {
     Ok(serde_json::from_value(row.doc.clone())?)
 }
@@ -159,6 +177,9 @@ async fn create(
     let plan = access.plan;
     let name = clean_name(&req.name)?;
     let kind = clean_kind(req.kind.as_deref(), &plan)?;
+    if kind == "org_template" {
+        access.require_admin()?;
+    }
     let doc = req.doc.unwrap_or_default();
     doc.validate()?;
     check_signature_quota(&plan, count_live(&st.db, access.org_id).await?)?;
@@ -195,6 +216,7 @@ async fn update(
     // ponytail : lecture puis écriture complète, sans verrou. Un éditeur a un seul auteur ;
     // le jour où deux onglets se battent, il faudra un numéro de version dans la table.
     let cur = fetch(&st.db, access.org_id, id).await?;
+    require_mutation(&access, &cur)?;
     let name = match req.name {
         Some(n) => clean_name(&n)?,
         None => cur.name,
@@ -233,6 +255,8 @@ async fn remove(
     access: OrgAccess,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode> {
+    let row = fetch(&st.db, access.org_id, id).await?;
+    require_mutation(&access, &row)?;
     let n = sqlx::query(
         "UPDATE signatures SET deleted_at = now(), updated_at = now() \
          WHERE id = $1 AND org_id = $2 AND deleted_at IS NULL",
@@ -255,6 +279,7 @@ async fn duplicate(
 ) -> Result<(StatusCode, Json<SignatureRow>)> {
     let plan = access.plan;
     let src = fetch(&st.db, access.org_id, id).await?;
+    require_mutation(&access, &src)?;
     check_signature_quota(&plan, count_live(&st.db, access.org_id).await?)?;
 
     let name: String = format!("{} (copie)", src.name).chars().take(120).collect();
@@ -297,6 +322,19 @@ pub(crate) async fn publish_doc(
     doc: &Doc,
     profile: &Profile,
 ) -> Result<Published> {
+    publish_snapshot(db, sig_id, current_slug, doc, profile, None).await
+}
+
+/// Met en file l'instantané exact à rasteriser. `campaign_id` ne modifie jamais le document
+/// source : il sert seulement à savoir quand la campagne doit être retirée automatiquement.
+pub(crate) async fn publish_snapshot(
+    db: &PgPool,
+    sig_id: Uuid,
+    current_slug: Option<String>,
+    doc: &Doc,
+    profile: &Profile,
+    campaign_id: Option<Uuid>,
+) -> Result<Published> {
     // Le hash porte sur (doc, profil) : c'est la même empreinte que celle que le renderer
     // recalcule et écrit dans `renders.doc_hash`, sinon le cache §7.1 ne se croiserait jamais.
     let hash = doc_hash(doc, profile);
@@ -315,11 +353,42 @@ pub(crate) async fn publish_doc(
     .fetch_optional(db)
     .await?;
     if let Some(render_id) = existing {
+        // Un rendu plus ancien peut encore être en cours. Le marqueur `done`, plus récent,
+        // l'empêche de republier son état après ce retour immédiat au cache.
+        let pending_other: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM render_jobs WHERE signature_id = $1 \
+             AND status IN ('queued', 'running') \
+             AND (doc_hash <> $2 OR campaign_id IS DISTINCT FROM $3))",
+        )
+        .bind(sig_id)
+        .bind(&hash)
+        .bind(campaign_id)
+        .fetch_one(db)
+        .await?;
+        if pending_other {
+            sqlx::query(
+                "INSERT INTO render_jobs \
+                   (id, signature_id, status, doc_hash, doc, profile, campaign_id, finished_at) \
+                 VALUES ($1, $2, 'done', $3, $4, $5, $6, now())",
+            )
+            .bind(Uuid::new_v4())
+            .bind(sig_id)
+            .bind(&hash)
+            .bind(serde_json::to_value(doc)?)
+            .bind(serde_json::to_value(profile)?)
+            .bind(campaign_id)
+            .execute(db)
+            .await?;
+        }
         sqlx::query(
-            "UPDATE signatures SET published_render_id = $1, updated_at = now() WHERE id = $2",
+            "UPDATE signatures SET published_render_id = $1, published_campaign_id = $3, \
+               campaign_base_doc = CASE WHEN $3::uuid IS NULL THEN NULL ELSE campaign_base_doc END, \
+               campaign_base_profile = CASE WHEN $3::uuid IS NULL THEN NULL ELSE campaign_base_profile END, \
+               updated_at = now() WHERE id = $2",
         )
         .bind(render_id)
         .bind(sig_id)
+        .bind(campaign_id)
         .execute(db)
         .await?;
         return Ok(Published {
@@ -330,8 +399,9 @@ pub(crate) async fn publish_doc(
     }
 
     // un double-clic sur « Publier » ne doit pas empiler deux fois le même travail
-    let queued: Option<Uuid> = sqlx::query_scalar(
-        "SELECT id FROM render_jobs WHERE signature_id = $1 AND doc_hash = $2 \
+    let queued: Option<(Uuid, String, Option<Uuid>)> = sqlx::query_as(
+        "SELECT id, status, campaign_id FROM render_jobs \
+         WHERE signature_id = $1 AND doc_hash = $2 \
          AND status IN ('queued', 'running') ORDER BY created_at DESC LIMIT 1",
     )
     .bind(sig_id)
@@ -339,15 +409,34 @@ pub(crate) async fn publish_doc(
     .fetch_optional(db)
     .await?;
     let job_id = match queued {
-        Some(id) => id,
-        None => {
+        Some((id, status, queued_campaign))
+            if status == "queued" || queued_campaign == campaign_id =>
+        {
+            sqlx::query(
+                "UPDATE render_jobs SET doc = $2, profile = $3, campaign_id = $4 WHERE id = $1",
+            )
+            .bind(id)
+            .bind(serde_json::to_value(doc)?)
+            .bind(serde_json::to_value(profile)?)
+            .bind(campaign_id)
+            .execute(db)
+            .await?;
+            id
+        }
+        Some(_) | None => {
             let id = Uuid::new_v4();
-            sqlx::query("INSERT INTO render_jobs (id, signature_id, doc_hash) VALUES ($1, $2, $3)")
-                .bind(id)
-                .bind(sig_id)
-                .bind(&hash)
-                .execute(db)
-                .await?;
+            sqlx::query(
+                "INSERT INTO render_jobs (id, signature_id, doc_hash, doc, profile, campaign_id) \
+                 VALUES ($1, $2, $3, $4, $5, $6)",
+            )
+            .bind(id)
+            .bind(sig_id)
+            .bind(&hash)
+            .bind(serde_json::to_value(doc)?)
+            .bind(serde_json::to_value(profile)?)
+            .bind(campaign_id)
+            .execute(db)
+            .await?;
             id
         }
     };
@@ -408,13 +497,34 @@ async fn publish(
         ));
     }
     let row = fetch(&st.db, access.org_id, id).await?;
-    let doc = doc_of(&row)?;
+    require_mutation(&access, &row)?;
+    let mut doc = doc_of(&row)?;
     // revalidation avant rendu : Chromium chargera ces URL depuis notre réseau (contrat §8),
     // et un DNS peut avoir changé de réponse depuis l'enregistrement.
     doc.validate()?;
 
     let profile = profile_of(&row);
-    let p = publish_doc(&st.db, row.id, row.public_slug, &doc, &profile).await?;
+    let campaign = crate::routes::campaigns::active_for_signature(
+        &st.db,
+        &access,
+        row.owner_user_id,
+        Utc::now(),
+    )
+    .await?;
+    if let Some(c) = campaign.as_ref() {
+        crate::routes::campaigns::remember_base(&st.db, row.id, &doc, &profile, true).await?;
+        crate::routes::campaigns::apply_to_doc(&mut doc, c);
+        doc.validate()?;
+    }
+    let p = publish_snapshot(
+        &st.db,
+        row.id,
+        row.public_slug,
+        &doc,
+        &profile,
+        campaign.as_ref().map(|c| c.id),
+    )
+    .await?;
     Ok(Json(json!({
         "slug": p.slug,
         "job_id": p.job_id,
@@ -524,4 +634,63 @@ async fn stats(
     Path(id): Path<Uuid>,
 ) -> Result<Json<Value>> {
     analytics::for_signature(&st, &access, id).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plans::{PRO, TEAM};
+
+    fn access(user_id: Uuid, role: &str, plan: Plan) -> OrgAccess {
+        OrgAccess {
+            org_id: Uuid::nil(),
+            user_id,
+            name: "Test".into(),
+            slug: "test".into(),
+            plan,
+            seats: 1,
+            analytics_enabled: true,
+            role: role.into(),
+        }
+    }
+
+    fn row(owner_user_id: Option<Uuid>, kind: &str) -> SignatureRow {
+        let now = Utc::now();
+        SignatureRow {
+            id: Uuid::new_v4(),
+            org_id: Uuid::nil(),
+            owner_user_id,
+            name: "Signature".into(),
+            kind: kind.into(),
+            doc: serde_json::to_value(Doc::default()).unwrap(),
+            profile: json!({}),
+            public_slug: None,
+            published_render_id: None,
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn personal_signatures_are_owned_unless_a_team_admin_manages_them() {
+        let alice = Uuid::new_v4();
+        let bob = Uuid::new_v4();
+        let personal = row(Some(alice), "personal");
+
+        assert!(can_mutate(&access(alice, "member", PRO), &personal));
+        assert!(!can_mutate(&access(bob, "admin", PRO), &personal));
+        assert!(!can_mutate(&access(bob, "member", TEAM), &personal));
+        assert!(can_mutate(&access(bob, "admin", TEAM), &personal));
+        assert!(can_mutate(&access(bob, "owner", TEAM), &personal));
+    }
+
+    #[test]
+    fn organisation_templates_require_a_team_admin_even_when_created_by_the_user() {
+        let alice = Uuid::new_v4();
+        let template = row(Some(alice), "org_template");
+
+        assert!(!can_mutate(&access(alice, "owner", PRO), &template));
+        assert!(!can_mutate(&access(alice, "member", TEAM), &template));
+        assert!(can_mutate(&access(alice, "admin", TEAM), &template));
+    }
 }
