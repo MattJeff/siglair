@@ -162,8 +162,39 @@ export const getSignatureStatus = (id: string): Promise<SignatureStatus> =>
 export const exportSignature = (id: string, mode: ExportMode): Promise<{ html: string }> =>
   api<{ html: string }>(`/api/signatures/${id}/export?mode=${mode}`);
 
-export const getAnalytics = (id: string): Promise<AnalyticsSeries> =>
-  api<AnalyticsSeries>(`/api/signatures/${id}/analytics`);
+type AnalyticsWire = Omit<AnalyticsSeries, 'from' | 'to' | 'points' | 'top_elements'> & {
+  from?: string;
+  to?: string;
+  points?: Array<{ date?: string; day?: string; opens: number; clicks: number }>;
+  /** Ancienne forme servie avant l'alignement du contrat Analytics. */
+  series?: Array<{ date?: string; day?: string; opens: number; clicks: number }>;
+  top_elements?: Array<{ element_id: string; label?: string; clicks: number }>;
+};
+
+/** Accepte aussi l'ancienne réponse pendant un déploiement où web et API se croisent. */
+export function normalizeAnalytics(value: AnalyticsWire): AnalyticsSeries {
+  const points = (value.points ?? value.series ?? [])
+    .map((point) => ({
+      date: point.date ?? point.day ?? '',
+      opens: point.opens,
+      clicks: point.clicks,
+    }))
+    .filter((point) => point.date !== '');
+
+  return {
+    from: value.from ?? points[0]?.date ?? '',
+    to: value.to ?? points[points.length - 1]?.date ?? '',
+    points,
+    totals: value.totals,
+    top_elements: (value.top_elements ?? []).map((element) => ({
+      ...element,
+      label: element.label ?? '',
+    })),
+  };
+}
+
+export const getAnalytics = async (id: string): Promise<AnalyticsSeries> =>
+  normalizeAnalytics(await api<AnalyticsWire>(`/api/signatures/${id}/analytics`));
 
 /** Aperçu éditeur : le HTML est produit par le serveur, jamais reconstruit ici (§2). */
 export const previewDoc = (doc: Doc, profile: Profile): Promise<{ html: string }> =>

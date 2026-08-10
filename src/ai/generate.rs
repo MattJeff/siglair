@@ -32,6 +32,12 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_TOKENS: u32 = 8000;
 const VARIANTS: usize = 3;
 
+/// Signal public de capacité : le composeur local reste disponible sans fournisseur,
+/// mais il ne doit pas être vendu comme une génération par modèle.
+pub fn provider_configured() -> bool {
+    env("AI_API_KEY").is_some() && env("AI_MODEL").is_some()
+}
+
 // Recopiées du contrat (§3.2 pour les presets, `templates.ts` pour les modèles) : le schéma
 // JSON a besoin des chaînes, pas des types. Le test `les_valeurs_du_schema_existent_vraiment`
 // échoue si l'une d'elles cesse de correspondre à son enum.

@@ -2,6 +2,7 @@ import { lazy } from 'react';
 import type { ComponentType } from 'react';
 
 const RELOAD_MARKER = 'siglair:lazy-reload';
+const SYNC_PARAM = '_siglair_sync';
 
 export function isLazyLoadError(value: unknown): boolean {
   if (!(value instanceof Error)) return false;
@@ -11,7 +12,15 @@ export function isLazyLoadError(value: unknown): boolean {
 }
 
 function recoveryPath(): string {
-  return `${location.pathname}${location.search}`;
+  const url = new URL(location.href);
+  url.searchParams.delete(SYNC_PARAM);
+  return `${url.pathname}${url.search}`;
+}
+
+export function applicationRecoveryUrl(href: string, nonce = Date.now()): string {
+  const url = new URL(href);
+  url.searchParams.set(SYNC_PARAM, String(nonce));
+  return `${url.pathname}${url.search}${url.hash}`;
 }
 
 function clearRecoveryMarker() {
@@ -20,6 +29,19 @@ function clearRecoveryMarker() {
   } catch {
     // Une politique navigateur peut bloquer sessionStorage. Le chargement normal continue.
   }
+}
+
+function clearRecoveryParam() {
+  const url = new URL(location.href);
+  if (!url.searchParams.has(SYNC_PARAM)) return;
+  url.searchParams.delete(SYNC_PARAM);
+  history.replaceState(history.state, '', `${url.pathname}${url.search}${url.hash}`);
+}
+
+/** Recharge le shell HTML en contournant explicitement les caches intermédiaires. */
+export function reloadApplication() {
+  clearRecoveryMarker();
+  location.replace(applicationRecoveryUrl(location.href));
 }
 
 /**
@@ -31,6 +53,7 @@ export function lazyPage<T extends ComponentType>(loader: () => Promise<{ defaul
     try {
       const module = await loader();
       clearRecoveryMarker();
+      clearRecoveryParam();
       return module;
     } catch (error) {
       if (isLazyLoadError(error)) {
@@ -38,7 +61,7 @@ export function lazyPage<T extends ComponentType>(loader: () => Promise<{ defaul
         try {
           if (sessionStorage.getItem(RELOAD_MARKER) !== path) {
             sessionStorage.setItem(RELOAD_MARKER, path);
-            location.reload();
+            location.replace(applicationRecoveryUrl(location.href));
             return await new Promise<never>(() => undefined);
           }
           sessionStorage.removeItem(RELOAD_MARKER);

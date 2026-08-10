@@ -23,7 +23,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{
-    ai::{brand, compose, generate, Brand, Logo},
+    ai::{brand, compose, generate, Brand, Logo, VariantSource},
     auth::{middleware::client_ip, OrgAccess},
     doc::{Doc, Profile},
     error::{AppError, Result},
@@ -267,6 +267,14 @@ async fn generate_variants(
     let fallback = compose::fallback_variants(&req.brand, &profile);
     let out = generate::generate(&st.http, &req.brand, fallback).await;
 
+    // Un repli local n'est pas une génération IA. Il reste utile, mais il ne consomme
+    // jamais le quota vendu aux plans payants (ni l'unique essai du plan Free).
+    if out.source == VariantSource::Fallback {
+        if let Err(error) = refund_ai_generation(&st, &access).await {
+            tracing::error!(?error, org_id = %access.org_id, "quota IA non remboursé après repli");
+        }
+    }
+
     let mut variants = Vec::with_capacity(out.variants.len());
     for (i, spec) in out.variants.iter().enumerate() {
         let mut doc = compose::compose(spec, &req.brand, &profile);
@@ -341,6 +349,19 @@ async fn consume_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> 
     if n == 0 {
         return Err(AppError::QuotaExceeded(quota_message(&access.plan)));
     }
+    Ok(())
+}
+
+async fn refund_ai_generation(st: &AppState, access: &OrgAccess) -> Result<()> {
+    if access.plan.ai_generations.is_none() {
+        return Ok(());
+    }
+    sqlx::query(
+        "UPDATE orgs SET ai_generations_used = greatest(ai_generations_used - 1, 0) WHERE id = $1",
+    )
+    .bind(access.org_id)
+    .execute(&st.db)
+    .await?;
     Ok(())
 }
 

@@ -1,5 +1,14 @@
 import { Link, NavLink } from 'react-router-dom';
 import type { ReactNode } from 'react';
+import {
+  ChevronDown,
+  CreditCard,
+  LayoutDashboard,
+  LogOut,
+  Settings2,
+  Sparkles,
+  Users,
+} from 'lucide-react';
 import { logout } from '../../lib/api';
 import { useSession } from '../../lib/session';
 import s from './shell.module.css';
@@ -13,9 +22,10 @@ export interface AppShellProps {
 }
 
 const NAV = [
-  { to: '/app', label: 'Signatures', end: true },
-  { to: '/app/team', label: 'Équipe', end: false },
-  { to: '/app/settings', label: 'Réglages', end: false },
+  { to: '/app', label: 'Signatures', end: true, icon: LayoutDashboard },
+  { to: '/onboarding', label: 'Créer', end: false, icon: Sparkles },
+  { to: '/app/team', label: 'Équipe', end: false, icon: Users },
+  { to: '/app/settings', label: 'Réglages', end: false, icon: Settings2 },
 ];
 
 /**
@@ -55,13 +65,18 @@ export function AppShell({ title, subtitle, actions, children }: AppShellProps) 
         </Link>
 
         <nav className={s.nav} aria-label="Navigation principale">
-          {NAV.map((item) => (
-            <NavLink key={item.to} to={item.to} end={item.end} className={s.navLink}>
-              {item.label}
-            </NavLink>
-          ))}
+          {NAV.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink key={item.to} to={item.to} end={item.end} className={s.navLink}>
+                <Icon size={16} aria-hidden="true" />
+                {item.label}
+              </NavLink>
+            );
+          })}
           {features?.billing && (
             <NavLink to="/app/billing" className={s.navLink}>
+              <CreditCard size={16} aria-hidden="true" />
               Abonnement
             </NavLink>
           )}
@@ -80,19 +95,23 @@ export function AppShell({ title, subtitle, actions, children }: AppShellProps) 
               <span className={s.avatar} aria-hidden="true">
                 {initial}
               </span>
-              Mon compte
+              <span className={s.accountLabel}>Mon compte</span>
+              <ChevronDown size={14} aria-hidden="true" />
             </summary>
             <div className={s.menuPanel}>
               <p className={s.menuEmail}>{user?.email}</p>
               <Link className={s.menuItem} to="/app/settings">
+                <Settings2 size={16} aria-hidden="true" />
                 Profil et réglages
               </Link>
               {features?.billing && (
                 <Link className={s.menuItem} to="/app/billing">
+                  <CreditCard size={16} aria-hidden="true" />
                   Abonnement et factures
                 </Link>
               )}
               <button type="button" className={s.menuItem} onClick={() => void onLogout()}>
+                <LogOut size={16} aria-hidden="true" />
                 Se déconnecter
               </button>
             </div>

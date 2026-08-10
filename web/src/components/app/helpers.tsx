@@ -70,7 +70,7 @@ export interface PlanFeature {
  * Une seule liste pour /pricing, la landing et /app/billing : trois listes finiraient
  * par vendre trois grilles différentes.
  */
-export function planFeatures(plan: PlanInfo): PlanFeature[] {
+export function planFeatures(plan: PlanInfo, aiProvider = true): PlanFeature[] {
   const l = plan.limits;
   const ai = plan.ai_generations;
   return [
@@ -83,11 +83,12 @@ export function planFeatures(plan: PlanInfo): PlanFeature[] {
     },
     { label: 'GIF animé hébergé sur une URL stable', on: l.hosted_gif },
     {
-      label:
-        ai === null
+      label: aiProvider
+        ? ai === null
           ? 'Générations IA illimitées'
-          : `${ai} génération${ai > 1 ? 's' : ''} IA ${plan.ai_generations_monthly ? '/ mois' : 'à vie'}`,
-      on: ai === null || ai > 0,
+          : `${ai} génération${ai > 1 ? 's' : ''} IA ${plan.ai_generations_monthly ? '/ mois' : 'à vie'}`
+        : 'Création guidée à partir de votre site',
+      on: aiProvider ? ai === null || ai > 0 : true,
     },
     // La PORTÉE, pas `hosted_gif` : Free a désormais le GIF hébergé, et ce verrou-ci
     // affichait donc « Campagnes datées ✓ » sur un plan à qui l'API répond 402.

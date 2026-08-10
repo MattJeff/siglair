@@ -1319,6 +1319,27 @@
   background: var(--panel3);
 }
 
+.backgroundPicker {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.backgroundThumb {
+  width: 100%;
+  height: 72px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--panel2);
+}
+
+.backgroundActions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .row2,
 .row3,
 .row4 {

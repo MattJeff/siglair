@@ -56,7 +56,7 @@ function applyBrandDefaults(form: Form, brand: Brand | null): Form {
 }
 
 export default function Onboarding() {
-  const { user, refresh } = useSession();
+  const { user, refresh, features } = useSession();
   const navigate = useNavigate();
 
   const [brand, setBrandState] = useState<Brand | null>(() => readBrand());
@@ -79,6 +79,7 @@ export default function Onboarding() {
   const [picking, setPicking] = useState<number | null>(null);
   const [error, setError] = useState('');
   const [quota, setQuota] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
 
   // La marque édite en place et survit à un rechargement de l'onglet.
   const setBrand = (next: Brand) => {
@@ -115,6 +116,7 @@ export default function Onboarding() {
     try {
       const result = await generateVariants(brand, profile);
       setProposals(result.variants);
+      setUsedFallback(result.source === 'fallback');
       setStep('choose');
     } catch (cause) {
       setQuota(errorCode(cause) === 'quota_exceeded');
@@ -205,7 +207,10 @@ export default function Onboarding() {
 
               <div className={s.actions}>
                 <Button type="submit">
-                  <span aria-hidden="true">✨</span> Générer ma signature
+                  <span aria-hidden="true">✨</span>{' '}
+                  {features?.ai_provider === false
+                    ? 'Créer mes trois propositions'
+                    : 'Générer avec l’IA'}
                 </Button>
                 <p className={s.reassure}>Vous pourrez tout modifier ensuite.</p>
               </div>
@@ -251,6 +256,12 @@ export default function Onboarding() {
                 proche : l’éditeur fait le reste.
               </p>
               <p className={s.reassure}>Vous pourrez tout modifier ensuite.</p>
+              {usedFallback && (
+                <p className={s.muted} role="status">
+                  Le fournisseur IA n’a pas répondu. Le moteur Siglair a préparé ces directions
+                  localement et votre quota IA n’a pas été débité.
+                </p>
+              )}
             </div>
 
             <VariantCards

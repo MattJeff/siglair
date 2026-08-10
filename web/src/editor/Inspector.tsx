@@ -5,7 +5,7 @@
  */
 import { useRef, useState } from 'react';
 import type { Dispatch } from 'react';
-import { Upload } from 'lucide-react';
+import { ImagePlus, Trash2, Upload } from 'lucide-react';
 import { Field } from '../components/Field';
 import { Input } from '../components/Input';
 import { Select } from '../components/Select';
@@ -75,7 +75,9 @@ interface InspectorProps {
 export function Inspector({ state, dispatch, assets, onUploadFiles }: InspectorProps) {
   const [tab, setTab] = useState<'style' | 'animate'>('style');
   const [uploading, setUploading] = useState(false);
+  const [backgroundUploading, setBackgroundUploading] = useState(false);
   const mediaInput = useRef<HTMLInputElement>(null);
+  const backgroundInput = useRef<HTMLInputElement>(null);
   const element = selectedElement(state);
   const { canvas } = state.doc;
 
@@ -189,19 +191,69 @@ export function Inspector({ state, dispatch, assets, onUploadFiles }: InspectorP
                   dispatch({ type: 'updateCanvas', patch: { bg }, coalesce: 'canvas.bg' })
                 }
               />
-              <Field label="Image de fond" hint="URL http(s) publique. Les adresses privées sont refusées.">
-                <Input
-                  type="url"
-                  value={canvas.bgImage}
-                  placeholder="https://"
-                  onChange={(e) =>
-                    dispatch({
-                      type: 'updateCanvas',
-                      patch: { bgImage: e.target.value },
-                      coalesce: 'canvas.bgImage',
-                    })
-                  }
-                />
+              <Field label="Image de fond" hint="Importez une image ou un GIF, ou collez une URL publique.">
+                <div className={s.backgroundPicker}>
+                  {canvas.bgImage && (
+                    <img className={s.backgroundThumb} src={canvas.bgImage} alt="Aperçu du fond" />
+                  )}
+                  <Input
+                    type="url"
+                    value={canvas.bgImage}
+                    placeholder="https://"
+                    onChange={(e) =>
+                      dispatch({
+                        type: 'updateCanvas',
+                        patch: { bgImage: e.target.value },
+                        coalesce: 'canvas.bgImage',
+                      })
+                    }
+                  />
+                  <div className={s.backgroundActions}>
+                    <button
+                      type="button"
+                      className={s.mediaUploadBtn}
+                      disabled={backgroundUploading}
+                      onClick={() => backgroundInput.current?.click()}
+                    >
+                      <ImagePlus size={15} />
+                      {backgroundUploading ? 'Import…' : 'Importer'}
+                    </button>
+                    {canvas.bgImage && (
+                      <button
+                        type="button"
+                        className={s.mediaUploadBtn}
+                        onClick={() =>
+                          dispatch({ type: 'updateCanvas', patch: { bgImage: '' } })
+                        }
+                      >
+                        <Trash2 size={14} />
+                        Retirer
+                      </button>
+                    )}
+                  </div>
+                  <input
+                    ref={backgroundInput}
+                    type="file"
+                    hidden
+                    accept="image/png,image/jpeg,image/webp,image/gif"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      event.target.value = '';
+                      if (!file) return;
+                      setBackgroundUploading(true);
+                      void onUploadFiles([file])
+                        .then(([asset]) => {
+                          if (asset) {
+                            dispatch({
+                              type: 'updateCanvas',
+                              patch: { bgImage: asset.url },
+                            });
+                          }
+                        })
+                        .finally(() => setBackgroundUploading(false));
+                    }}
+                  />
+                </div>
               </Field>
               <div className={s.row2}>
                 <Field label={`Voile ${Math.round(canvas.overlay * 100)} %`}>

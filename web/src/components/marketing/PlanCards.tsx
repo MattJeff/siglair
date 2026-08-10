@@ -64,7 +64,8 @@ const CAMPAIGN_CELL: Record<CampaignScope, string> = {
  * comme `require_paid_plan` côté serveur. Le `map` sur le libellé exact qui vivait ici
  * n'a plus lieu d'être : un couplage par chaîne de moins.
  */
-const features = (plan: PlanInfo): PlanFeature[] => planFeatures(plan);
+const featureList = (plan: PlanInfo, aiProvider: boolean): PlanFeature[] =>
+  planFeatures(plan, aiProvider);
 
 function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
   if (plan.price_eur_month === 0) {
@@ -103,7 +104,7 @@ function PlanPrice({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
 }
 
 function PlanCard({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
-  const { status } = useSession();
+  const { status, features } = useSession();
   const free = plan.price_eur_month === 0;
   const featured = plan.plan === 'pro';
 
@@ -123,7 +124,7 @@ function PlanCard({ plan, cycle }: { plan: PlanInfo; cycle: Cycle }) {
       <PlanPrice plan={plan} cycle={cycle} />
       <p className={s.pitch}>{PITCH[plan.plan] ?? ''}</p>
       <ul className={s.features}>
-        {features(plan).map((f) => (
+        {featureList(plan, features?.ai_provider !== false).map((f) => (
           <li key={f.label} className={f.on ? undefined : s.off}>
             {f.label}
           </li>
@@ -217,7 +218,7 @@ export function PlanCards({ withCycle = false }: { withCycle?: boolean }) {
 
 /** Comparatif détaillé — /pricing uniquement. */
 export function PlanComparison() {
-  const { plans } = useSession();
+  const { plans, features } = useSession();
   if (plans.length === 0) return null;
 
   const yes = (
@@ -250,9 +251,14 @@ export function PlanComparison() {
     { label: 'Signatures', cell: (p) => formatSignatures(p.limits.signatures) },
     { label: 'GIF animé hébergé sur une URL', cell: (p) => (p.limits.hosted_gif ? yes : no) },
     {
-      label: 'Générations par intelligence artificielle',
+      label:
+        features?.ai_provider !== false
+          ? 'Générations par intelligence artificielle'
+          : 'Création guidée à partir de votre site',
       cell: (p) =>
-        p.ai_generations === null
+        features?.ai_provider === false
+          ? yes
+          : p.ai_generations === null
           ? 'Illimitées'
           : `${p.ai_generations}${p.ai_generations_monthly ? ' / mois' : ' à vie'}`,
     },

@@ -314,6 +314,8 @@ export interface Features {
   apple: boolean;
   magic: boolean;
   billing: boolean;
+  /** Un vrai fournisseur de modèle est configuré ; sinon le composeur local prend le relais. */
+  ai_provider: boolean;
 }
 
 export interface Config extends Features {
@@ -323,6 +325,7 @@ export interface Config extends Features {
    * propositions — le champ « collez votre site » ne se masque jamais.
    */
   ai: boolean;
+  ai_provider: boolean;
 }
 
 /* ------------------------------------------------------------------ */

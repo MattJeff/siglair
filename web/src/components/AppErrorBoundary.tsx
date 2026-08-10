@@ -1,6 +1,7 @@
 import { Component } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Button } from './Button';
+import { reloadApplication } from '../lib/lazyPage';
 
 interface Props {
   children: ReactNode;
@@ -40,7 +41,7 @@ export class AppErrorBoundary extends Component<Props, State> {
             Une nouvelle version a peut-être été déployée pendant que cet onglet était ouvert.
             Rechargez la page pour reprendre là où vous en étiez.
           </p>
-          <Button onClick={() => location.reload()}>Recharger l’application</Button>
+          <Button onClick={reloadApplication}>Recharger l’application</Button>
         </div>
       </main>
     );

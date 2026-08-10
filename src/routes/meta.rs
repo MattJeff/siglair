@@ -9,6 +9,7 @@ use axum::{extract::State, routing::get, Json, Router};
 use serde::Serialize;
 
 use crate::{
+    ai::generate,
     config::Features,
     plans::{Plan, ALL},
     AppState,
@@ -23,6 +24,8 @@ struct ConfigOut {
     /// le repli déterministe rend trois propositions — masquer le champ « collez votre
     /// site » couperait l'entonnoir d'acquisition pour une clé manquante.
     ai: bool,
+    /// Vrai uniquement quand un fournisseur OpenAI-compatible est réellement branché.
+    ai_provider: bool,
 }
 
 pub fn router() -> Router<AppState> {
@@ -34,5 +37,6 @@ async fn config(State(st): State<AppState>) -> Json<ConfigOut> {
         features: st.cfg.features(),
         plans: ALL,
         ai: true,
+        ai_provider: generate::provider_configured(),
     })
 }

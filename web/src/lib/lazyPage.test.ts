@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { isLazyLoadError } from './lazyPage';
+import { applicationRecoveryUrl, isLazyLoadError } from './lazyPage';
 
 describe('lazy page recovery', () => {
   it.each([
@@ -13,5 +13,11 @@ describe('lazy page recovery', () => {
 
   it('does not reload for an application error', () => {
     expect(isLazyLoadError(new Error('Le profil est invalide'))).toBe(false);
+  });
+
+  it('adds a cache buster without losing the route, query or anchor', () => {
+    expect(applicationRecoveryUrl('https://siglair.com/app/settings?tab=profile#email', 42)).toBe(
+      '/app/settings?tab=profile&_siglair_sync=42#email',
+    );
   });
 });

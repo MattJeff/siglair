@@ -360,7 +360,7 @@ export default function Billing() {
                     </p>
                   )}
                   <ul className={s.features}>
-                    {planFeatures(info).map((f) => (
+                    {planFeatures(info, features?.ai_provider !== false).map((f) => (
                       <li key={f.label} className={f.on ? undefined : s.featureOff}>
                         {f.label}
                       </li>

@@ -4,7 +4,7 @@
 //! bien mieux qu'une boucle Rust qui rouvre une connexion à chaque itération.
 
 use axum::Json;
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate, Utc};
 use serde::Serialize;
 use serde_json::{json, Value};
 use uuid::Uuid;
@@ -17,6 +17,7 @@ use crate::{
 
 #[derive(Serialize, sqlx::FromRow)]
 struct DayRow {
+    #[serde(rename = "date")]
     day: NaiveDate,
     opens: i64,
     clicks: i64,
@@ -62,12 +63,14 @@ pub async fn for_signature(
     }
 
     let days = plan.limits.analytics_days as i32;
+    let today = Utc::now().date_naive();
+    let from = today - Duration::days(i64::from(days.saturating_sub(1)));
     if !analytics_enabled {
         // contrat §4.1 : l'org a coupé la mesure, on ne montre pas d'historique résiduel
         return Ok(Json(json!({
-            "enabled": false, "days": days,
+            "enabled": false, "days": days, "from": from, "to": today,
             "totals": { "opens": 0, "clicks": 0 },
-            "series": [], "top_elements": [], "clients": [],
+            "points": [], "top_elements": [], "clients": [],
         })));
     }
 
@@ -116,8 +119,10 @@ pub async fn for_signature(
     Ok(Json(json!({
         "enabled": true,
         "days": days,
+        "from": from,
+        "to": today,
         "totals": { "opens": opens, "clicks": clicks },
-        "series": series,
+        "points": series,
         "top_elements": top_elements,
         "clients": clients,
     })))
