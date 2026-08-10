@@ -12,7 +12,14 @@ export const START_HREF = `/login?next=${encodeURIComponent('/app')}`;
 export function Brand() {
   return (
     <Link to="/" className={s.brand}>
-      <span className={s.ring} aria-hidden="true" />
+      <img
+        className={s.brandMark}
+        src="/brand/siglair-mark.png"
+        alt=""
+        width={36}
+        height={36}
+        aria-hidden="true"
+      />
       Siglair
     </Link>
   );

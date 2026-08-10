@@ -43,7 +43,14 @@ export function AppShell({ title, subtitle, actions, children }: AppShellProps) 
 
       <header className={s.bar}>
         <Link className={s.brand} to="/app">
-          <span className={s.ring} aria-hidden="true" />
+          <img
+            className={s.brandMark}
+            src="/brand/siglair-mark.png"
+            alt=""
+            width={26}
+            height={26}
+            aria-hidden="true"
+          />
           Siglair
         </Link>
 

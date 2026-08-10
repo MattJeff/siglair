@@ -39,7 +39,7 @@ export function SignatureDemo() {
               <div className={s.logoWrap}>
                 <img
                   className={s.logo}
-                  src="/demo-logo.png"
+                  src="/brand/siglair-mark.png"
                   alt=""
                   width={256}
                   height={256}

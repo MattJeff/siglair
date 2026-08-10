@@ -63,7 +63,14 @@ export default function Invite() {
     <div className={s.authWrap}>
       <div className={s.authCard}>
         <Link className={s.authBrand} to="/">
-          <span className={s.authRing} aria-hidden="true" />
+          <img
+            className={s.authLogo}
+            src="/brand/siglair-mark.png"
+            alt=""
+            width={28}
+            height={28}
+            aria-hidden="true"
+          />
           Siglair
         </Link>
 

@@ -57,31 +57,12 @@
   text-decoration: none;
 }
 
-/* Anneau de marque : gradient masqué, repris de la maquette (DESIGN.md). */
-.ring {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  position: relative;
+.brandMark {
+  width: 36px;
+  height: 36px;
+  object-fit: contain;
   flex: 0 0 auto;
-  filter: drop-shadow(0 0 12px color-mix(in srgb, var(--blue) 50%, transparent));
-}
-
-.ring::before {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  border: 6px solid transparent;
-  background: linear-gradient(135deg, color-mix(in srgb, var(--cyan) 52%, var(--text)), var(--primary-a), color-mix(in srgb, var(--cyan) 82%, var(--text))) border-box;
-  mask:
-    linear-gradient(#fff 0 0) padding-box,
-    linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  -webkit-mask:
-    linear-gradient(#fff 0 0) padding-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
+  filter: drop-shadow(0 0 11px color-mix(in srgb, var(--blue) 42%, transparent));
 }
 
 .nav {

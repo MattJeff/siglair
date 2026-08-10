@@ -340,8 +340,8 @@
   width: 54px;
   height: 54px;
   aspect-ratio: 1;
-  border-radius: 50%;
-  object-fit: cover;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--blue) 32%, transparent));
 }
 
 .rule {

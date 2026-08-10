@@ -100,7 +100,13 @@ export function CampaignDemo() {
               </div>
               <div className={s.signature}>
                 <div className={s.identity}>
-                  <img src="/demo-logo.png" alt="" width={256} height={256} decoding="async" />
+                  <img
+                    src="/brand/siglair-mark.png"
+                    alt=""
+                    width={256}
+                    height={256}
+                    decoding="async"
+                  />
                   <span className={s.rule} aria-hidden="true" />
                   <div>
                     <strong>Camille Roussel</strong>

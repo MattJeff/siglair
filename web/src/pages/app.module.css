@@ -393,12 +393,12 @@
   text-decoration: none;
 }
 
-.authRing {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: conic-gradient(from 140deg, var(--blue), var(--cyan), var(--purple), var(--blue));
-  mask: radial-gradient(circle, transparent 52%, #000 54%);
+.authLogo {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: contain;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--blue) 38%, transparent));
 }
 
 .authTitle {
