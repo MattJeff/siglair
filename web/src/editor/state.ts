@@ -6,7 +6,7 @@
  * de l'utilisateur — d'où les tests de state.test.ts.
  */
 import { ELEMENT_TYPES } from '../lib/types';
-import type { Anim, Canvas, Doc, Element, ElementType, Profile } from '../lib/types';
+import type { ExportMode, Anim, Canvas, Doc, Element, ElementType, Profile } from '../lib/types';
 
 /* ------------------------------------------------------------------ */
 /* Identifiants                                                        */
@@ -492,42 +492,84 @@ export interface Compatibility {
 }
 
 /** Conseil, pas rendu : le HTML de vérité vient du serveur (contrat §2). */
-export function compatibility(doc: Doc): Compatibility {
+export function compatibility(doc: Doc, mode: ExportMode = 'hosted'): Compatibility {
   const issues: string[] = [];
   const warnings: string[] = [];
   let score = 100;
 
-  if (doc.canvas.bgImage) {
-    score -= 10;
-    issues.push('image de fond');
-    warnings.push(
-      "Image de fond : Outlook pour Windows peut l'ignorer. Prévoyez une couleur de fond lisible sans elle.",
-    );
-  }
-  if (doc.elements.some((e) => e.type === 'video')) {
-    score -= 25;
-    issues.push('vidéo');
-    warnings.push(
-      "Vidéo : aucun client mail ne la lit de façon fiable. Elle est convertie en image au rendu.",
-    );
-  }
-  if (doc.elements.some((e) => e.rotation !== 0)) {
-    score -= 5;
-    issues.push('rotation');
-  }
-  if (doc.elements.some((e) => e.anim.preset !== 'none')) {
-    score -= 12;
-    issues.push('animation');
-    warnings.push(
-      "Animations : elles sont rendues en GIF hébergé. En export statique, seule la première image est visible.",
-    );
-  }
-  if (doc.elements.some((e) => e.type === 'shape')) score -= 3;
+  const animated = doc.elements.filter((e) => e.anim.preset !== 'none').length;
+  const hasVideo = doc.elements.some((e) => e.type === 'video');
+  const hasRotation = doc.elements.some((e) => e.rotation !== 0);
+  const hasGradient = doc.elements.some((e) => e.background.includes('gradient'));
 
-  warnings.push(
-    "Outlook (versions anciennes) fige le GIF sur sa première image : soignez ce qui est visible à l'instant 0.",
-  );
+  if (mode === 'hosted') {
+    // Le GIF est une image : la mise en page est identique PARTOUT, au pixel près. Il n'y
+    // a donc rien à retirer pour une animation ou une rotation — c'est justement ce que
+    // ce mode rend parfaitement. Les seuls vrais risques sont ailleurs.
+    warnings.push(
+      "Les images sont masquées par défaut pour un expéditeur inconnu : en prospection à froid, le destinataire ne verra rien. Préférez « Texte compatible ».",
+    );
+    warnings.push(
+      "Outlook pour Windows fige le GIF sur sa première image : soignez ce qui est visible à l’instant 0.",
+    );
+    if (animated > 6) {
+      score -= 15;
+      issues.push(`${animated} éléments animés`);
+      warnings.push(
+        'Beaucoup d’éléments animés alourdissent le GIF. Au-delà d’environ 1 Mo, Gmail le coupe et l’image ne s’affiche pas.',
+      );
+    }
+    if (hasVideo) {
+      score -= 10;
+      issues.push('vidéo');
+      warnings.push('Vidéo : elle est figée sur sa première image au rendu.');
+    }
+  } else {
+    // Mode table : on énumère ce qui SERA VISIBLEMENT DIFFÉRENT de l'éditeur. C'est la
+    // seule information utile ici — un score élevé sur un rendu qui perd les animations
+    // et réorganise la mise en page serait un mensonge.
+    warnings.push(
+      'Ce mode reconstruit la mise en page en colonnes : les positions sont approchées, pas identiques à l’éditeur.',
+    );
+    if (animated > 0) {
+      score -= 20;
+      issues.push('animations perdues');
+      warnings.push(
+        `${animated} élément${animated > 1 ? 's animés sont rendus fixes' : ' animé est rendu fixe'} : aucun client mail n’anime du HTML.`,
+      );
+    }
+    if (doc.canvas.bgImage) {
+      score -= 15;
+      issues.push('image de fond perdue');
+      warnings.push('L’image de fond n’est pas reprise : seule la couleur de fond est conservée.');
+    }
+    if (hasGradient) {
+      score -= 8;
+      issues.push('dégradés aplatis');
+      warnings.push('Les dégradés sont remplacés par leur première couleur.');
+    }
+    if (hasRotation) {
+      score -= 8;
+      issues.push('rotations perdues');
+    }
+    if (hasVideo) {
+      score -= 20;
+      issues.push('vidéo absente');
+      warnings.push('Vidéo : absente de ce mode. Utilisez le GIF hébergé.');
+    }
+    const spanning = doc.elements.filter(
+      (e) => (e.type === 'divider' || e.type === 'shape') && e.h > e.w * 4 && e.h >= doc.canvas.height * 0.5,
+    ).length;
+    if (spanning > 0) {
+      score -= 6;
+      issues.push('séparateur vertical retiré');
+      warnings.push(
+        'Un séparateur qui traverse la carte ne s’exprime pas en table : il est retiré. Le GIF hébergé le conserve.',
+      );
+    }
+  }
 
+  score = Math.max(0, Math.min(100, score));
   const level = score >= 85 ? 'good' : score >= 65 ? 'warn' : 'risky';
   const label = level === 'good' ? 'Bonne' : level === 'warn' ? 'À optimiser' : 'Risquée';
   return { score, level, label, issues, warnings };

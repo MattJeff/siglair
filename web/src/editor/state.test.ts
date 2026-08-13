@@ -1,3 +1,8 @@
+// @vitest-environment happy-dom
+//
+// Uniquement pour ce fichier : l'importeur utilise DOMParser, l'analyseur HTML natif du
+// navigateur. Les autres tests restent en environnement Node, nettement plus rapide.
+import { importSignatureHtml } from './import';
 import { describe, expect, it } from 'vitest';
 import {
   EMPTY_DOC,
@@ -217,5 +222,79 @@ describe('compatibilité', () => {
     const withVideo = compatibility(run(start(), { type: 'add', kind: 'video' }).doc);
     expect(withVideo.score).toBeLessThan(clean.score);
     expect(withVideo.issues).toContain('vidéo');
+  });
+
+  // Le score notait le DOCUMENT et affichait « Bonne 85/100 » sur une signature que le
+  // mode choisi allait visiblement dégrader. Un même document est parfait en GIF — c'est
+  // une image, identique partout — et forcément approché en table.
+  it('dépend du mode d’export, pas seulement du document', () => {
+    const anime = run(start(), { type: 'add', kind: 'button' });
+    const doc = run(anime, {
+      type: 'updateAnim',
+      id: anime.doc.elements[anime.doc.elements.length - 1].id,
+      patch: { preset: 'pulse' },
+    }).doc;
+
+    const gif = compatibility(doc, 'hosted');
+    const table = compatibility(doc, 'safe');
+
+    expect(gif.score).toBeGreaterThan(table.score);
+    expect(table.issues).toContain('animations perdues');
+    expect(gif.issues).not.toContain('animations perdues');
+
+    // Le risque du GIF n'est pas l'animation, c'est le blocage des images.
+    expect(gif.warnings.join(' ')).toMatch(/masquées par défaut/);
+  });
+});
+
+describe('import HTML', () => {
+  // Aller-retour : le HTML que Siglair exporte doit revenir à un document équivalent.
+  // C'est le cas d'usage réel — reprendre une signature existante au lieu de la refaire.
+  it('relit une signature exportée par Siglair', () => {
+    const html = `<div style="position: relative; width: 620px; height: 250px; border-radius: 18px; background: rgb(7, 17, 31);">
+      <div style="position: absolute; left: 24px; top: 48px; width: 92px; height: 92px; z-index: 1; border-radius: 46px; animation-name: sg-draw; --duration: 1.6s; --delay: 0s; --iterations: 1;"><img src="https://siglair.com/f/logo.png"></div>
+      <div style="position: absolute; left: 155px; top: 20px; width: 355px; height: 31px; z-index: 3; color: rgb(255, 255, 255); font-size: 21px; font-weight: 700;">Mathis Higuinen</div>
+      <a href="https://example.com/api" style="position: absolute; left: 160px; top: 165px; width: 390px; height: 35px; z-index: 7; border-radius: 8px; background: rgb(49, 92, 255); text-align: center;">Try the API</a>
+    </div>`;
+
+    const { doc } = importSignatureHtml(html, [
+      { id: 'asset-1', url: 'https://siglair.com/f/logo.png' } as never,
+    ]);
+
+    expect(doc.canvas.width).toBe(620);
+    expect(doc.canvas.bg).toBe('#07111f');
+    expect(doc.elements).toHaveLength(3);
+
+    const [logo, nom, cta] = doc.elements;
+    expect(logo.type).toBe('image');
+    expect(logo.assetId).toBe('asset-1');
+    expect(logo.anim.preset).toBe('draw');
+    expect(logo.anim.duration).toBe(1.6);
+
+    expect(nom.type).toBe('text');
+    expect(nom.content).toBe('Mathis Higuinen');
+    expect(nom.fontSize).toBe(21);
+
+    expect(cta.type).toBe('button');
+    expect(cta.href).toBe('https://example.com/api');
+    expect(cta.align).toBe('center');
+  });
+
+  // Un lien /c/{slug}/{id} appartient à l'ANCIENNE signature : le réimporter ferait
+  // compter les clics de la nouvelle sur l'ancienne, en silence.
+  it('retire les liens de suivi de la signature d’origine', () => {
+    const html = `<div style="position: relative; width: 620px; height: 250px;">
+      <a href="https://siglair.com/c/e2bwtydrav3w/oeak30s" style="position: absolute; left: 10px; top: 10px; width: 100px; height: 30px; background: rgb(37, 99, 235);">CTA</a>
+    </div>`;
+    const { doc, notes } = importSignatureHtml(html);
+    expect(doc.elements[0].href).toBe('');
+    expect(notes.join(' ')).toMatch(/liens de suivi/);
+  });
+
+  // Une signature en tableau n'a aucune coordonnée : on le DIT au lieu d'inventer.
+  it('refuse d’inventer une mise en page depuis un tableau', () => {
+    const { doc, notes } = importSignatureHtml('<table><tr><td>Mathis</td></tr></table>');
+    expect(doc.elements).toHaveLength(0);
+    expect(notes.join(' ')).toMatch(/tableau/);
   });
 });

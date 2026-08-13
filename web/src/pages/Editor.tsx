@@ -371,6 +371,9 @@ function EditorShell({ signature }: { signature: Signature }) {
                   dispatch={dispatch}
                   branding={limits?.branding ?? false}
                   signatureId={signature.id}
+                  // Sert à retrouver l'assetId d'une image à l'import : sans eux, un logo
+                  // repris depuis un HTML collé arriverait sans média rattaché.
+                  assets={assets}
                 />
                 <p className={`${s.note} ${s.gap}`}>
                   Un modèle remplace le document courant. Ctrl+Z revient en arrière.

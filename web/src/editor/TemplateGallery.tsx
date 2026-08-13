@@ -10,7 +10,12 @@ import { TEMPLATES, docFromTemplate } from './templates';
 import type { Template } from './templates';
 import type { Action } from './state';
 import { FREE_BRANDING_LABEL } from './BrandingUpsell';
+import { useState } from 'react';
 import { getAnalytics } from '../lib/analytics';
+import { Button } from '../components/Button';
+import { useToast } from '../components/Toast';
+import { importSignatureHtml } from './import';
+import type { Asset } from '../lib/types';
 import { resolveTokens } from './state';
 import s from './editor.module.css';
 
@@ -111,13 +116,76 @@ export function TemplateGallery({
   dispatch,
   branding,
   signatureId,
+  assets = [],
 }: {
   dispatch: Dispatch<Action>;
   branding: boolean;
   signatureId?: string;
+  assets?: readonly Asset[];
 }) {
+  const toast = useToast();
+  const [pasting, setPasting] = useState(false);
+  const [html, setHtml] = useState('');
+
+  function runImport() {
+    const { doc, notes } = importSignatureHtml(html, assets);
+    if (doc.elements.length === 0) {
+      toast(notes[0] ?? "Ce HTML n'a pas pu être lu.", 'error');
+      return;
+    }
+    dispatch({ type: 'replaceDoc', doc });
+    getAnalytics().track('template_selected', {
+      ...(signatureId ? { signature_id: signatureId } : {}),
+      template_id: 'import_html',
+    });
+    setPasting(false);
+    setHtml('');
+    toast(
+      notes.length > 0
+        ? `${doc.elements.length} éléments repris. ${notes[0]}`
+        : `${doc.elements.length} éléments repris.`,
+      notes.length > 0 ? 'info' : 'success',
+    );
+  }
+
   return (
     <div className={s.templateGrid}>
+      {/* Reprendre une signature existante plutôt que repartir d'une page blanche. */}
+      {pasting ? (
+        <div className={s.stack}>
+          <label className={s.srOnly} htmlFor="import-html">
+            HTML de la signature à importer
+          </label>
+          <textarea
+            id="import-html"
+            className={s.exportCode}
+            value={html}
+            autoFocus
+            placeholder="Collez ici le HTML d'une signature existante…"
+            onChange={(e) => setHtml(e.target.value)}
+          />
+          <div className={`${s.toolbarRow} ${s.gap}`}>
+            <Button onClick={runImport} disabled={!html.trim()}>
+              Importer
+            </Button>
+            <Button variant="ghost" onClick={() => setPasting(false)}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className={s.template} onClick={() => setPasting(true)}>
+          <span className={s.templateMeta}>
+            <span className={s.templateTitle}>
+              <b>Importer du HTML</b>
+              <em>reprise</em>
+            </span>
+            <small>
+              Collez une signature existante pour la modifier au lieu de la refaire.
+            </small>
+          </span>
+        </button>
+      )}
       {TEMPLATES.map((template) => (
         <button
           key={template.id}

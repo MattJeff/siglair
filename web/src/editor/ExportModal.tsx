@@ -58,7 +58,7 @@ export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, br
   const [html, setHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const report = compatibility(doc);
+  const report = compatibility(doc, mode);
 
   const load = useCallback(
     async (next: ExportMode) => {
