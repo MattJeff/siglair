@@ -75,6 +75,22 @@ jobs:
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+
+      # sqlx identifie une migration par son NUMÉRO, pas par son nom de fichier. Deux
+      # fichiers portant le même numéro, et il en applique un puis refuse de démarrer sur
+      # « migration N was previously applied but has been modified » — l'API redémarre en
+      # boucle et le site tombe en 502. C'est arrivé : 0009_purge_engagement.sql a été
+      # ajouté à côté de 0009_product_analytics_deletion.sql. Un `psql -f` sur chaque
+      # fichier ne le voit pas, les deux SQL étant valides isolément.
+      - name: Aucun numéro de migration en double
+        run: |
+          doublons=$(ls migrations/*.sql | xargs -n1 basename | cut -d_ -f1 | sort | uniq -d)
+          if [ -n "$doublons" ]; then
+            echo "Numéros de migration en double : $doublons"
+            ls migrations/*.sql | xargs -n1 basename | grep -E "^($(echo "$doublons" | paste -sd'|' -))_"
+            exit 1
+          fi
+
       - name: Appliquer toutes les migrations sur une base neuve
         env:
           PGPASSWORD: postgres
