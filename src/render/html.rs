@@ -404,13 +404,27 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
             && e.h >= spanning)
     });
 
-    let cols = columns(&els);
-    let mut rows = String::new();
+    // Un élément qui traverse toute la carte — le filet horizontal du bas, une bannière —
+    // n'appartient à aucune colonne : il les CHEVAUCHE toutes. Laissé dans le découpage,
+    // il fusionne le logo et le texte en une seule colonne et on retombe sur l'empilement.
+    // C'est le même piège que le séparateur vertical, vu d'un autre côté.
+    let content_w = (doc.canvas.width - 36.0).max(1.0);
+    let (bands, cols_els): (Vec<&Element>, Vec<&Element>) =
+        els.iter().partition(|e| e.w >= content_w * 0.8);
 
+    let block_top = cols_els.iter().map(|e| e.y).fold(f64::MAX, f64::min);
+    let mut rows = String::new();
+    // Les bandes qui se terminent AVANT le bloc en colonnes passent au-dessus, les autres
+    // en dessous : l'ordre visuel du canvas est préservé sans avoir à trier deux fois.
+    for e in bands.iter().filter(|e| e.y + e.h.max(1.0) <= block_top) {
+        rows.push_str(&safe_row(&[e], doc, profile, opts));
+    }
+
+    let cols = columns(&cols_els);
     if cols.len() > 1 {
-        // Plusieurs colonnes : une seule ligne extérieure, une cellule par colonne, et
-        // l'empilement se fait dans une table imbriquée. C'est la structure classique
-        // d'une signature e-mail, et la seule qui tienne dans Outlook.
+        // Plusieurs colonnes : UNE ligne extérieure, une cellule par colonne, et
+        // l'empilement dans une table imbriquée. C'est la structure classique d'une
+        // signature e-mail, et la seule qui tienne dans Outlook.
         let mut cells = String::new();
         for (i, col) in cols.iter().enumerate() {
             let w = col
@@ -434,9 +448,13 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
         }
         let _ = write!(rows, "<tr>{cells}</tr>");
     } else {
-        for row in rows_in_column(&els) {
+        for row in rows_in_column(&cols_els) {
             rows.push_str(&safe_row(&row, doc, profile, opts));
         }
+    }
+
+    for e in bands.iter().filter(|e| e.y + e.h.max(1.0) > block_top) {
+        rows.push_str(&safe_row(&[e], doc, profile, opts));
     }
 
     format!(
@@ -704,6 +722,11 @@ mod tests {
             Element { kind: ElementType::Button, x: 154.0, y: 165.0, w: 90.0, h: 32.0, content: "Site".into(),     href: "https://a.test".into(), ..el("btn0001") },
             Element { kind: ElementType::Button, x: 252.0, y: 165.0, w: 94.0, h: 32.0, content: "LinkedIn".into(), href: "https://b.test".into(), ..el("btn0002") },
             Element { kind: ElementType::Button, x: 354.0, y: 165.0, w: 94.0, h: 32.0, content: "WhatsApp".into(), href: "https://c.test".into(), ..el("btn0003") },
+            // Le filet horizontal du bas : il TRAVERSE toute la carte. Laissé dans le
+            // découpage en colonnes, il fusionne le logo et le texte et on retombe sur
+            // l'empilement — c'est le second piège, découvert sur la signature réelle.
+            Element { kind: ElementType::Shape, x: 24.0, y: 218.0, w: 572.0, h: 2.0,
+                      background: "#ff00aa".into(), ..el("sha0001") },
         ]);
         let h = render_document(&d, &Profile::new(), RenderMode::Safe, &o);
 
@@ -743,6 +766,15 @@ mod tests {
         assert!(
             !h.contains("#46556c"),
             "le séparateur pleine hauteur ne doit pas être rendu en mode safe : {h}"
+        );
+
+        // La bande pleine largeur sort du bloc en colonnes et se place en dessous.
+        // Couleur volontairement unique : #2563eb est aussi le fond par défaut des boutons,
+        // et l'assertion validait alors le mauvais élément.
+        let i_bande = h.find("#ff00aa").expect("le filet horizontal a disparu");
+        assert!(
+            i_bande > h.find("WhatsApp").unwrap(),
+            "le filet pleine largeur remonte au-dessus du contenu"
         );
 
         // L'image porte ses dimensions réelles, pas 100 % (Outlook ignore le CSS sur <img>).
