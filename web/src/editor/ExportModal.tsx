@@ -14,10 +14,29 @@ import { Modal } from '../components/Modal';
 import { compatibility } from './state';
 import s from './editor.module.css';
 
+// Le mode `freeform` n'apparaît PLUS ici, et ce n'est pas un oubli.
+//
+// Il repose sur `position:absolute`, et Gmail supprime purement et simplement la propriété
+// `position`. Les éléments retombent alors en flux normal, s'empilent et débordent du
+// conteneur : la signature est illisible. Ça marche dans un navigateur — donc dans l'éditeur
+// de Smartlead, dans un aperçu, dans un fichier ouvert en local — et nulle part où l'on
+// colle réellement une signature. Il était pourtant décrit « Positionnement exact, HTML
+// complet », ce qui le faisait passer pour le meilleur des trois. Un utilisateur l'a collé
+// dans Gmail, capture à l'appui.
+//
+// Le mode reste dans l'API : c'est lui que /api/preview rend dans l'iframe de l'éditeur,
+// où le positionnement absolu est justement ce qu'on veut.
 const MODES: { mode: ExportMode; title: string; hint: string }[] = [
-  { mode: 'hosted', title: 'GIF hébergé', hint: 'Une image, mise à jour sans recoller' },
-  { mode: 'freeform', title: 'Libre', hint: 'Positionnement exact, HTML complet' },
-  { mode: 'safe', title: 'Compatible', hint: 'Tableau simple, aucune animation' },
+  {
+    mode: 'hosted',
+    title: 'GIF hébergé',
+    hint: 'Le rendu exact, animé, partout. Pour votre signature quotidienne.',
+  },
+  {
+    mode: 'safe',
+    title: 'Texte compatible',
+    hint: 'Texte et liens réels, rien à charger. Pour la prospection à froid.',
+  },
 ];
 
 interface ExportModalProps {
@@ -33,7 +52,9 @@ interface ExportModalProps {
 
 export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, branding }: ExportModalProps) {
   const toast = useToast();
-  const [mode, setMode] = useState<ExportMode>(hostedAllowed ? 'hosted' : 'freeform');
+  // Repli sur `safe`, jamais sur `freeform` : il n'est plus proposé, et un compte Free
+  // aurait atterri sur le mode que Gmail détruit, sans qu'aucun bouton ne soit sélectionné.
+  const [mode, setMode] = useState<ExportMode>(hostedAllowed ? 'hosted' : 'safe');
   const [html, setHtml] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
