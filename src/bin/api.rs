@@ -18,7 +18,7 @@ use tower_http::{
 };
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
-use siglair::{auth, billing, config::Config, db, routes, storage::FsStorage, AppState};
+use siglair::{auth, billing, config::Config, db, plans, routes, storage::FsStorage, AppState};
 
 /// 10 Mo d'asset (contrat §5.3) plus l'enveloppe multipart.
 const BODY_LIMIT: usize = 12 * 1024 * 1024;
@@ -172,6 +172,21 @@ async fn maintenance(state: AppState) {
                     Ok(count) if count > 0 => tracing::info!(events = count, "analytics produit purgés"),
                     Ok(_) => {}
                     Err(error) => tracing::error!(?error, "purge analytics impossible"),
+                }
+                // Les durées viennent de `plans.rs`, seul endroit où les limites d'un plan
+                // existent (§6). La marge couvre le décalage entre la bascule de la colonne
+                // `orgs.plan` et la fin du délai de grâce, que le SQL ne sait pas calculer.
+                const MARGE: i32 = 35;
+                match sqlx::query_scalar::<_, i64>("SELECT purge_engagement_events($1, $2, $3)")
+                    .bind(plans::FREE.limits.analytics_days as i32 + MARGE)
+                    .bind(plans::PRO.limits.analytics_days as i32 + MARGE)
+                    .bind(plans::TEAM.limits.analytics_days as i32 + MARGE)
+                    .fetch_one(&state.db)
+                    .await
+                {
+                    Ok(count) if count > 0 => tracing::info!(events = count, "événements d'engagement purgés"),
+                    Ok(_) => {}
+                    Err(error) => tracing::error!(?error, "purge des événements d'engagement impossible"),
                 }
             },
         }

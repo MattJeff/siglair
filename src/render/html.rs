@@ -312,6 +312,43 @@ fn safe_row(row: &[&Element], doc: &Doc, profile: &Profile, opts: &RenderOpts) -
     format!("<tr>{cells}</tr>")
 }
 
+/// Une ligne visuelle → un `<tr>` d'EXACTEMENT UNE cellule.
+///
+/// Le nombre de colonnes d'une table HTML est le maximum sur toutes ses lignes, et une
+/// ligne plus courte n'occupe que les premières. Émettre des `<tr>` d'arité différente dans
+/// la même table produit donc deux dégâts, tous les deux observés sur une vraie signature :
+///
+/// - la rangée des trois boutons (5 cellules avec les gouttières) ajoutait quatre colonnes
+///   à la table du bloc texte. Sa largeur passait de 420 à 624 px, elle débordait de la
+///   carte, et les boutons partaient se coller au bord droit ;
+/// - le filet horizontal du bas, seul sur sa ligne, tombait dans la colonne 1 — celle du
+///   logo. Il s'affichait à mi-largeur, sous l'image, au lieu de traverser la carte.
+///
+/// La règle est donc : une table = une colonne, et tout groupe multi-cellules descend dans
+/// sa propre table imbriquée. Plus fiable qu'un `colspan`, qu'Outlook applique de travers
+/// dès que les largeurs sont fixées en pixels.
+fn safe_line(row: &[&Element], doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
+    if let [only] = row {
+        return format!("<tr>{}</tr>", safe_cell(only, only.h.max(1.0), profile, opts));
+    }
+    let left = row.iter().map(|e| e.x).fold(f64::MAX, f64::min);
+    let right = row
+        .iter()
+        .map(|e| e.x + e.w.max(1.0))
+        .fold(f64::MIN, f64::max);
+    let w = (right - left).max(1.0);
+    format!(
+        // padding 0 : les cellules internes portent déjà leur 3px, les cumuler doublerait
+        // l'espacement de cette seule ligne.
+        "<tr><td width=\"{}\" valign=\"top\" style=\"width:{}px;padding:0;\">\
+         <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" \
+         style=\"border-collapse:collapse;\">{}</table></td></tr>",
+        w.round() as i64,
+        num(w),
+        safe_row(row, doc, profile, opts),
+    )
+}
+
 fn safe_cell(el: &Element, row_h: f64, profile: &Profile, opts: &RenderOpts) -> String {
     let align = one_of(&el.align, &ALIGNS, "left");
     let color = css_color(&el.color, "#ffffff");
@@ -417,7 +454,7 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     // Les bandes qui se terminent AVANT le bloc en colonnes passent au-dessus, les autres
     // en dessous : l'ordre visuel du canvas est préservé sans avoir à trier deux fois.
     for e in bands.iter().filter(|e| e.y + e.h.max(1.0) <= block_top) {
-        rows.push_str(&safe_row(&[e], doc, profile, opts));
+        rows.push_str(&safe_line(&[e], doc, profile, opts));
     }
 
     let cols = columns(&cols_els);
@@ -427,34 +464,52 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
         // signature e-mail, et la seule qui tienne dans Outlook.
         let mut cells = String::new();
         for (i, col) in cols.iter().enumerate() {
-            let w = col
+            let left = col.iter().map(|e| e.x).fold(f64::MAX, f64::min);
+            let right = col
                 .iter()
                 .map(|e| e.x + e.w.max(1.0))
-                .fold(0.0f64, f64::max)
-                - col.iter().map(|e| e.x).fold(f64::MAX, f64::min);
+                .fold(f64::MIN, f64::max);
+            let w = (right - left).max(1.0);
             let inner_rows: String = rows_in_column(col)
                 .iter()
-                .map(|r| safe_row(r, doc, profile, opts))
+                .map(|r| safe_line(r, doc, profile, opts))
                 .collect();
-            let pad = if i + 1 < cols.len() { "0 14px 0 0" } else { "0" };
+            // La gouttière RÉELLE du canvas, pas une valeur fixe : c'est elle qui tient
+            // l'équilibre voulu entre le logo et le bloc texte. Un 14px arbitraire tassait
+            // les colonnes serrées et laissait un trou dans les autres.
+            let pad = match cols.get(i + 1) {
+                Some(next) => {
+                    let gap = next.iter().map(|e| e.x).fold(f64::MAX, f64::min) - right;
+                    format!("0 {}px 0 0", num(gap.max(0.0)))
+                }
+                None => "0".into(),
+            };
             let _ = write!(
                 cells,
                 "<td width=\"{}\" valign=\"top\" style=\"width:{}px;padding:{pad};\">\
                  <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" \
                  style=\"border-collapse:collapse;\">{inner_rows}</table></td>",
-                w.round().max(1.0) as i64,
-                num(w.max(1.0)),
+                w.round() as i64,
+                num(w),
             );
         }
-        let _ = write!(rows, "<tr>{cells}</tr>");
+        // Le bloc en colonnes descend lui aussi dans sa propre table : la table extérieure
+        // garde ainsi UNE seule colonne, et les bandes pleine largeur qui l'encadrent la
+        // traversent vraiment au lieu de tomber dans la première colonne.
+        let _ = write!(
+            rows,
+            "<tr><td style=\"padding:0;\"><table role=\"presentation\" border=\"0\" \
+             cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;\">\
+             <tr>{cells}</tr></table></td></tr>",
+        );
     } else {
         for row in rows_in_column(&cols_els) {
-            rows.push_str(&safe_row(&row, doc, profile, opts));
+            rows.push_str(&safe_line(&row, doc, profile, opts));
         }
     }
 
     for e in bands.iter().filter(|e| e.y + e.h.max(1.0) > block_top) {
-        rows.push_str(&safe_row(&[e], doc, profile, opts));
+        rows.push_str(&safe_line(&[e], doc, profile, opts));
     }
 
     format!(
@@ -698,6 +753,78 @@ mod tests {
         Element {
             id: id.into(),
             ..Default::default()
+        }
+    }
+
+    /// Compte les cellules de chaque ligne, table par table, en suivant l'imbrication.
+    ///
+    /// Retourne une entrée par table : le nombre de cellules de chacune de ses lignes.
+    /// Toutes les balises émises ici sont fermées explicitement, un simple parcours des
+    /// balises suffit donc — pas besoin d'un analyseur HTML.
+    fn arite_des_lignes(html: &str) -> Vec<Vec<usize>> {
+        let mut tables: Vec<Vec<usize>> = Vec::new();
+        let mut pile: Vec<usize> = Vec::new(); // index de table pour chaque niveau
+        for tag in html.split('<').skip(1) {
+            if tag.starts_with("table") {
+                pile.push(tables.len());
+                tables.push(Vec::new());
+            } else if tag.starts_with("/table") {
+                pile.pop();
+            } else if tag.starts_with("tr") {
+                if let Some(&t) = pile.last() {
+                    tables[t].push(0);
+                }
+            } else if tag.starts_with("td") {
+                if let Some(&t) = pile.last() {
+                    if let Some(row) = tables[t].last_mut() {
+                        *row += 1;
+                    }
+                }
+            }
+        }
+        tables
+    }
+
+    /// Le nombre de colonnes d'une table HTML est le MAXIMUM sur ses lignes ; une ligne
+    /// plus courte n'occupe que les premières colonnes. Mélanger des arités dans une même
+    /// table est donc toujours un bug de mise en page, et il s'est produit deux fois sur la
+    /// même signature réelle :
+    ///
+    /// - la rangée des trois boutons (5 cellules avec les gouttières) ajoutait 4 colonnes à
+    ///   la table du bloc texte : largeur 624 px au lieu de 420, débordement de la carte,
+    ///   boutons collés au bord droit ;
+    /// - le filet horizontal du bas tombait dans la colonne du logo et s'affichait à
+    ///   mi-largeur au lieu de traverser la carte.
+    ///
+    /// Les deux passaient tous les tests précédents : ils vérifiaient l'ORDRE des éléments,
+    /// jamais la structure de la table. Celui-ci vérifie l'invariant.
+    #[test]
+    fn safe_ne_melange_jamais_deux_arites_dans_une_meme_table() {
+        let asset = uuid::Uuid::nil();
+        let mut o = opts(None);
+        o.assets.insert(asset, "https://siglair.com/f/logo.png".into());
+        let d = doc_with(vec![
+            Element { kind: ElementType::Image, x: 24.0, y: 48.0, w: 92.0, h: 92.0,
+                      asset_id: Some(asset), ..el("img0001") },
+            Element { x: 154.0, y: 39.0, w: 355.0, h: 31.0, content: "Mathis".into(), ..el("nom0001") },
+            Element { x: 154.0, y: 75.0, w: 350.0, h: 22.0, content: "Founder".into(), ..el("rol0001") },
+            Element { kind: ElementType::Button, x: 154.0, y: 165.0, w: 90.0, h: 32.0, content: "Site".into(),     href: "https://a.test".into(), ..el("btn0001") },
+            Element { kind: ElementType::Button, x: 252.0, y: 165.0, w: 94.0, h: 32.0, content: "LinkedIn".into(), href: "https://b.test".into(), ..el("btn0002") },
+            Element { kind: ElementType::Button, x: 354.0, y: 165.0, w: 94.0, h: 32.0, content: "WhatsApp".into(), href: "https://c.test".into(), ..el("btn0003") },
+            Element { kind: ElementType::Shape, x: 24.0, y: 218.0, w: 572.0, h: 2.0,
+                      background: "#ff00aa".into(), ..el("sha0001") },
+        ]);
+        let h = render_document(&d, &Profile::new(), RenderMode::Safe, &o);
+
+        for (i, lignes) in arite_des_lignes(&h).iter().enumerate() {
+            let mut vues: Vec<usize> = lignes.iter().copied().filter(|n| *n > 0).collect();
+            vues.sort_unstable();
+            vues.dedup();
+            assert!(
+                vues.len() <= 1,
+                "table {i} mélange des lignes de {lignes:?} cellules : les lignes courtes \
+                 tomberont dans les premières colonnes.\n{h}"
+            );
         }
     }
 

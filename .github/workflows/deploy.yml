@@ -59,8 +59,37 @@ jobs:
       - run: npm run test:seo
         working-directory: web
 
+  # Les migrations ne sont vérifiées par rien d'autre : `sqlx::migrate!` les applique au
+  # DÉMARRAGE de l'API. Une erreur de syntaxe ne se voyait donc qu'en production, sur un
+  # conteneur qui redémarre en boucle — après que l'image a été construite et déployée.
+  migrations:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: siglair
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Appliquer toutes les migrations sur une base neuve
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for f in migrations/*.sql; do
+            echo "→ $f"
+            psql -h localhost -U postgres -d siglair -v ON_ERROR_STOP=1 -q -f "$f"
+          done
+      - name: Vérifier la purge par rétention de plan
+        env:
+          PGPASSWORD: postgres
+        run: psql -h localhost -U postgres -d siglair -v ON_ERROR_STOP=1 -f scripts/check-migrations.sql
+
   build:
-    needs: tests
+    needs: [tests, migrations]
     runs-on: ubuntu-latest
     permissions:
       contents: read
