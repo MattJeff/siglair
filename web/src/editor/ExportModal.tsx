@@ -101,7 +101,21 @@ export function ExportModal({ open, onClose, signatureId, doc, hostedAllowed, br
       client: 'unknown',
       method: 'manual',
     });
-    const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+    // Le fragment est enveloppé dans un vrai document AVEC charset. Sans lui, un fichier
+    // ouvert depuis le disque n'a aucune information d'encodage : Chrome retombe sur
+    // Windows-1252 et le « · » des séparateurs s'affiche « Â· » — puis se copie tel quel
+    // dans Gmail. Le BOM n'y suffit pas, certains navigateurs l'ignorent sur file://.
+    const doc = `<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Signature — à copier dans votre client mail</title>
+</head>
+<body style="margin:0;padding:24px;background:#f5f6f8;">
+${html}
+</body>
+</html>`;
+    const url = URL.createObjectURL(new Blob([doc], { type: 'text/html;charset=utf-8' }));
     const link = document.createElement('a');
     link.href = url;
     link.download = 'signature.html';

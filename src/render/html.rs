@@ -215,14 +215,177 @@ fn freeform(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     )
 }
 
+/// Découpe les éléments en COLONNES par les vides horizontaux.
+///
+/// Une signature n'est pas une pile de lignes : c'est « logo à gauche, bloc texte à
+/// droite », et c'est exactement ce que produit une table e-mail. On cherche donc d'abord
+/// les gouttières verticales — les bandes de `x` que rien ne traverse — puis on empile à
+/// l'intérieur de chaque colonne.
+fn columns<'a>(els: &[&'a Element]) -> Vec<Vec<&'a Element>> {
+    let mut by_x: Vec<&Element> = els.to_vec();
+    by_x.sort_by(|a, b| a.x.total_cmp(&b.x));
+
+    let mut out: Vec<Vec<&Element>> = Vec::new();
+    let mut right = f64::MIN;
+    for el in by_x {
+        // 12 px : en dessous, deux éléments se touchent presque et appartiennent au même
+        // bloc visuel. Au-dessus, l'œil voit deux colonnes.
+        if out.is_empty() || el.x > right + 12.0 {
+            out.push(vec![el]);
+            right = el.x + el.w.max(1.0);
+        } else {
+            if let Some(col) = out.last_mut() {
+                col.push(el);
+            }
+            right = right.max(el.x + el.w.max(1.0));
+        }
+    }
+    for col in &mut out {
+        col.sort_by(|a, b| {
+            a.y.partial_cmp(&b.y)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then(a.x.total_cmp(&b.x))
+        });
+    }
+    out
+}
+
+/// Dans une colonne, regroupe ce qui est visuellement sur la même ligne.
+///
+/// Critère : les centres verticaux sont proches au regard de la plus grande des deux
+/// hauteurs. Trois boutons posés au même `y` forment une ligne ; un nom et une fonction
+/// espacés de 36 px n'en forment pas.
+fn rows_in_column<'a>(col: &[&'a Element]) -> Vec<Vec<&'a Element>> {
+    let mut out: Vec<Vec<&Element>> = Vec::new();
+    for el in col {
+        let joins = out.last().is_some_and(|row: &Vec<&Element>| {
+            row.iter().any(|o| {
+                let (ca, cb) = (o.y + o.h.max(1.0) / 2.0, el.y + el.h.max(1.0) / 2.0);
+                (ca - cb).abs() <= o.h.max(1.0).max(el.h.max(1.0)) * 0.45
+            })
+        });
+        if joins {
+            if let Some(row) = out.last_mut() {
+                row.push(el);
+            }
+        } else {
+            out.push(vec![el]);
+        }
+    }
+    for row in &mut out {
+        row.sort_by(|a, b| a.x.total_cmp(&b.x));
+    }
+    out
+}
+
+/// Une ligne visuelle → un `<tr>`, un `<td>` par élément, largeurs en pixels.
+///
+/// Les largeurs sont en pixels et pas en pourcentage : Outlook desktop ignore les
+/// pourcentages sur les cellules imbriquées, une largeur en pixels est la seule chose
+/// qu'il respecte de façon fiable.
+fn safe_row(row: &[&Element], doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
+    let left = row.iter().map(|e| e.x).fold(f64::MAX, f64::min);
+    let mut cells = String::new();
+    let mut cursor = left;
+    let row_h = row
+        .iter()
+        .map(|e| e.h.max(1.0))
+        .fold(0.0f64, f64::max)
+        .max(1.0);
+
+    for el in row {
+        // Gouttière : sans elle, deux boutons distants de 8 px se retrouvent collés.
+        let gap = el.x - cursor;
+        if gap > 4.0 {
+            let _ = write!(
+                cells,
+                "<td width=\"{}\" style=\"width:{}px;font-size:0;line-height:0;\">&nbsp;</td>",
+                gap.round() as i64,
+                num(gap)
+            );
+        }
+        cells.push_str(&safe_cell(el, row_h, profile, opts));
+        cursor = el.x + el.w.max(1.0);
+    }
+
+    let _ = doc;
+    format!("<tr>{cells}</tr>")
+}
+
+fn safe_cell(el: &Element, row_h: f64, profile: &Profile, opts: &RenderOpts) -> String {
+    let align = one_of(&el.align, &ALIGNS, "left");
+    let color = css_color(&el.color, "#ffffff");
+    let w = el.w.max(1.0);
+    let content = inner(el, profile, opts, false);
+
+    let body = match el.kind {
+        // Un séparateur plus haut que large est VERTICAL : une cellule fine dont le fond
+        // fait la ligne. L'ancienne version en faisait un bloc pleine largeur — c'est ce
+        // qui produisait le grand rectangle gris en haut de la signature.
+        ElementType::Divider | ElementType::Shape if el.h > el.w => format!(
+            "<div style=\"width:{}px;height:{}px;line-height:0;font-size:0;background-color:{};border-radius:{}px;\">&nbsp;</div>",
+            num(w),
+            num(el.h.max(1.0)),
+            element_fallback_color(el),
+            num(el.radius),
+        ),
+        ElementType::Divider | ElementType::Shape => format!(
+            "<div style=\"height:{}px;line-height:0;font-size:0;background-color:{};border-radius:{}px;\">&nbsp;</div>",
+            num(el.h.max(1.0)),
+            element_fallback_color(el),
+            num(el.radius),
+        ),
+        ElementType::Button | ElementType::Badge => format!(
+            "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;display:inline-table;\">\
+             <tr><td style=\"background-color:{};border-radius:{}px;padding:7px 14px;color:{};font-size:{}px;font-weight:{};\">{}</td></tr></table>",
+            element_fallback_color(el),
+            num(el.radius),
+            color,
+            num(el.font_size),
+            one_of(&el.font_weight, &FONT_WEIGHTS, "500"),
+            wrap_link(&content, el, profile, opts, color),
+        ),
+        _ => wrap_link(&content, el, profile, opts, color),
+    };
+
+    let valign = if row_h > el.h * 1.5 { "middle" } else { "top" };
+    format!(
+        "<td width=\"{}\" valign=\"{valign}\" style=\"width:{}px;padding:3px 0;font-family:{FONT};\
+         font-size:{}px;font-weight:{};color:{};text-align:{align};\">{body}</td>",
+        w.round() as i64,
+        num(w),
+        num(el.font_size),
+        one_of(&el.font_weight, &FONT_WEIGHTS, "500"),
+        color,
+    )
+}
+
 // ------------------------------------------------------------------ safe
 
-/// Tables imbriquées, empilement vertical trié par y, aucune animation, styles inline.
+/// Tables imbriquées, aucune animation, styles inline — le mode qui survit à Outlook.
+///
+/// Le canvas est en positionnement absolu ; l'e-mail, lui, n'a que des tables. On ne peut
+/// donc pas reproduire la mise en page au pixel — c'est précisément pour ça que le produit
+/// vend un GIF hébergé. Mais on peut faire beaucoup mieux qu'un empilement.
+///
+/// Une première version triait par `y` et émettait UNE LIGNE PAR ÉLÉMENT. Résultat sur une
+/// signature normale : le logo posé à gauche du texte se retrouvait seul sur sa ligne, les
+/// trois boutons l'un sous l'autre, et le séparateur vertical de 1×150 px devenait un pavé
+/// gris pleine largeur. Rien à voir avec l'éditeur.
+///
+/// On reconstitue donc de vraies lignes par RECOUVREMENT VERTICAL, puis des colonnes par
+/// `x`. Deux éléments dont les bandes verticales se chevauchent appartiennent à la même
+/// ligne visuelle : c'est ce que fait l'œil, et ça suffit à retrouver « logo à gauche,
+/// texte à droite » et « trois boutons côte à côte ».
 fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
     let mut els: Vec<&Element> = doc
         .elements
         .iter()
         .filter(|e| !e.hidden && !is_legacy_branding_element(e))
+        .filter(|e| {
+            !inner(e, profile, opts, false).is_empty()
+                || matches!(e.kind, ElementType::Divider | ElementType::Shape)
+        })
         .collect();
     els.sort_by(|a, b| {
         a.y.partial_cmp(&b.y)
@@ -230,41 +393,50 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
             .then(a.x.total_cmp(&b.x))
     });
 
+    // Un séparateur nettement plus haut que large qui traverse la carte est de la pure
+    // décoration : en table, il ne peut s'exprimer qu'avec un rowspan, que Outlook rend
+    // mal, et il chevauche toutes les autres lignes — c'est lui qui écrasait la mise en
+    // page en un seul bloc. On le laisse au GIF, qui le rend parfaitement.
+    let spanning = doc.canvas.height * 0.5;
+    els.retain(|e| {
+        !(matches!(e.kind, ElementType::Divider | ElementType::Shape)
+            && e.h > e.w * 4.0
+            && e.h >= spanning)
+    });
+
+    let cols = columns(&els);
     let mut rows = String::new();
-    for el in els {
-        let align = one_of(&el.align, &ALIGNS, "left");
-        let color = css_color(&el.color, "#ffffff");
-        let content = inner(el, profile, opts, false);
-        if content.is_empty() && !matches!(el.kind, ElementType::Divider | ElementType::Shape) {
-            continue;
+
+    if cols.len() > 1 {
+        // Plusieurs colonnes : une seule ligne extérieure, une cellule par colonne, et
+        // l'empilement se fait dans une table imbriquée. C'est la structure classique
+        // d'une signature e-mail, et la seule qui tienne dans Outlook.
+        let mut cells = String::new();
+        for (i, col) in cols.iter().enumerate() {
+            let w = col
+                .iter()
+                .map(|e| e.x + e.w.max(1.0))
+                .fold(0.0f64, f64::max)
+                - col.iter().map(|e| e.x).fold(f64::MAX, f64::min);
+            let inner_rows: String = rows_in_column(col)
+                .iter()
+                .map(|r| safe_row(r, doc, profile, opts))
+                .collect();
+            let pad = if i + 1 < cols.len() { "0 14px 0 0" } else { "0" };
+            let _ = write!(
+                cells,
+                "<td width=\"{}\" valign=\"top\" style=\"width:{}px;padding:{pad};\">\
+                 <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" \
+                 style=\"border-collapse:collapse;\">{inner_rows}</table></td>",
+                w.round().max(1.0) as i64,
+                num(w.max(1.0)),
+            );
         }
-        let cell = match el.kind {
-            ElementType::Divider | ElementType::Shape => format!(
-                "<div style=\"height:{}px;line-height:0;font-size:0;background-color:{};border-radius:{}px;\">&nbsp;</div>",
-                num(el.h.max(1.0)),
-                element_fallback_color(el),
-                num(el.radius),
-            ),
-            ElementType::Button | ElementType::Badge => format!(
-                "<table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;display:inline-table;\">\
-                 <tr><td style=\"background-color:{};border-radius:{}px;padding:7px 14px;color:{};font-size:{}px;font-weight:{};\">{}</td></tr></table>",
-                element_fallback_color(el),
-                num(el.radius),
-                color,
-                num(el.font_size),
-                one_of(&el.font_weight, &FONT_WEIGHTS, "500"),
-                wrap_link(&content, el, profile, opts, color),
-            ),
-            _ => wrap_link(&content, el, profile, opts, color),
-        };
-        let _ = write!(
-            rows,
-            "<tr><td style=\"padding:3px 0;font-family:{FONT};font-size:{}px;font-weight:{};color:{};text-align:{};\">{cell}</td></tr>",
-            num(el.font_size),
-            one_of(&el.font_weight, &FONT_WEIGHTS, "500"),
-            color,
-            align,
-        );
+        let _ = write!(rows, "<tr>{cells}</tr>");
+    } else {
+        for row in rows_in_column(&els) {
+            rows.push_str(&safe_row(&row, doc, profile, opts));
+        }
     }
 
     format!(
@@ -286,9 +458,15 @@ fn inner(el: &Element, profile: &Profile, opts: &RenderOpts, rich: bool) -> Stri
     match el.kind {
         ElementType::Image => match asset_url(el, opts) {
             Some(url) => format!(
-                "<img src=\"{}\" alt=\"{}\" style=\"width:100%;height:100%;object-fit:contain;border:0;display:block;border-radius:{}px;\">",
+                "<img src=\"{}\" alt=\"{}\" width=\"{}\" height=\"{}\" style=\"width:{}px;height:{}px;object-fit:contain;border:0;display:block;border-radius:{}px;\">",
                 esc(url),
                 esc(&resolve_tokens(&el.content, profile)),
+                // Attributs width/height EN PLUS du style : Outlook desktop ignore les
+                // dimensions CSS sur <img> et afficherait l'image à sa taille native.
+                el.w.max(1.0).round() as i64,
+                el.h.max(1.0).round() as i64,
+                num(el.w.max(1.0)),
+                num(el.h.max(1.0)),
                 num(el.radius),
             ),
             None => String::new(),
@@ -503,6 +681,75 @@ mod tests {
             id: id.into(),
             ..Default::default()
         }
+    }
+
+    /// Reproduit la mise en page réelle du modèle « Neon Founder » : logo à gauche,
+    /// séparateur vertical, textes à droite, trois boutons côte à côte.
+    ///
+    /// La première version du mode safe triait par `y` et sortait UNE LIGNE PAR ÉLÉMENT.
+    /// Dans Gmail, ça donnait : un pavé gris pleine largeur (le séparateur vertical de
+    /// 1×150), le logo étiré en carré géant, et les trois boutons empilés. Un utilisateur
+    /// l'a signalé sur sa vraie signature, capture à l'appui.
+    #[test]
+    fn safe_reconstitue_les_lignes_au_lieu_de_tout_empiler() {
+        let asset = uuid::Uuid::nil();
+        let mut o = opts(None);
+        o.assets.insert(asset, "https://siglair.com/f/logo.png".into());
+        let d = doc_with(vec![
+            Element { kind: ElementType::Image, x: 24.0,  y: 48.0,  w: 92.0,  h: 92.0,
+                      asset_id: Some(asset), ..el("img0001") },
+            Element { kind: ElementType::Divider, x: 132.0, y: 35.0, w: 1.0,  h: 150.0, background: "#46556c".into(), ..el("div0001") },
+            Element { x: 154.0, y: 39.0,  w: 355.0, h: 31.0, content: "Mathis Higuinen".into(), ..el("nom0001") },
+            Element { x: 154.0, y: 75.0,  w: 350.0, h: 22.0, content: "Founder".into(), ..el("rol0001") },
+            Element { kind: ElementType::Button, x: 154.0, y: 165.0, w: 90.0, h: 32.0, content: "Site".into(),     href: "https://a.test".into(), ..el("btn0001") },
+            Element { kind: ElementType::Button, x: 252.0, y: 165.0, w: 94.0, h: 32.0, content: "LinkedIn".into(), href: "https://b.test".into(), ..el("btn0002") },
+            Element { kind: ElementType::Button, x: 354.0, y: 165.0, w: 94.0, h: 32.0, content: "WhatsApp".into(), href: "https://c.test".into(), ..el("btn0003") },
+        ]);
+        let h = render_document(&d, &Profile::new(), RenderMode::Safe, &o);
+
+        // Le logo et le bloc texte sont DEUX COLONNES : le logo doit précéder le nom
+        // sans qu'aucune fin de ligne ne les sépare. Sinon on est retombé sur l'empilement.
+        let (i_logo, i_nom) = (h.find("logo.png").unwrap(), h.find("Mathis").unwrap());
+        assert!(i_logo < i_nom, "le logo passe après le texte");
+        // Deux colonnes produisent « …</tr></table></td><td…><table…><tr>… » ; un
+        // empilement produirait « </tr><tr> ». C'est le seul discriminant fiable, la
+        // fermeture de la table imbriquée du logo contenant forcément un </tr>.
+        assert!(
+            !h[i_logo..i_nom].contains("</tr><tr>"),
+            "le logo est sur sa propre ligne au lieu d'être à gauche du texte : {h}"
+        );
+
+        // Nom et fonction sont empilés : eux DOIVENT être séparés par une fin de ligne.
+        let (a, b) = (h.find("Mathis").unwrap(), h.find("Founder").unwrap());
+        assert!(
+            h[a..b].contains("</tr>"),
+            "le nom et la fonction sont sur la même ligne"
+        );
+
+        // Les trois boutons partagent une ligne. Chaque bouton étant lui-même une petite
+        // table, on cherche « </tr><tr> » — la signature d'un vrai changement de ligne —
+        // et pas un <tr> quelconque.
+        let entre = &h[h.find("Site").unwrap()..h.find("WhatsApp").unwrap()];
+        assert!(
+            !entre.contains("</tr><tr>"),
+            "les boutons sont empilés alors qu'ils étaient côte à côte dans l'éditeur"
+        );
+
+        // Le séparateur vertical qui traverse la carte est ABANDONNÉ en mode safe.
+        // En table il exigerait un rowspan, qu'Outlook rend mal, et il chevauche toutes
+        // les lignes — c'est lui qui écrasait la mise en page en un seul bloc. Le rendre
+        // en pavé gris pleine largeur, comme avant, était bien pire que ne pas le rendre :
+        // le GIF hébergé, lui, le restitue parfaitement.
+        assert!(
+            !h.contains("#46556c"),
+            "le séparateur pleine hauteur ne doit pas être rendu en mode safe : {h}"
+        );
+
+        // L'image porte ses dimensions réelles, pas 100 % (Outlook ignore le CSS sur <img>).
+        assert!(
+            h.contains("width=\"92\" height=\"92\"") && !h.contains("width:100%;height:100%"),
+            "l'image est étirée au lieu de faire 92×92"
+        );
     }
 
     #[test]
