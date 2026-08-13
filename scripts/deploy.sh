@@ -16,13 +16,51 @@ cd /opt/siglair
 
 log() { printf '\033[1m▸ %s\033[0m\n' "$1"; }
 
+# Les images en place sont notées AVANT le `pull`, et par IDENTIFIANT.
+#
+# L'ancienne version les relevait APRÈS le pull : `docker inspect` sur le nom de l'image
+# résolvait alors la NOUVELLE, et le « retour arrière » proposé pointait sur l'image cassée.
+# L'identifiant, lui, ne bouge pas quand un tag est réattribué — un digest ou un nom de tag
+# ne survivrait pas au pull suivant.
+IMG_API=$(docker compose config --images api | head -1)
+IMG_WEB=$(docker compose config --images web | head -1)
+PREV_API=$(docker image inspect --format '{{.Id}}' "$IMG_API" 2>/dev/null || echo '')
+PREV_WEB=$(docker image inspect --format '{{.Id}}' "$IMG_WEB" 2>/dev/null || echo '')
+
+sain() { curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; }
+
+attendre_sante() {
+    for i in $(seq 1 60); do
+        if sain; then echo "  API saine après ${i}s"; return 0; fi
+        sleep 1
+    done
+    return 1
+}
+
+# Le déploiement REVIENT EN ARRIÈRE tout seul. L'ancienne version se contentait
+# d'imprimer une suggestion et sortait en erreur : une migration refusée au démarrage
+# laissait l'API redémarrer en boucle, Caddy sans amont, et le site en 502 jusqu'à ce
+# qu'un humain regarde. C'est exactement ce qui s'est produit avec le doublon de
+# numéro de migration 0009.
+retour_arriere() {
+    if [ -z "$PREV_API" ]; then
+        echo "  AUCUNE image précédente connue — le site reste en panne, intervention requise." >&2
+        return 1
+    fi
+    echo "  RETOUR ARRIÈRE vers ${PREV_API:0:19}" >&2
+    docker tag "$PREV_API" "$IMG_API"
+    [ -n "$PREV_WEB" ] && docker tag "$PREV_WEB" "$IMG_WEB"
+    docker compose --profile proxy up -d --remove-orphans >&2
+    if attendre_sante >&2; then
+        echo "  service restauré sur la version précédente." >&2
+        return 0
+    fi
+    echo "  RETOUR ARRIÈRE ÉCHOUÉ — intervention manuelle requise." >&2
+    return 1
+}
+
 log "Images"
 docker compose pull --quiet api renderer web
-
-# L'image précédente est notée AVANT de basculer : sans elle, un retour arrière
-# demanderait de retrouver le tag à la main pendant que le site est cassé.
-PREV=$(docker inspect --format '{{index .RepoDigests 0}}' \
-       "$(docker compose config --images api | head -1)" 2>/dev/null || echo '')
 
 log "Bascule"
 docker compose --profile proxy up -d --remove-orphans
@@ -30,19 +68,12 @@ docker compose --profile proxy up -d --remove-orphans
 # Les migrations s'appliquent au démarrage de l'API ; on attend qu'elle soit saine
 # avant de déclarer quoi que ce soit.
 log "Santé"
-for i in $(seq 1 60); do
-    if curl -fsS --max-time 3 http://127.0.0.1:8080/health >/dev/null 2>&1; then
-        echo "  API saine après ${i}s"
-        break
-    fi
-    if [ "$i" -eq 60 ]; then
-        echo "  ÉCHEC : /health muet après 60s" >&2
-        docker compose logs api --tail 40 >&2
-        [ -n "$PREV" ] && echo "  retour arrière : docker compose down && docker run $PREV" >&2
-        exit 1
-    fi
-    sleep 1
-done
+if ! attendre_sante; then
+    echo "  ÉCHEC : /health muet après 60s" >&2
+    docker compose logs api --tail 40 >&2
+    retour_arriere || true
+    exit 1
+fi
 
 # Le juge. « Les conteneurs tournent » ne veut rien dire pour un pipeline de rendu :
 # ce script vérifie qu'un GIF sort réellement de Chromium et qu'un clic est compté.
@@ -50,8 +81,8 @@ log "Parcours complet"
 if API=https://siglair.com bash scripts/smoke.sh; then
     log "Déploiement validé"
 else
-    echo "  ÉCHEC du parcours complet — le site tourne mais quelque chose est cassé." >&2
-    echo "  Image précédente : ${PREV:-inconnue}" >&2
+    echo "  ÉCHEC du parcours complet — le site répond mais quelque chose est cassé." >&2
+    retour_arriere || true
     exit 1
 fi
 
