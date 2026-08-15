@@ -212,7 +212,28 @@ opens=$(sql "SELECT count(*) FROM events WHERE signature_id = '$SIG_ID' AND kind
 ok "$opens ouvertures enregistrées"
 
 step "Clic tracé"
-code=$(curl -sS -o /dev/null -D "$TMP/click" -w '%{http_code}' "$API/c/$SLUG/cta0001")
+
+# Le scanner passe EN PREMIER, et l'ordre n'est pas un détail.
+#
+# Microsoft Defender Safe Links, Proofpoint et Mimecast ouvrent chaque lien d'un e-mail
+# avant de le remettre au destinataire. Ils doivent être redirigés comme tout le monde — un
+# scanner qui reçoit une erreur classe le lien comme suspect, et c'est la signature entière
+# qui devient douteuse — mais jamais comptés.
+#
+# En premier parce que la déduplication des clics porte sur (signature, élément, ip_hash) :
+# si le clic humain avait lieu avant, celui du scanner serait écarté par la déduplication et
+# le test passerait pour la mauvaise raison, sans rien prouver du filtre.
+SCANNER='Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1) SafeLinks'
+code=$(curl -sS -o /dev/null -w '%{http_code}' -A "$SCANNER" "$API/c/$SLUG/cta0001")
+[[ "$code" == "302" ]] || die "un scanner d'URL doit être redirigé comme tout le monde, reçu $code"
+robot=$(sql "SELECT count(*) FROM events WHERE signature_id = '$SIG_ID' AND kind = 'click';")
+((robot == 0)) || die "$robot clic(s) de scanner compté(s) : le filtre anti-robots ne mord pas"
+ok "scanner d'URL redirigé mais non compté"
+
+# `curl` par défaut s'annonce « curl/8.x » et se fait — à juste titre — écarter par le
+# filtre. Le test simule un humain : il doit donc se présenter comme un navigateur.
+HUMAIN='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15'
+code=$(curl -sS -o /dev/null -D "$TMP/click" -w '%{http_code}' -A "$HUMAIN" "$API/c/$SLUG/cta0001")
 [[ "$code" == "302" ]] || die "clic → $code, attendu 302"
 location=$(grep -i '^location:' "$TMP/click" | sed -E 's/^[Ll]ocation: *//' | tr -d '\r')
 [[ "$location" == "https://example.com/" ]] || die "redirection vers '$location' au lieu de la cible du document"
