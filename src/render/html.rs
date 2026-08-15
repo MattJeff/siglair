@@ -517,9 +517,10 @@ fn safe(doc: &Doc, profile: &Profile, opts: &RenderOpts) -> String {
          style=\"border-collapse:collapse;background-color:{};width:{}px;max-width:100%;\">\
          <tr><td style=\"padding:14px 18px;\">\
          <table role=\"presentation\" border=\"0\" cellpadding=\"0\" cellspacing=\"0\" style=\"border-collapse:collapse;width:100%;\">{rows}</table>\
-         </td></tr>{}</table>",
+         </td></tr>{}{}</table>",
         paint_fallback_color(&doc.canvas.bg).unwrap_or("#ffffff"),
         doc.canvas.width_px(),
+        verify_row(opts),
         branding_row(opts),
     )
 }
@@ -662,6 +663,34 @@ fn branding_row(opts: &RenderOpts) -> String {
     format!(
         "<tr><td style=\"padding:6px 0 0;font-family:{FONT};font-size:10px;line-height:1.4;text-align:left;\">{}</td></tr>",
         branding_link(opts)
+    )
+}
+
+/// La ligne « Vérifier ce message » — en TEXTE, jamais en image.
+///
+/// Elle mène à `/v/{slug}`, une page publique qui dit qui est l'expéditeur et ce que sa
+/// structure ne demandera jamais par e-mail. C'est le seul élément de la signature qu'aucune
+/// des quatre contraintes du courriel ne touche : un lien texte survit à Outlook et à son
+/// moteur Word, aux images bloquées, au mode texte brut, au transfert et à l'impression.
+///
+/// Sans slug, rien : il n'y a pas de page à montrer, et un lien mort en signature est pire
+/// que pas de lien — surtout celui-là, dont le rôle est justement de rassurer.
+///
+/// L'URL n'est PAS tracée par `/c/` : elle doit rester courte, lisible et retapable à la main.
+/// Une adresse de vérification qui passe par un redirecteur a exactement la forme de ce
+/// qu'elle prétend combattre.
+fn verify_row(opts: &RenderOpts) -> String {
+    let Some(slug) = opts.slug.as_deref().filter(|_| opts.verify_link) else {
+        return String::new();
+    };
+    format!(
+        "<tr><td style=\"padding:6px 0 0;font-family:{FONT};font-size:11px;line-height:1.4;color:#576274;text-align:left;\">\
+         Vérifier que ce message vient bien de moi : \
+         <a href=\"{}/v/{}\" style=\"color:#576274;\">{}/v/{}</a></td></tr>",
+        esc(&opts.public_url),
+        esc(slug),
+        esc(opts.public_url.trim_start_matches("https://")),
+        esc(slug),
     )
 }
 
@@ -826,6 +855,63 @@ mod tests {
                  tomberont dans les premières colonnes.\n{h}"
             );
         }
+    }
+
+    /// La ligne de vérification est du TEXTE, dans le seul mode `safe`, et jamais ailleurs.
+    ///
+    /// Son intérêt tient entièrement à ce qu'elle survit là où l'image échoue : destinataire
+    /// inconnu dont Gmail masque les images, Outlook qui fige la première frame, lecteur
+    /// d'écran, e-mail imprimé ou transféré en texte brut. La graver dans le GIF la rendrait
+    /// invisible exactement chez le méfiant, c'est-à-dire chez celui qui la cherche.
+    ///
+    /// Le mode `hosted` n'en porte pas non plus : il ne contient qu'un `<img>`, et y ajouter
+    /// une ligne de texte reviendrait à en faire un mode `safe` déguisé.
+    #[test]
+    fn la_ligne_de_verification_ne_finit_jamais_dans_une_image() {
+        let d = doc_with(vec![Element {
+            x: 20.0,
+            y: 20.0,
+            w: 300.0,
+            h: 30.0,
+            content: "Ada Lovelace".into(),
+            ..el("nom0001")
+        }]);
+
+        let mut o = opts(Some("abc123"));
+        o.verify_link = true;
+        let safe = render_document(&d, &Profile::new(), RenderMode::Safe, &o);
+        assert!(
+            safe.contains("/v/abc123"),
+            "la ligne manque dans l'export texte : {safe}"
+        );
+        assert!(
+            !safe.contains("/c/abc123"),
+            "l'URL de vérification passe par le redirecteur de clics — elle doit rester \
+             courte et retapable à la main, sinon elle a la forme de ce qu'elle combat : {safe}"
+        );
+
+        let hosted = render_document(&d, &Profile::new(), RenderMode::Hosted, &o);
+        assert!(
+            !hosted.contains("/v/abc123"),
+            "la ligne apparaît en mode hosted, où elle serait noyée dans une image : {hosted}"
+        );
+
+        // Réglage éteint : rien, même avec un slug.
+        let mut eteint = opts(Some("abc123"));
+        eteint.verify_link = false;
+        assert!(
+            !render_document(&d, &Profile::new(), RenderMode::Safe, &eteint).contains("/v/"),
+            "la ligne s'affiche alors que l'organisation ne l'a pas activée"
+        );
+
+        // Sans slug il n'y a pas de page publiée : un lien mort en signature est pire que
+        // pas de lien, et celui-ci a précisément pour rôle de rassurer.
+        let mut sans_slug = opts(None);
+        sans_slug.verify_link = true;
+        assert!(
+            !render_document(&d, &Profile::new(), RenderMode::Safe, &sans_slug).contains("/v/"),
+            "lien de vérification émis sans signature publiée"
+        );
     }
 
     /// Reproduit la mise en page réelle du modèle « Neon Founder » : logo à gauche,

@@ -9,8 +9,13 @@
 	encode zstd gzip
 
 	# Tout ce que l'API sert : l'app, les URL publiques collées dans les mails
-	# (/s, /c) et les fichiers du stockage (/f). Le reste est le SPA.
-	@api path /api/* /s/* /c/* /f/* /health /ready
+	# (/s, /c, /v) et les fichiers du stockage (/f). Le reste est le SPA.
+	#
+	# /v/* est la page de vérification. Oublier de l'ajouter ici ne casse rien en local —
+	# le binaire répond directement — mais en production Caddy la servirait au SPA React,
+	# qui afficherait sa page « introuvable » sur une URL imprimée dans des e-mails déjà
+	# partis. Le genre de panne qui ne se voit qu'après le déploiement.
+	@api path /api/* /s/* /c/* /v/* /f/* /health /ready
 	handle @api {
 		header X-Robots-Tag "noindex, nofollow"
 		reverse_proxy api:8080

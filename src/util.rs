@@ -39,6 +39,65 @@ pub fn ua_family(ua: &str) -> &'static str {
     }
 }
 
+/// Le clic vient-il d'une machine plutôt que d'un humain ?
+///
+/// Ce n'est PAS de l'antispam : la redirection est servie à tout le monde, on décide
+/// seulement s'il faut la COMPTER.
+///
+/// Microsoft Defender Safe Links, Proofpoint URL Defense et Mimecast ouvrent CHAQUE lien d'un
+/// e-mail avant de le remettre au destinataire, pour vérifier où il mène. Les messageries
+/// d'équipe et les réseaux sociaux font pareil pour fabriquer un aperçu. Sans ce filtre, un
+/// tableau de bord annonce des clics que personne n'a faits — et la contamination est la plus
+/// forte chez les PME sous Microsoft 365, c'est-à-dire exactement chez les clients qui paient.
+///
+/// Le filtre est délibérément généreux : compter un clic de robot est bien plus grave que
+/// d'en perdre un vrai. Un chiffre gonflé fait prendre des décisions ; un chiffre prudent
+/// fait, au pire, sous-estimer.
+pub fn is_machine(ua: &str) -> bool {
+    let ua = ua.to_ascii_lowercase();
+    // Un client mail qui affiche une signature envoie toujours un User-Agent. Une requête
+    // sans UA n'a donc pas été faite par un humain devant sa boîte.
+    if ua.trim().is_empty() {
+        return true;
+    }
+    const MACHINES: [&str; 30] = [
+        // Analyse d'URL en amont de la boîte de réception
+        "safelinks",
+        "urldefense",
+        "proofpoint",
+        "mimecast",
+        "barracuda",
+        "forcepoint",
+        "symantec",
+        "trendmicro",
+        "bitdefender",
+        "kaspersky",
+        "sophos",
+        "fireeye",
+        "cloudmark",
+        // Fabrication d'un aperçu de lien
+        "slackbot",
+        "discordbot",
+        "telegrambot",
+        "whatsapp",
+        "skypeuripreview",
+        "bingpreview",
+        "facebookexternalhit",
+        "twitterbot",
+        "linkedinbot",
+        "embedly",
+        "preview",
+        // Outils et robots génériques
+        "curl",
+        "wget",
+        "python-requests",
+        "go-http-client",
+        "headlesschrome",
+        "bot",
+    ];
+    MACHINES.iter().any(|m| ua.contains(m))
+}
+
 /// 32 octets aléatoires en base64url — magic link, invitation, state OAuth.
 pub fn random_token() -> String {
     let bytes: [u8; 32] = rand::thread_rng().gen();
@@ -197,6 +256,36 @@ mod tests {
             ..Default::default()
         });
         assert_ne!(doc_hash(&a, &p), doc_hash(&c, &p));
+    }
+
+    /// Les scanners d'URL sont invisibles dans les journaux si on ne les cherche pas : ils
+    /// se présentent comme des navigateurs et cliquent avant l'humain. Ce test fige les
+    /// familles à écarter ET, surtout, celles à NE PAS écarter — un filtre trop large
+    /// rendrait le compteur muet, ce qui est le seul défaut pire qu'un compteur gonflé.
+    #[test]
+    fn un_scanner_durl_nest_pas_un_clic() {
+        for machine in [
+            "Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1) SafeLinks",
+            "Mozilla/5.0 urldefense.proofpoint.com",
+            "Mimecast-Link-Scanner/1.0",
+            "Slackbot-LinkExpanding 1.0 (+https://api.slack.com/robots)",
+            "facebookexternalhit/1.1",
+            "curl/8.4.0",
+            "python-requests/2.31.0",
+            "Mozilla/5.0 HeadlessChrome/120.0.0.0",
+            "", // aucun User-Agent : personne devant l'écran
+        ] {
+            assert!(is_machine(machine), "non détecté comme machine : {machine:?}");
+        }
+
+        for humain in [
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Safari/605.1.15",
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148 Safari/604.1",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0.0.0 Safari/537.36",
+            "Mozilla/5.0 (Windows NT 10.0) Gecko/20100101 Firefox/121.0",
+        ] {
+            assert!(!is_machine(humain), "faux positif, clic perdu : {humain:?}");
+        }
     }
 
     /// Le bug corrigé par la migration 0002 : republier après avoir changé sa fonction

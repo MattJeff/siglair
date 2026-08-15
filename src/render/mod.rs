@@ -35,4 +35,12 @@ pub struct RenderOpts {
     pub for_capture: bool,
     /// Plan Free : marque Siglair imposée dans l'export (contrat §6).
     pub branding: bool,
+    /// Ligne « Vérifier ce message » vers `/v/{slug}`, activée par organisation.
+    ///
+    /// Elle n'est émise QU'EN MODE `safe`, et c'est la seule raison d'être de ce mode ici :
+    /// dans le GIF, elle serait une image — donc masquée par Gmail pour un expéditeur inconnu,
+    /// figée sur sa première frame par Outlook, illisible par un lecteur d'écran, et non
+    /// cliquable une fois l'e-mail imprimé ou transféré en texte. Or c'est précisément au
+    /// destinataire méfiant, celui dont le client bloque tout, qu'elle s'adresse.
+    pub verify_link: bool,
 }

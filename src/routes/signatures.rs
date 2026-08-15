@@ -764,6 +764,13 @@ async fn export(
         assets: assets::urls_for_doc(&st, access.org_id, &doc).await?,
         for_capture: false,
         branding: plan.limits.branding,
+        // Réglage d'organisation, désactivé par défaut. Il ajoute une ligne dans la signature
+        // de tous ses membres : on ne l'impose à personne tant que le clic n'est pas observé.
+        verify_link: sqlx::query_scalar::<_, bool>("SELECT verify_link FROM orgs WHERE id = $1")
+            .bind(access.org_id)
+            .fetch_optional(&st.db)
+            .await?
+            .unwrap_or(false),
     };
     let html = render_document(&doc, &profile_of(&row), q.mode, &opts);
     Ok(Json(json!({ "html": html, "mode": q.mode })))

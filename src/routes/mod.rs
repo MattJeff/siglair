@@ -83,6 +83,9 @@ async fn preview(
         assets: assets::urls_for_doc(&st, access.org_id, &req.doc).await?,
         for_capture: false,
         branding: plan.limits.branding,
+        // Sans slug, `verify_row` ne produit rien de toute façon : l'aperçu de l'éditeur
+        // porte sur un brouillon, qui n'a pas de page de vérification à montrer.
+        verify_link: false,
     };
     Ok(Json(
         json!({ "html": render_document(&req.doc, &req.profile, req.mode, &opts) }),

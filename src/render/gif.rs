@@ -124,6 +124,10 @@ async fn run(
         for_capture: true,
         // La mention Siglair s'affiche sous l'image, hors du canvas : la capturer la couperait.
         branding: false,
+        // Jamais dans l'image. Une ligne de vérification gravée dans un GIF ne serait ni
+        // cliquable, ni lisible par un lecteur d'écran, ni visible chez un destinataire dont
+        // le client bloque les images — c'est-à-dire chez celui à qui elle s'adresse.
+        verify_link: false,
     };
     let page_path = dir.join("page.html");
     tokio::fs::write(

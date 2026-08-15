@@ -8,6 +8,7 @@
 //!    Siglair devient un redirecteur ouvert exploitable pour du phishing depuis son
 //!    propre domaine.
 
+use std::fmt::Write as _;
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, StatusCode},
@@ -24,7 +25,7 @@ use crate::{
     doc::{resolve_tokens, safe_href, Doc, Profile},
     error::{AppError, Result},
     growth::{self, GrowthEvent, Visitor},
-    util::{hash_ip, ua_family},
+    util::{esc_html, hash_ip, is_machine, ua_family},
     AppState,
 };
 
@@ -55,6 +56,7 @@ pub fn router() -> Router<AppState> {
         .route("/ready", get(ready))
         .route("/s/{file}", get(image))
         .route("/c/{slug}/{element_id}", get(click))
+        .route("/v/{slug}", get(verify))
         .route("/f/{*key}", get(media))
 }
 
@@ -301,7 +303,16 @@ async fn click(
 
     let target = click_target(&doc, &profile, &element_id).ok_or(AppError::NotFound)?;
 
-    if row.analytics_enabled {
+    // La redirection est servie à TOUT LE MONDE, robots compris : un scanner qui reçoit une
+    // erreur classe le lien comme suspect, et c'est la signature entière qui devient douteuse.
+    // On décide seulement s'il faut le COMPTER.
+    let machine = is_machine(
+        headers
+            .get(header::USER_AGENT)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default(),
+    );
+    if row.analytics_enabled && !machine {
         let host = Url::parse(&target)
             .ok()
             .and_then(|u| u.host_str().map(str::to_string));
@@ -319,6 +330,171 @@ async fn click(
         ],
     )
         .into_response())
+}
+
+// ------------------------------------------------------------------ vérification
+
+#[derive(sqlx::FromRow)]
+struct VerifyRow {
+    profile: Option<Value>,
+    verify_link: bool,
+    verify_notice: Option<String>,
+    org_name: String,
+    published_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// `GET /v/{slug}` — « cet e-mail vient-il vraiment de cette personne ? »
+///
+/// Une page publique, en HTML rendu par le serveur, SANS formulaire, sans champ, sans
+/// javascript, sans cookie et sans rien à envoyer. Ce vide est la fonctionnalité : une page
+/// de vérification qui demanderait quoi que ce soit serait indiscernable d'un hameçonnage,
+/// et détruirait la confiance qu'elle prétend établir.
+///
+/// Les données viennent de l'INSTANTANÉ publié (`renders.profile`), jamais du brouillon en
+/// cours d'édition — même règle que `/c/`. Sinon une modification non publiée changerait ce
+/// que la page affirme au sujet d'e-mails déjà partis.
+///
+/// Ce qu'on N'AFFICHE PAS, volontairement : aucune adresse du destinataire, aucun contenu de
+/// message, aucune date d'envoi. La page ne sait rien de qui la consulte et ne doit rien en
+/// apprendre — elle ne fait que republier ce que l'employeur a lui-même publié.
+async fn verify(State(st): State<AppState>, Path(slug): Path<String>) -> Response {
+    if slug.is_empty() || slug.len() > 64 {
+        return not_verifiable();
+    }
+    let row: Option<VerifyRow> = match sqlx::query_as(
+        "SELECT r.profile, o.verify_link, o.verify_notice, o.name AS org_name, \
+                r.created_at AS published_at \
+         FROM signatures s \
+         JOIN orgs o ON o.id = s.org_id \
+         LEFT JOIN renders r ON r.id = s.published_render_id \
+         WHERE s.public_slug = $1::citext AND s.deleted_at IS NULL",
+    )
+    .bind(&slug)
+    .fetch_optional(&st.db)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::warn!(error = ?e, %slug, "page de vérification indisponible");
+            return not_verifiable();
+        }
+    };
+
+    // Org qui n'a pas activé le lien, signature inconnue, ou jamais publiée : la MÊME réponse
+    // dans les trois cas. Distinguer « ce slug n'existe pas » de « cette org n'a pas activé
+    // l'option » donnerait à un attaquant de quoi énumérer les clients de Siglair.
+    let Some(row) = row.filter(|r| r.verify_link && r.profile.is_some()) else {
+        return not_verifiable();
+    };
+    let profile: Profile = row
+        .profile
+        .and_then(|p| serde_json::from_value(p).ok())
+        .unwrap_or_default();
+
+    let champ = |k: &str| profile.get(k).map(String::as_str).unwrap_or("").trim();
+    let nom = champ("name");
+    if nom.is_empty() {
+        return not_verifiable();
+    }
+    let structure = {
+        let c = champ("company");
+        if c.is_empty() { row.org_name.as_str() } else { c }
+    };
+
+    let mut contacts = String::new();
+    for (etiquette, cle) in [("E-mail", "email"), ("Téléphone", "phone"), ("Site", "website")] {
+        let v = champ(cle);
+        if v.is_empty() {
+            continue;
+        }
+        let _ = write!(
+            contacts,
+            "<div class=l><dt>{etiquette}</dt><dd>{}</dd></div>",
+            esc_html(v)
+        );
+    }
+
+    // La date de dernière publication est le seul élément qui distingue une page vivante
+    // d'une page fabriquée une fois : elle dit que l'employeur tient encore cette fiche.
+    let maj = row
+        .published_at
+        .map(|d| format!("Mise à jour par {} le {}.", esc_html(structure), d.format("%d/%m/%Y")))
+        .unwrap_or_default();
+
+    let avertissement = row
+        .verify_notice
+        .as_deref()
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(|n| format!("<p class=w><b>Ce que {} ne vous demandera jamais par e-mail</b><br>{}</p>", esc_html(structure), esc_html(n)))
+        .unwrap_or_default();
+
+    page(
+        StatusCode::OK,
+        &format!(
+            "<h1>{}</h1><p class=s>{}</p><dl>{contacts}</dl><p class=d>{maj}</p>{avertissement}",
+            esc_html(nom),
+            esc_html(champ("role")),
+        ),
+    )
+}
+
+/// La réponse quand rien ne peut être confirmé. Elle ne dit PAS « ce compte n'existe pas » :
+/// elle dit qu'on ne peut rien confirmer, ce qui est la seule chose vraie et la seule utile.
+/// Un 404 nu laisserait croire à une page cassée, alors que l'absence de confirmation EST
+/// l'information — c'est exactement ce que le lecteur doit retenir.
+fn not_verifiable() -> Response {
+    page(
+        StatusCode::NOT_FOUND,
+        "<h1>Impossible de confirmer</h1><p class=s>Aucune signature vérifiable ne correspond à \
+         cette adresse.</p><p class=w>Cela ne prouve pas qu'il s'agit d'une fraude — mais si ce \
+         message vous demande un virement, un changement de coordonnées bancaires ou un \
+         identifiant, appelez votre correspondant à un numéro que vous connaissez déjà, jamais \
+         à celui écrit dans le message.</p>",
+    )
+}
+
+/// Le gabarit. Un seul fichier, aucun asset, aucune requête réseau supplémentaire : la page
+/// doit s'afficher entièrement même derrière un pare-feu d'entreprise qui bloque tout le reste.
+fn page(code: StatusCode, corps: &str) -> Response {
+    let html = format!(
+        "<!doctype html><html lang=fr><head><meta charset=utf-8>\
+         <meta name=viewport content=\"width=device-width,initial-scale=1\">\
+         <meta name=robots content=\"noindex\">\
+         <title>Vérification — Siglair</title><style>\
+         :root{{color-scheme:light dark}}\
+         body{{margin:0;padding:48px 20px;font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;background:#f5f6f8;color:#0a1220}}\
+         main{{max-width:34rem;margin:auto;background:#fff;border:1px solid #dfe3ea;border-radius:14px;padding:32px}}\
+         h1{{margin:0 0 4px;font-size:26px;line-height:1.2}}\
+         .s{{margin:0 0 22px;color:#59657a}}\
+         dl{{margin:0;display:grid;gap:10px}}.l{{display:flex;gap:12px}}\
+         dt{{flex:0 0 88px;color:#59657a;font-size:14px}}dd{{margin:0;overflow-wrap:anywhere}}\
+         .d{{margin:22px 0 0;font-size:14px;color:#59657a}}\
+         .w{{margin:22px 0 0;padding:14px 16px;background:#fff7ed;border:1px solid #fed7aa;border-radius:10px;font-size:15px}}\
+         footer{{max-width:34rem;margin:18px auto 0;font-size:13px;color:#59657a;text-align:center}}\
+         footer a{{color:inherit}}\
+         @media(prefers-color-scheme:dark){{body{{background:#07111f;color:#e7edf6}}\
+         main{{background:#0c1727;border-color:#1d2b40}}.s,dt,.d,footer{{color:#93a1b5}}\
+         .w{{background:#2a1c0b;border-color:#7c4a12}}}}\
+         </style></head><body><main>{corps}</main>\
+         <footer>Fiche publiée par l'employeur et vérifiée par \
+         <a href=\"https://siglair.com/\">Siglair</a>. Cette page ne vous demande jamais rien.</footer>\
+         </body></html>"
+    );
+    (
+        code,
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            // Elle doit refléter une republication rapidement : c'est sa fraîcheur qui fait
+            // sa valeur. 5 minutes, comme l'image.
+            (header::CACHE_CONTROL, CACHE),
+            // Une fiche de vérification n'a rien à faire dans un moteur de recherche :
+            // elle ne se lit qu'en réponse à un e-mail qu'on tient déjà.
+            (header::HeaderName::from_static("x-robots-tag"), "noindex"),
+        ],
+        html,
+    )
+        .into_response()
 }
 
 // ------------------------------------------------------------------ médias
@@ -400,9 +576,26 @@ fn record(
 
     tokio::spawn(async move {
         let ip_hash = ip.map(|ip| hash_ip(&ip, &salt));
+        // Déduplication à 10 secondes, faite par la base et non par une lecture-puis-écriture :
+        // le proxy d'images de Gmail rappelle la même URL plusieurs fois EN PARALLÈLE, et deux
+        // tâches détachées qui vérifient « ça n'existe pas encore » en même temps insèrent deux
+        // lignes. Ici la seconde ne trouve rien à insérer.
+        //
+        // 10 secondes : au-delà, deux consultations rapprochées d'un même e-mail sont deux vraies
+        // ouvertures et doivent compter. En deçà, c'est une rafale technique.
+        //
+        // `IS NOT DISTINCT FROM` et non `=` : element_id et ip_hash valent NULL en temps normal,
+        // et `NULL = NULL` est NULL, donc la clause serait toujours fausse et ne dédupliquerait
+        // rien — silencieusement.
         let res = sqlx::query(
             "INSERT INTO events (signature_id, kind, element_id, target_host, ip_hash, ua_family) \
-             VALUES ($1, $2, $3, $4, $5, $6)",
+             SELECT $1, $2, $3, $4, $5, $6 \
+             WHERE NOT EXISTS ( \
+               SELECT 1 FROM events \
+               WHERE signature_id = $1 AND kind = $2 \
+                 AND element_id IS NOT DISTINCT FROM $3 \
+                 AND ip_hash IS NOT DISTINCT FROM $5 \
+                 AND occurred_at > now() - interval '10 seconds')",
         )
         .bind(signature_id)
         .bind(kind)
