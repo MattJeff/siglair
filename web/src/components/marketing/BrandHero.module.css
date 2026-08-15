@@ -400,6 +400,13 @@
   animation: lineFade 5.6s ease-out 0.52s infinite;
 }
 
+/* Sélecteur à deux classes : sinon `.signatureIdentity strong` l'emporte et le champ
+   à remplir revient en couleur de texte pleine, donc en fausse donnée. */
+.signatureIdentity .toFill {
+  color: var(--muted);
+  font-weight: 600;
+}
+
 .signatureIdentity em {
   color: color-mix(in srgb, var(--sig-accent-2) 84%, var(--text));
   font-size: 12px;

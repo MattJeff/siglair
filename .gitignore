@@ -8,3 +8,8 @@ web/dist
 
 .DS_Store
 *.log
+
+# La liste de prospection est REGÉNÉRABLE : prospection/README.md donne la commande, et la
+# source data.gouv.fr change tous les jours. Une copie de 3,8 Mo figée dans l'historique
+# serait périmée dès la semaine prochaine, sans que rien ne le signale.
+prospection/*.csv

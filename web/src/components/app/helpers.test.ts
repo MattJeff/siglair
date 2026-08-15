@@ -15,7 +15,7 @@ const FREE: PlanInfo = {
   price_eur_month: 0,
   per_seat: false,
   min_seats: 1,
-  ai_generations: 1,
+  ai_generations: 3,
   ai_generations_monthly: false,
   limits: {
     signatures: 1,
@@ -83,8 +83,11 @@ describe('planFeatures', () => {
       'Export sans la marque Siglair',
     ]);
     expect(planFeatures(TEAM).every((f) => f.on)).toBe(true);
+    // Le libellé est accordé par `planFeatures`, il n'est écrit nulle part en dur : c'est
+    // justement ce que cette assertion vérifie. Le passage de Free à 3 générations l'a fait
+    // basculer au pluriel tout seul.
     expect(planFeatures(FREE).find((f) => f.label.includes('IA'))?.label).toBe(
-      '1 génération IA à vie',
+      '3 générations IA à vie',
     );
   });
 

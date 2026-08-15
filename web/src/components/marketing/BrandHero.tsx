@@ -423,8 +423,11 @@ function SignaturePreview({
           </div>
           <div className={s.signatureRule} aria-hidden="true" />
           <div className={s.signatureIdentity}>
-            <strong>Camille Martin</strong>
-            <span>CEO — {brandName}</span>
+            {/* Le nom et le poste ne sont pas analysables depuis un site : un « Camille Martin »
+                en dur donnait « Camille Martin — CEO — SonEntreprise » au visiteur, à côté de son
+                vrai logo. Champ à remplir, pas donnée récupérée. */}
+            <strong className={s.toFill}>Votre nom</strong>
+            <span className={s.toFill}>Votre poste — {brandName}</span>
             {brand.tagline && <small>{brand.tagline}</small>}
             <em>{contact}</em>
           </div>

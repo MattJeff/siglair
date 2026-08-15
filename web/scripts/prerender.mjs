@@ -39,15 +39,25 @@ const pages = [
   {
     path: '/pricing',
     title: 'Tarifs des signatures et campagnes email | Siglair',
+    // Les montants sont aussi dans la description : c'est l'extrait que les moteurs et les
+    // assistants reprennent tel quel, souvent SANS ouvrir la page. Une description sans prix
+    // sur une page « Tarifs » laisse la question « combien ça coûte » sans réponse même quand
+    // le corps de la page, lui, répond.
     description:
-      'Le plan gratuit héberge votre signature animée. Pro enlève la marque et ouvre les campagnes datées. Team fait des emails de votre équipe un canal marketing piloté.',
+      'Siglair est gratuit pour héberger une signature animée. Pro coûte 7,90 €/mois et ouvre les campagnes datées et la mesure des clics. Team coûte 5,90 €/membre/mois, 3 membres minimum.',
     heading: 'Gratuit pour signer. Payant pour diffuser.',
     intro:
       'Le plan gratuit héberge une vraie signature animée sur son URL, avec une discrète mention Siglair. Pro enlève la marque, ouvre les campagnes datées sur vos signatures et mesure les clics. Team pousse une campagne sur les signatures de toute l\u2019équipe.',
+    // Montants recopiés à la main de src/plans.rs (§6). `curl https://siglair.com/pricing`
+    // ne renvoyait ni « 7,90 », ni « 5,90 », ni un seul « € » : GPTBot, ClaudeBot et
+    // PerplexityBot, autorisés nommément dans robots.txt, n'exécutent pas le JS et
+    // repartaient avec une page tarifs sans tarif. La copie est assumée plutôt qu'un
+    // générateur ; c'est l'assertion de scripts/seo-smoke.mjs qui la rend détectable le
+    // jour où un prix bouge dans plans.rs.
     points: [
-      'Free héberge une signature animée sur son URL, avec une mention Siglair.',
-      'Pro enlève la marque, ouvre les campagnes datées sur ses signatures et mesure les clics.',
-      'Team pousse une campagne sur les signatures de toute l\u2019équipe en un clic.',
+      'Free coûte 0 € et héberge une signature animée sur son URL, avec une mention Siglair.',
+      'Pro coûte 7,90 € par mois : il enlève la marque, ouvre les campagnes datées sur ses signatures et mesure les clics.',
+      'Team coûte 5,90 € par membre et par mois, 3 membres minimum soit 17,70 €, et pousse une campagne sur les signatures de toute l\u2019équipe en un clic.',
     ],
     links: [['/', 'Découvrir Siglair'], ...sharedProductLinks.slice(0, 4)],
     schema: 'webpage',

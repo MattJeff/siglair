@@ -56,7 +56,7 @@ Les clics des CTA peuvent être distingués par élément. Les chiffres de port�
 
 ## Offres
 
-- Free : une signature animée hébergée, avec la mention « Powered by siglair.com », sans campagnes ni analytics, et une génération IA d'essai à vie.
+- Free : une signature animée hébergée, avec la mention « Powered by siglair.com », sans campagnes ni analytics, et trois générations IA d'essai à vie.
 - Pro : signatures sans mention Siglair, campagnes sur ses propres signatures, historique analytics de 30 jours et quota mensuel de générations IA.
 - Team : fonctions d'équipe et modèles d'organisation, campagnes diffusables à l'équipe, historique analytics de 12 mois et quota mensuel de générations IA par organisation.
 

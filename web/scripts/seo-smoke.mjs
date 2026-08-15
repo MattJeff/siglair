@@ -242,7 +242,20 @@ const pricing = await readFile(htmlPath('/pricing'), 'utf8');
 assert.match(pricing, /<title>Tarifs des signatures et campagnes email \| Siglair<\/title>/);
 assert.match(pricing, /<h1>Gratuit pour signer\. Payant pour diffuser\.<\/h1>/);
 assert.match(pricing, /Pro enlève la marque, ouvre les campagnes datées/);
-assert.match(pricing, /Free héberge une signature animée/);
+assert.match(pricing, /Free coûte 0 € et héberge une signature animée/);
+
+// Les montants vivent dans src/plans.rs et sont recopiés dans prerender.mjs. Sans cette
+// assertion, la recopie ment en silence : `curl https://siglair.com/pricing` renvoyait 0
+// occurrence de « 7,90 » et de « € », donc les robots qui n'exécutent pas le JS repartaient
+// avec une page tarifs sans tarif. Si ça casse, la question est « prerender.mjs a-t-il suivi
+// le changement de prix », pas « comment faire passer le test ».
+// « 0 € » n'est pas dans la liste : l'assertion « Free coûte 0 € » ci-dessus le couvre, et
+// ici il passerait même sans prix sur Free — « 7,90 € » contient déjà « 0 € ».
+// « 17,70 € » y est parce qu'il n'existe dans aucun fichier Rust : c'est 5,90 × min_seats,
+// donc le seul montant de la page qui reste faux en silence quand min_seats passe de 3 à 4.
+for (const montant of ['7,90 €', '5,90 €', '17,70 €']) {
+  assert.ok(pricing.includes(montant), `/pricing prérendu sans le montant ${montant} de src/plans.rs`);
+}
 
 console.log(
   `SEO smoke: ${indexablePages.length} pages indexables, ${legalPages.length} pages noindex, ` +

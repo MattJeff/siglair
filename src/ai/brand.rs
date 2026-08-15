@@ -508,17 +508,40 @@ fn from_host(base: &Url) -> String {
     }
 }
 
+/// L'accroche sous le nom, reprise de la meta description du site.
+///
+/// Coupée à 60 caractères sur un mot entier, et coupée ICI plutôt qu'à l'affichage. Une meta
+/// description est écrite pour Google, pas pour une signature : celle de qonto.com est
+/// « ✓ Facturation ✓ Comptabilité ✓ Gestion des dépenses… » et tenait sur quatre lignes dans la
+/// carte. Mais la même chaîne part aussi dans `profile.tagline`, donc dans la signature
+/// réellement produite — la tronquer côté aperçu seulement faisait diverger ce qu'on montre et
+/// ce qu'on livre, ce qui est pire qu'une carte moche.
+///
+/// 240 auparavant, ce qui ne coupait rien : une meta description dépasse rarement cette longueur.
 fn tagline(page: &Page) -> String {
-    page.meta("og:description")
+    let complet = page
+        .meta("og:description")
         .or_else(|| page.meta("description"))
         .or_else(|| page.meta("twitter:description"))
         .unwrap_or_default()
         .split_whitespace()
         .collect::<Vec<_>>()
-        .join(" ")
-        .chars()
-        .take(240)
-        .collect()
+        .join(" ");
+
+    if complet.chars().count() <= 60 {
+        return complet;
+    }
+    let coupe: String = complet.chars().take(60).collect();
+    let court = match coupe.rsplit_once(' ') {
+        Some((debut, _)) if !debut.is_empty() => debut,
+        // Aucun espace dans les 60 premiers caractères : on coupe net. `chars()` compte des
+        // caractères Unicode entiers, il n'y a donc pas de demi-caractère possible.
+        _ => coupe.as_str(),
+    };
+    format!(
+        "{}…",
+        court.trim_end_matches([' ', '.', ',', ';', ':', '–', '—', '-'])
+    )
 }
 
 const GENERIC_FONTS: [&str; 8] = [
@@ -800,11 +823,21 @@ fn clean_email(raw: &str) -> Option<String> {
         return None;
     }
     let (local, domain) = email.split_once('@')?;
+    // `email_in_text` balaye le HTML brut, JavaScript embarqué compris : sur qonto.com une version
+    // de paquet `qonto-blog@6.6.6` passait pour un contact, et un `srcset="logo@2x.png 2x"`
+    // donnait `logo@2x.png`. Un vrai TLD est alphabétique et n'est jamais une extension de fichier.
+    const EXTENSIONS: [&str; 12] = [
+        "png", "jpg", "jpeg", "gif", "svg", "webp", "avif", "ico", "css", "js", "json", "html",
+    ];
+    let tld = domain.rsplit('.').next().unwrap_or_default();
     if local.is_empty()
         || domain.len() < 3
         || !domain.contains('.')
         || domain.starts_with('.')
         || domain.ends_with('.')
+        || tld.len() < 2
+        || !tld.chars().all(|c| c.is_ascii_alphabetic())
+        || EXTENSIONS.iter().any(|e| tld.eq_ignore_ascii_case(e))
     {
         return None;
     }
@@ -826,10 +859,31 @@ fn clean_phone(raw: &str) -> Option<String> {
 }
 
 fn email_in_text(raw: &str) -> Option<String> {
-    raw.split(|c: char| {
-        !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-' | '@'))
-    })
-    .find_map(clean_email)
+    let separateur =
+        |c: char| !(c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '%' | '+' | '-' | '@'));
+
+    // On garde la POSITION de chaque candidat, alors qu'un `split().find_map()` suffirait à le
+    // découper. La raison : un candidat précédé de « // » est le `userinfo` d'une URL, pas une
+    // adresse. Un DSN Sentry embarqué dans le JavaScript de la page
+    // (https://cle@o4507.ingest.sentry.io/99) a exactement la forme d'un email et devenait le
+    // contact affiché sur la carte du visiteur. Rien dans la chaîne elle-même ne permet de les
+    // distinguer : seul ce qui précède le dit.
+    let mut debut = 0usize;
+    for (i, c) in raw
+        .char_indices()
+        .chain(std::iter::once((raw.len(), ' ')))
+    {
+        if !separateur(c) {
+            continue;
+        }
+        if i > debut && !raw[..debut].ends_with("//") {
+            if let Some(email) = clean_email(&raw[debut..i]) {
+                return Some(email);
+            }
+        }
+        debut = i + c.len_utf8();
+    }
+    None
 }
 
 // ------------------------------------------------------------------ logo
@@ -1680,6 +1734,54 @@ mod tests {
             c.get("email").map(String::as_str),
             Some("bonjour@acme.test")
         );
+    }
+
+    #[test]
+    fn une_version_de_paquet_nest_pas_un_email() {
+        // symptôme : qonto.com affichait `qonto-blog@6.6.6`, lu dans le JS embarqué
+        assert_eq!(clean_email("a@6.6.6"), None);
+        assert_eq!(clean_email("a@x.c"), None);
+        assert_eq!(clean_email("a@x.c0m"), None);
+        assert_eq!(clean_email("logo@2x.png"), None);
+        assert_eq!(clean_email("a@qonto.com").as_deref(), Some("a@qonto.com"));
+
+        let js =
+            Page::new(r#"<script>var d={"qonto-blog@6.6.6":1};</script><p>presse@qonto.com</p>"#);
+        assert_eq!(
+            contacts(&js, &base()).get("email").map(String::as_str),
+            Some("presse@qonto.com")
+        );
+
+        // Un DSN Sentry a la forme exacte d'une adresse. Seul le « // » qui le précède le
+        // trahit : c'est le `userinfo` d'une URL. Sans la garde de position, c'est LUI qui
+        // sortait, parce qu'il apparaît avant l'adresse réelle dans le HTML.
+        let dsn = Page::new(
+            r#"<script>Sentry.init({dsn:"https://ab12cd@o4507.ingest.sentry.io/99"})</script><p>presse@qonto.com</p>"#,
+        );
+        assert_eq!(
+            contacts(&dsn, &base()).get("email").map(String::as_str),
+            Some("presse@qonto.com")
+        );
+    }
+
+    #[test]
+    fn laccroche_est_coupee_sur_un_mot_entier() {
+        // symptôme : la meta description de qonto.com tenait sur quatre lignes dans la carte.
+        // La coupe est côté serveur, donc l'aperçu ET la signature livrée reçoivent la même.
+        let long = Page::new(
+            r#"<meta name="description" content="Facturation, comptabilite, gestion des depenses et cartes pour les entreprises exigeantes partout en Europe">"#,
+        );
+        let t = tagline(&long);
+        assert!(t.chars().count() <= 61, "accroche trop longue : {t:?}");
+        assert!(t.ends_with('…'), "accroche non tronquée : {t:?}");
+        assert!(
+            !t.contains(" …"),
+            "espace laissée devant l'ellipse : {t:?}"
+        );
+
+        // Une accroche déjà courte ne doit surtout pas gagner d'ellipse.
+        let court = Page::new(r#"<meta name="description" content="Le compte pro des PME.">"#);
+        assert_eq!(tagline(&court), "Le compte pro des PME.");
     }
 
     // ---------------------------------------------------------------- couleurs

@@ -115,8 +115,12 @@ pub const FREE: Plan = Plan {
         org_templates: false,
         branding: true,
     },
-    // §6bis.6 : 1 génération AU TOTAL, pas par mois — c'est l'essai, pas un quota récurrent.
-    ai_generations: Some(1),
+    // §6bis.6 : quota AU TOTAL, pas par mois — c'est l'essai, pas un quota récurrent.
+    // 3 et non 1 : le hero demande de coller une URL et l'IA rend le premier résultat. Ce
+    // premier jet peut être médiocre (mauvais logo capté, couleurs à côté) ; avec un seul
+    // essai à vie, l'utilisateur juge le produit sur ce ratage et part. Le coût Groq de
+    // deux générations de plus est négligeable devant une inscription perdue.
+    ai_generations: Some(3),
     ai_generations_monthly: false,
 };
 
@@ -259,9 +263,22 @@ mod tests {
     /// Les prix du contrat §6, et le fait qu'ils ne vivent qu'ici.
     #[test]
     fn pricing_matches_the_contract() {
-        assert_eq!(FREE.price_eur_month, 0.0);
-        assert_eq!(PRO.price_eur_month, 7.90);
-        assert_eq!(TEAM.price_eur_month, 5.90);
+        // Les trois prix en une assertion : ce qui porte, ici, est le message d'échec —
+        // il nomme les recopies hors de ce fichier. En centimes entiers pour que l'échec
+        // affiche le prix fautif tel qu'il est écrit (890), pas un f32.
+        // Via ALL : sur les consts, clippy replie l'assertion à la compilation.
+        let cents: Vec<u32> = ALL
+            .iter()
+            .map(|p| (p.price_eur_month * 100.0).round() as u32)
+            .collect();
+        assert_eq!(
+            cents,
+            vec![0, 790, 590],
+            "prix modifié ici : DEUX fichiers recopient les montants en dur et doivent suivre \
+             dans le même commit — web/scripts/prerender.mjs écrit 7,90 € et 5,90 € dans le \
+             prérendu SEO (le crawler lit la page sans exécuter le JS), et \
+             web/scripts/seo-smoke.mjs vérifie ces mêmes montants dans le HTML prérendu"
+        );
 
         // Team : par siège, minimum 3. C'est ce qui fait suivre la facture à la taille du
         // client au lieu de la plafonner.
@@ -328,7 +345,7 @@ mod tests {
         assert_eq!(Plan::get("enterprise").id, "free");
     }
 
-    /// §6bis.6 : Free = 1 AU TOTAL, Pro = 30/mois, Team = 100/mois. La vérification, elle,
+    /// §6bis.6 : Free = 3 AU TOTAL, Pro = 30/mois, Team = 100/mois. La vérification, elle,
     /// est l'`UPDATE ... WHERE used < max` de `routes::onboarding::consume_ai_generation` :
     /// en deux requêtes, un double-clic consommerait deux fois la génération gratuite.
     #[test]
@@ -337,7 +354,7 @@ mod tests {
             ALL.iter()
                 .map(|p| (p.ai_generations, p.ai_generations_monthly))
                 .collect::<Vec<_>>(),
-            vec![(Some(1), false), (Some(30), true), (Some(100), true)]
+            vec![(Some(3), false), (Some(30), true), (Some(100), true)]
         );
     }
 }
