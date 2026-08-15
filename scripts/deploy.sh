@@ -14,6 +14,17 @@ set -euo pipefail
 
 cd /opt/siglair
 
+# Une copie de toute la sortie sur le disque du serveur.
+#
+# Un déploiement lancé par la CI passe par une clé à commande forcée : sa sortie n'existe que
+# dans le flux SSH. Le 15 août, ce flux s'est fermé une seconde après l'ouverture de session,
+# sans une seule ligne — impossible de savoir où le script était mort, ni même s'il avait
+# démarré. Le journal du runner ne montrait que « exit code 255 ».
+#
+# `tee -a` et non `>` : deux déploiements consécutifs doivent tous les deux rester lisibles.
+exec > >(tee -a /var/log/siglair-deploy.log) 2>&1
+printf '\n===== %s — déploiement lancé (pid %s) =====\n' "$(date -Is)" "$$"
+
 log() { printf '\033[1m▸ %s\033[0m\n' "$1"; }
 
 # Les images en place sont notées AVANT le `pull`, et par IDENTIFIANT.
@@ -22,8 +33,20 @@ log() { printf '\033[1m▸ %s\033[0m\n' "$1"; }
 # résolvait alors la NOUVELLE, et le « retour arrière » proposé pointait sur l'image cassée.
 # L'identifiant, lui, ne bouge pas quand un tag est réattribué — un digest ou un nom de tag
 # ne survivrait pas au pull suivant.
-IMG_API=$(docker compose config --images api | head -1)
-IMG_WEB=$(docker compose config --images web | head -1)
+# `docker compose config --images api | head -1` — la version précédente — avait DEUX défauts,
+# et le second cachait le premier.
+#
+# 1. `--images api` liste aussi les images des services dont `api` dépend. La première ligne est
+#    `postgres:16-alpine`, pas celle de l'API : le retour arrière aurait retagué Postgres.
+# 2. `head -1` ferme le tuyau dès la première ligne. Quand docker n'a pas encore fini d'écrire
+#    la seconde, il prend un SIGPIPE et sort en 255 ; `pipefail` propage, `set -e` tue le script.
+#    C'est une course : selon que docker a rempli le tampon du tuyau avant ou après, le
+#    déploiement passait ou échouait. D'où des échecs « exit code 255 » sans une ligne de sortie,
+#    un jour sur deux, sans qu'aucun code n'ait changé.
+#
+# `jq` lit son entrée jusqu'au bout : pas de SIGPIPE possible. Il est déjà exigé par smoke.sh.
+IMG_API=$(docker compose config --format json | jq -r '.services.api.image')
+IMG_WEB=$(docker compose config --format json | jq -r '.services.web.image')
 PREV_API=$(docker image inspect --format '{{.Id}}' "$IMG_API" 2>/dev/null || echo '')
 PREV_WEB=$(docker image inspect --format '{{.Id}}' "$IMG_WEB" 2>/dev/null || echo '')
 

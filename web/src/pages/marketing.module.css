@@ -68,6 +68,13 @@
   background: linear-gradient(100deg, var(--text) 0, color-mix(in srgb, var(--text) 68%, var(--blue2)) 28%, var(--cyan) 56%, color-mix(in srgb, var(--purple) 52%, var(--text)) 100%);
   -webkit-background-clip: text;
   background-clip: text;
+  /* `background-clip: text` peint le dégradé sur la BOÎTE de l'élément, pas sur les glyphes :
+     la jambe d'un « g » ou d'un « q » qui descend sous cette boîte n'est plus couverte, donc
+     transparente, donc invisible. Le texte de l'accroche était jusqu'ici écrit pour éviter les
+     descendantes — une contrainte de rédaction née d'un défaut de style. On étire la boîte vers
+     le bas et on rend la place prise, ce qui la supprime. */
+  padding-bottom: 0.14em;
+  margin-bottom: -0.14em;
 }
 
 /* ---------------------------------------------------------------- héros */

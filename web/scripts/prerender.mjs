@@ -21,12 +21,15 @@ const sharedProductLinks = [
 const pages = [
   {
     path: '/',
-    title: 'Siglair | Signature email marketing animée',
+    // Doit rester identique à `usePageMeta` dans web/src/pages/Landing.tsx : c'est la même page,
+    // servie une fois aux robots et une fois aux navigateurs. Les deux ont déjà divergé.
+    title: 'Siglair | Signatures email pour organismes de formation',
     description:
-      'Transformez chaque email en canal marketing : signature animée, campagnes et CTA, mise à jour sans copier-coller, analytics, Gmail et Outlook.',
-    heading: 'Votre signature email. Un canal marketing à part entière.',
+      'Programmez une bannière de session : elle apparaît dans les signatures de tous vos formateurs pendant les inscriptions, puis disparaît toute seule.',
+    kicker: 'Signatures email pour organismes de formation',
+    heading: 'Votre prochaine session de formation, dans la signature de toute l’équipe.',
     intro:
-      'Collez votre site, Siglair compose la signature. Ajoutez ensuite campagnes, CTA, lancements et contenus, puis republiez sans demander un nouveau copier-coller.',
+      'Pour les organismes de formation : vous programmez la date d’ouverture et de fermeture, la bannière apparaît dans les emails de tous vos formateurs pendant la période d’inscription, puis disparaît toute seule. Personne ne recolle sa signature, personne n’oublie de la retirer.',
     points: [
       'Créez une signature aux couleurs de votre marque avec un éditeur visuel.',
       'Ajoutez une campagne, une bannière ou un CTA sous vos conversations.',
@@ -377,7 +380,7 @@ function staticContent(page) {
         .map(([href, label]) => `<a href="${href}">${escapeHtml(label)}</a>`)
         .join('')}</nav></header>
       <main class="seo-main">
-        <p class="seo-kicker">Signature email marketing</p>
+        <p class="seo-kicker">${escapeHtml(page.kicker ?? 'Signature email marketing')}</p>
         <h1>${escapeHtml(page.heading)}</h1>
         <p class="seo-intro">${escapeHtml(page.intro)}</p>
         ${points}

@@ -24,5 +24,21 @@
 		-Server
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
+
+		# HSTS : une fois le domaine visité, le navigateur REFUSE le HTTP en clair pendant un
+		# an, sans même émettre la requête. Ça ferme la fenêtre de la toute première requête,
+		# celle qu'un réseau hostile peut détourner avant que la redirection 301 arrive.
+		# Sans `preload` volontairement : l'inscription à la liste des navigateurs est
+		# difficilement réversible et n'a de sens qu'une fois le domaine stabilisé.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
+		# Anti-détournement de clic. `frame-ancestors 'self'` et non `DENY` : l'éditeur affiche
+		# son propre aperçu dans une iframe de même origine, que DENY casserait.
+		# Aucune directive `script-src` ici — une CSP de scripts se mesure avant de s'imposer,
+		# et une CSP cassée sur une SPA se voit par une page blanche, pas par un avertissement.
+		Content-Security-Policy "frame-ancestors 'self'"
+
+		# Rien dans Siglair n'a besoin de la caméra, du micro ou de la position.
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
 	}
 }

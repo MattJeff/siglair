@@ -119,9 +119,11 @@ export default function Landing() {
     captureRef(params.get('ref'));
   }, [params]);
 
+  // Ce couple titre/description existe aussi dans web/scripts/prerender.mjs, qui sert la même
+  // page aux robots. Les deux ont déjà divergé par le passé : les modifier ensemble.
   usePageMeta(
-    'Siglair | Signature email marketing animée',
-    'Transformez chaque email en canal marketing : signature animée, campagnes et CTA, mise à jour sans copier-coller, analytics, Gmail et Outlook.',
+    'Siglair | Signatures email pour organismes de formation',
+    'Programmez une bannière de session : elle apparaît dans les signatures de tous vos formateurs pendant les inscriptions, puis disparaît toute seule.',
   );
 
   return (
@@ -138,18 +140,23 @@ export default function Landing() {
         */}
         <section className={`${s.wrap} ${s.hero}`}>
           <div className={s.heroCenter}>
-            <p className={s.eyebrow}>Créez gratuitement votre première signature marketing</p>
-            {/* Le dégradé porte sur un segment sans jambage : `.gradientText` découpe le
-                fond sur la boîte de la ligne, et un « g » y perdrait sa descendante. */}
+            {/*
+              L'accroche nomme le métier visé, pas une catégorie de logiciel. « Un canal
+              marketing à part entière » décrivait une ambition et s'adressait à tout le monde,
+              donc à personne — c'est aussi la catégorie que Sigstr a le plus financée sans
+              jamais la faire tenir seule. L'eyebrow « Créez gratuitement… » a disparu : il
+              répétait le bouton et retardait la phrase qui compte.
+            */}
             <h1>
-              Votre signature email.
+              Votre prochaine session de formation,
               <br />
-              <span className={s.gradientText}>Un canal marketing à part entière.</span>
+              <span className={s.gradientText}>dans la signature de toute l’équipe.</span>
             </h1>
             <p className={s.heroCopy}>
-              <strong>Collez votre site, Siglair compose la signature.</strong> Ajoutez ensuite
-              campagnes, CTA, lancements et contenus, puis republiez sans demander à personne de
-              recoller quoi que ce soit.
+              <strong>Pour les organismes de formation :</strong> vous programmez la date
+              d’ouverture et de fermeture, la bannière apparaît dans les emails de tous vos
+              formateurs pendant la période d’inscription, puis disparaît toute seule. Personne
+              ne recolle sa signature, personne n’oublie de la retirer.
             </p>
             <BrandHero />
             <ul className={`${s.micro} ${s.microList} ${s.microCenter}`}>
