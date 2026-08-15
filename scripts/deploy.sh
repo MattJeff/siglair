@@ -65,9 +65,35 @@ attendre_sante() {
 # laissait l'API redémarrer en boucle, Caddy sans amont, et le site en 502 jusqu'à ce
 # qu'un humain regarde. C'est exactement ce qui s'est produit avec le doublon de
 # numéro de migration 0009.
+migrations_appliquees() {
+    docker compose exec -T db psql -U siglair -d siglair -tAc \
+        'SELECT coalesce(max(version), 0) FROM _sqlx_migrations' 2>/dev/null | tr -d ' \r'
+}
+
 retour_arriere() {
     if [ -z "$PREV_API" ]; then
         echo "  AUCUNE image précédente connue — le site reste en panne, intervention requise." >&2
+        return 1
+    fi
+
+    # UN RETOUR ARRIÈRE NE TRAVERSE PAS UNE MIGRATION.
+    #
+    # `sqlx::migrate!` embarque les migrations DANS le binaire et refuse de démarrer s'il en
+    # trouve une en base qu'il ne connaît pas : « migration N was previously applied but is
+    # missing in the resolved migrations ». Remettre l'image précédente après que la nouvelle
+    # a migré la base produit donc un binaire qui ne démarre PLUS JAMAIS.
+    #
+    # C'est arrivé le 15 août : la nouvelle image était saine, le parcours complet a échoué
+    # sur un bug applicatif, le retour arrière s'est déclenché — et a transformé « une version
+    # imparfaite tourne » en « aucune version ne peut démarrer ». Le remède a fait plus de mal
+    # que le mal. Dans ce cas il n'y a qu'une issue sûre : garder la nouvelle image et corriger
+    # en avant.
+    local apres
+    apres=$(migrations_appliquees)
+    if [ -n "$AVANT_MIGRATIONS" ] && [ -n "$apres" ] && [ "$apres" != "$AVANT_MIGRATIONS" ]; then
+        echo "  RETOUR ARRIÈRE REFUSÉ : la base est passée de la migration ${AVANT_MIGRATIONS} à ${apres}." >&2
+        echo "  L'image précédente ne connaît pas la migration ${apres} et refuserait de démarrer." >&2
+        echo "  La nouvelle image reste en place. Corriger en avant et redéployer." >&2
         return 1
     fi
     echo "  RETOUR ARRIÈRE vers ${PREV_API:0:19}" >&2
@@ -81,6 +107,10 @@ retour_arriere() {
     echo "  RETOUR ARRIÈRE ÉCHOUÉ — intervention manuelle requise." >&2
     return 1
 }
+
+# Relevé AVANT la bascule : c'est le seul moment où la base est encore à la version que
+# l'image précédente sait lire. Après, l'information est perdue.
+AVANT_MIGRATIONS=$(migrations_appliquees)
 
 log "Images"
 docker compose pull --quiet api renderer web

@@ -576,23 +576,27 @@ fn record(
 
     tokio::spawn(async move {
         let ip_hash = ip.map(|ip| hash_ip(&ip, &salt));
-        // Déduplication à 10 secondes, faite par la base et non par une lecture-puis-écriture :
-        // le proxy d'images de Gmail rappelle la même URL plusieurs fois EN PARALLÈLE, et deux
-        // tâches détachées qui vérifient « ça n'existe pas encore » en même temps insèrent deux
-        // lignes. Ici la seconde ne trouve rien à insérer.
+        // Déduplication à 10 secondes, sur les CLICS UNIQUEMENT.
         //
-        // 10 secondes : au-delà, deux consultations rapprochées d'un même e-mail sont deux vraies
-        // ouvertures et doivent compter. En deçà, c'est une rafale technique.
+        // Un scanner d'URL en ouvre plusieurs d'affilée sur le même bouton ; un humain qui
+        // double-clique en produit deux. Dans les deux cas c'est un clic.
         //
-        // `IS NOT DISTINCT FROM` et non `=` : element_id et ip_hash valent NULL en temps normal,
-        // et `NULL = NULL` est NULL, donc la clause serait toujours fausse et ne dédupliquerait
-        // rien — silencieusement.
+        // Surtout : ne PAS l'appliquer aux ouvertures. Une ouverture passe par le proxy
+        // d'images de Gmail, donc l'`ip_hash` enregistré est celui d'un serveur de Google, pas
+        // du lecteur. Dédupliquer dessus fondrait DEUX DESTINATAIRES DIFFÉRENTS en un seul dès
+        // qu'ils ouvrent le message à quelques secondes d'intervalle — une sous-estimation
+        // silencieuse, et d'autant plus forte que la signature est diffusée largement.
+        // La première version le faisait ; le parcours complet l'a attrapé en constatant une
+        // ouverture au lieu de deux (le GIF et le PNG de repli, récupérés coup sur coup).
+        //
+        // `IS NOT DISTINCT FROM` et non `=` : `ip_hash` est NULL quand l'IP est absente, et
+        // `NULL = NULL` vaut NULL — la clause serait toujours fausse et ne dédupliquerait rien.
         let res = sqlx::query(
             "INSERT INTO events (signature_id, kind, element_id, target_host, ip_hash, ua_family) \
              SELECT $1, $2, $3, $4, $5, $6 \
-             WHERE NOT EXISTS ( \
+             WHERE $2 <> 'click' OR NOT EXISTS ( \
                SELECT 1 FROM events \
-               WHERE signature_id = $1 AND kind = $2 \
+               WHERE signature_id = $1 AND kind = 'click' \
                  AND element_id IS NOT DISTINCT FROM $3 \
                  AND ip_hash IS NOT DISTINCT FROM $5 \
                  AND occurred_at > now() - interval '10 seconds')",
