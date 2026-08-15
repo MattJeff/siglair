@@ -21,7 +21,30 @@ API="${API:-http://localhost:8080}"
 WAIT_API="${WAIT_API:-90}"
 WAIT_RENDER="${WAIT_RENDER:-180}"
 TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+
+# Le compte de test ne survit JAMAIS à ce script, même quand il meurt en cours de route.
+#
+# L'étape 7 le supprime par la vraie route RGPD — mais elle est la dernière, et tout échec
+# avant elle laissait derrière un compte, une organisation et des événements. Ça s'est vu :
+# le déploiement interrompu du 13 août a laissé un compte fantôme en production, qui fausse
+# la seule métrique qu'on regarde vraiment au démarrage — combien d'inscrits.
+#
+# Le filet passe par SQL et non par l'API : quand le script échoue tôt, il n'y a souvent pas
+# encore de session utilisable. `|| true` partout — un filet de sécurité qui fait échouer le
+# déploiement parce que le ménage a raté serait pire que le désordre qu'il nettoie.
+nettoyer() {
+    local code=$?
+    if [[ -n "${EMAIL:-}" ]]; then
+        sql "DELETE FROM orgs WHERE id IN (
+               SELECT m.org_id FROM org_members m
+               JOIN users u ON u.id = m.user_id WHERE u.email = '$EMAIL');" >/dev/null 2>&1 || true
+        sql "DELETE FROM users       WHERE email = '$EMAIL';" >/dev/null 2>&1 || true
+        sql "DELETE FROM magic_links WHERE email = '$EMAIL';" >/dev/null 2>&1 || true
+    fi
+    rm -rf "$TMP"
+    exit "$code"
+}
+trap nettoyer EXIT
 
 STEP=0
 step() { STEP=$((STEP + 1)); printf '\n\033[1m[%02d] %s\033[0m\n' "$STEP" "$1"; }
