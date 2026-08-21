@@ -11,7 +11,7 @@ use crate::{
     auth::middleware::client_ip,
     config::Config,
     error::{AppError, Result},
-    util,
+    util, AppState,
 };
 
 pub const SESSION_COOKIE: &str = "sig_session";
@@ -157,17 +157,6 @@ pub async fn lookup_session(db: &PgPool, id: Uuid) -> Result<Option<Session>> {
 /// **Le rattachement par e-mail n'a lieu que si l'e-mail est vérifié par le fournisseur.**
 /// Sinon n'importe qui déclarant `email: victime@exemple.fr` chez un fournisseur laxiste
 /// prendrait le contrôle d'un compte existant.
-pub async fn find_or_create_user(
-    db: &PgPool,
-    email: &str,
-    email_verified: bool,
-    name: Option<&str>,
-    avatar: Option<&str>,
-    provider: Option<(&str, &str)>,
-) -> Result<Uuid> {
-    find_or_create_user_referred(db, email, email_verified, name, avatar, provider, None).await
-}
-
 /// Longueur maximale d'un code de parrainage accepté. Un slug en fait 12
 /// (`util::gen_slug`) ; au-delà de 64 c'est du bruit, et ça n'a rien à faire dans une
 /// requête SQL ni dans une colonne.
@@ -186,7 +175,7 @@ const MAX_REFERRAL_LEN: usize = 64;
 /// de parrainage réattribuer un compte existant est exactement ce qui rend une prime de
 /// parrainage fraudable.
 pub async fn find_or_create_user_referred(
-    db: &PgPool,
+    st: &AppState,
     email: &str,
     email_verified: bool,
     name: Option<&str>,
@@ -194,6 +183,10 @@ pub async fn find_or_create_user_referred(
     provider: Option<(&str, &str)>,
     referral: Option<&str>,
 ) -> Result<Uuid> {
+    // `AppState` plutôt que le pool seul : la création d'un compte doit aussi joindre le
+    // contact à la liste marketing Brevo, et ce chemin est le seul par lequel un
+    // utilisateur naît. Le brancher chez les trois appelants OAuth/magic, c'est l'oublier.
+    let db = &st.db;
     let email = email.trim().to_lowercase();
     let referral = referral
         .map(str::trim)
@@ -261,13 +254,13 @@ pub async fn find_or_create_user_referred(
         return Ok(user_id);
     }
 
-    create_user(db, &email, email_verified, name, avatar, provider, referral).await
+    create_user(st, &email, email_verified, name, avatar, provider, referral).await
 }
 
 /// Utilisateur + organisation personnelle + appartenance : une seule transaction. Un
 /// utilisateur sans org serait invisible de toutes les routes applicatives.
 async fn create_user(
-    db: &PgPool,
+    st: &AppState,
     email: &str,
     email_verified: bool,
     name: Option<&str>,
@@ -275,6 +268,7 @@ async fn create_user(
     provider: Option<(&str, &str)>,
     referral: Option<&str>,
 ) -> Result<Uuid> {
+    let db = &st.db;
     let user_id = Uuid::new_v4();
     let display = name
         .filter(|n| !n.trim().is_empty())
@@ -362,6 +356,14 @@ async fn create_user(
     .await?;
 
     tx.commit().await?;
+
+    // Après le commit, et détaché : un aller-retour vers Brevo n'a pas à tenir la
+    // transaction ouverte, ni à faire attendre — encore moins échouer — une inscription.
+    let (st, email, display) = (st.clone(), email.to_string(), display.to_string());
+    tokio::spawn(async move {
+        crate::email::sync_contact(&st, &email, Some(&display)).await;
+    });
+
     Ok(user_id)
 }
 

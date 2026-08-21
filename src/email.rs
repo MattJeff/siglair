@@ -1,8 +1,11 @@
-//! E-mails transactionnels via Resend (contrat §1).
+//! E-mails transactionnels via Brevo (contrat §1).
 //!
-//! Sans `RESEND_API_KEY`, l'envoi n'échoue pas : le message part dans les logs. Le produit
+//! Sans `BREVO_API_KEY`, l'envoi n'échoue pas : le message part dans les logs. Le produit
 //! doit démarrer et se tester sans clé tierce (contrat §9) — et un lien de connexion visible
 //! dans `docker compose logs` est exactement ce qu'il faut en développement.
+//!
+//! Le même compte Brevo porte le marketing (campagnes, listes). `sync_contact` y pousse les
+//! inscrits ; c'est la seule chose que ce fichier fait qui ne soit pas un envoi.
 
 use anyhow::anyhow;
 use serde_json::json;
@@ -106,23 +109,31 @@ pub(crate) async fn send(
     let html = html_body(heading, paragraphs, cta);
     let text = text_body(heading, paragraphs, cta);
 
-    let Some(cfg) = st.cfg.resend.as_ref() else {
+    let Some(cfg) = st.cfg.brevo.as_ref() else {
         // Pas de clé : mode développement. Le lien est dans le log, c'est voulu.
-        tracing::warn!(%to, %subject, body = %text, "RESEND_API_KEY absente — e-mail non envoyé");
+        tracing::warn!(%to, %subject, body = %text, "BREVO_API_KEY absente — e-mail non envoyé");
         return Ok(());
     };
 
+    let (from_name, from_email) = addr(&cfg.from);
+    let mut sender = json!({ "email": from_email });
+    if let Some(n) = from_name {
+        sender["name"] = json!(n);
+    }
+
     let resp = st
         .http
-        .post("https://api.resend.com/emails")
-        .bearer_auth(&cfg.api_key)
+        .post("https://api.brevo.com/v3/smtp/email")
+        .header("api-key", &cfg.api_key)
         .json(&json!({
-            "from": cfg.from,
-            "to": [to],
+            "sender": sender,
+            // Brevo veut une adresse nue par destinataire ; `to` peut être un
+            // « Nom <adresse> » (cf. billing::lifecycle, qui renvoie sur notre propre boîte).
+            "to": [{ "email": addr(to).1 }],
             "subject": subject,
-            "html": html,
+            "htmlContent": html,
             // Sans partie texte, la plupart des filtres classent le message en spam.
-            "text": text,
+            "textContent": text,
         }))
         .send()
         .await?;
@@ -130,10 +141,65 @@ pub(crate) async fn send(
     if !resp.status().is_success() {
         let status = resp.status();
         let detail = resp.text().await.unwrap_or_default();
-        tracing::error!(%status, %detail, "Resend a refusé l'envoi");
-        return Err(AppError::Internal(anyhow!("Resend a répondu {status}")));
+        tracing::error!(%status, %detail, "Brevo a refusé l'envoi");
+        return Err(AppError::Internal(anyhow!("Brevo a répondu {status}")));
     }
     Ok(())
+}
+
+/// Sépare `Nom <adresse@exemple.fr>` en `(Some("Nom"), "adresse@exemple.fr")`. Une adresse
+/// nue renvoie `(None, elle-même)`.
+fn addr(s: &str) -> (Option<&str>, &str) {
+    match (s.rfind('<'), s.rfind('>')) {
+        (Some(o), Some(c)) if o < c => {
+            let name = s[..o].trim().trim_matches('"').trim();
+            (
+                (!name.is_empty()).then_some(name),
+                s[o + 1..c].trim(),
+            )
+        }
+        _ => (None, s.trim()),
+    }
+}
+
+// ---------------------------------------------------------------- contacts
+
+/// Pousse un inscrit dans la liste marketing Brevo (`BREVO_LIST_ID`).
+///
+/// Ne renvoie jamais d'erreur, comme `growth::record` : une synchronisation marketing qui
+/// fait échouer une inscription transforme un outil de croissance en panne de connexion.
+/// `updateEnabled` rend l'appel idempotent — un contact déjà connu est mis à jour.
+pub async fn sync_contact(st: &AppState, email: &str, name: Option<&str>) {
+    let Some(cfg) = st.cfg.brevo.as_ref() else {
+        return;
+    };
+    let Some(list_id) = cfg.list_id else {
+        return;
+    };
+
+    let body = json!({
+        "email": email,
+        "listIds": [list_id],
+        "updateEnabled": true,
+        "attributes": { "PRENOM": name.unwrap_or("") },
+    });
+
+    match st
+        .http
+        .post("https://api.brevo.com/v3/contacts")
+        .header("api-key", &cfg.api_key)
+        .json(&body)
+        .send()
+        .await
+    {
+        Ok(r) if r.status().is_success() => {}
+        Ok(r) => {
+            let status = r.status();
+            let detail = r.text().await.unwrap_or_default();
+            tracing::warn!(%status, %detail, "Brevo a refusé le contact");
+        }
+        Err(e) => tracing::warn!(error = %e, "contact Brevo non synchronisé"),
+    }
 }
 
 // ---------------------------------------------------------------- gabarit
@@ -221,6 +287,17 @@ mod tests {
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;script&gt;"));
         assert!(html.contains("https://siglair.com/app?a=1&amp;b=2"));
+    }
+
+    #[test]
+    fn sender_is_split_for_brevo() {
+        assert_eq!(
+            addr("Siglair <bonjour@siglair.app>"),
+            (Some("Siglair"), "bonjour@siglair.app")
+        );
+        assert_eq!(addr("\"Siglair\" <bonjour@siglair.app>"), (Some("Siglair"), "bonjour@siglair.app"));
+        assert_eq!(addr("bonjour@siglair.app"), (None, "bonjour@siglair.app"));
+        assert_eq!(addr(" <bonjour@siglair.app> "), (None, "bonjour@siglair.app"));
     }
 
     #[test]

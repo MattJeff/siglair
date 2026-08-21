@@ -24,7 +24,7 @@ C'est ça qu'on facture.
 | Migrations | `sqlx::migrate!("./migrations")` embarqué | zéro outil externe au runtime |
 | Sessions | cookie opaque `sig_session`, HttpOnly, Secure, SameSite=Lax, table `sessions` | révocation immédiate, pas de JWT à révoquer |
 | OAuth | Google OIDC + Apple Sign In, code flow + PKCE | demandé |
-| Email | Resend, API REST via `reqwest` | demandé |
+| Email | Brevo, API REST via `reqwest` | demandé ; même compte que le marketing |
 | Paiement | Stripe, API REST via `reqwest` (**pas** `async-stripe`) | `async-stripe` = +4 min de compilation pour 6 endpoints |
 | Rendu | `chromiumoxide` (CDP) + `ffmpeg` en sous-processus | seule façon fiable de rasteriser du CSS animé |
 | File d'attente | table `render_jobs` + `FOR UPDATE SKIP LOCKED` | ponytail : pas de Redis pour 3 jobs/minute |
@@ -210,7 +210,7 @@ utilisable pour du phishing depuis notre domaine. La cible vient de la base, jam
 |---|---|---|
 | GET | `/api/auth/{google\|apple}/start` | 302 vers le fournisseur. `state` + PKCE en cookie court. |
 | GET/POST | `/api/auth/{google\|apple}/callback` | Apple poste en `form_post`. Crée user+session, 302 vers `/app`. |
-| POST | `/api/auth/magic/request` | `{email}` → envoie le lien Resend. **Réponse toujours 204**, même email inconnu. |
+| POST | `/api/auth/magic/request` | `{email}` → envoie le lien Brevo. **Réponse toujours 204**, même email inconnu. |
 | GET | `/api/auth/magic/consume?token=` | Consomme (usage unique), crée la session, 302 `/app`. |
 | POST | `/api/auth/logout` | Supprime la session, efface le cookie. |
 | GET | `/api/me` | `{user, orgs[], current_org, plan, limits, usage}`. 401 si non connecté. |
@@ -240,7 +240,7 @@ POST   /api/assets                        multipart, ≤ 10 Mo → {id, url, wid
 DELETE /api/assets/{id}                   refuse 409 si l'asset est utilisé
 
 GET    /api/orgs/{id}/members
-POST   /api/orgs/{id}/invites             {email, role} → email Resend
+POST   /api/orgs/{id}/invites             {email, role} → email Brevo
 DELETE /api/orgs/{id}/members/{user_id}
 PATCH  /api/orgs/{id}                     {name?, analytics_enabled?}
 POST   /api/orgs/{id}/rollout             {template_id} → génère/republie une signature
@@ -585,7 +585,8 @@ SIGLAIR_SECRET_KEY          # 32 octets base64, signature des cookies
 SIGLAIR_IP_SALT
 GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 APPLE_CLIENT_ID, APPLE_TEAM_ID, APPLE_KEY_ID, APPLE_PRIVATE_KEY   # .p8, PEM
-RESEND_API_KEY, RESEND_FROM
+BREVO_API_KEY, BREVO_FROM
+BREVO_LIST_ID                # absent → aucun contact synchronisé, le transactionnel marche
 STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
 STRIPE_PRICE_PRO, STRIPE_PRICE_TEAM                # plusieurs ids séparés par une virgule
 STRIPE_PRICE_PRO_YEARLY, STRIPE_PRICE_TEAM_YEARLY  # facultatif ; absent → Checkout annuel 501

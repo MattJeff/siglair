@@ -24,7 +24,7 @@ pub struct Config {
     pub ip_salt: String,
     pub google: Option<GoogleConfig>,
     pub apple: Option<AppleConfig>,
-    pub resend: Option<ResendConfig>,
+    pub brevo: Option<BrevoConfig>,
     pub stripe: Option<StripeConfig>,
     pub chrome_path: Option<String>,
     pub ffmpeg_path: String,
@@ -46,9 +46,13 @@ pub struct AppleConfig {
 }
 
 #[derive(Debug, Clone)]
-pub struct ResendConfig {
+pub struct BrevoConfig {
     pub api_key: String,
     pub from: String,
+    /// Liste de contacts marketing. Absente : aucun contact n'est synchronisé, le
+    /// transactionnel fonctionne quand même. Les deux sont des produits Brevo distincts,
+    /// et on n'exige pas le second pour avoir le premier.
+    pub list_id: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +122,11 @@ impl Config {
                 },
             ),
             apple: apple_from_env(),
-            resend: both("RESEND_API_KEY", "RESEND_FROM")
-                .map(|(api_key, from)| ResendConfig { api_key, from }),
+            brevo: both("BREVO_API_KEY", "BREVO_FROM").map(|(api_key, from)| BrevoConfig {
+                api_key,
+                from,
+                list_id: env("BREVO_LIST_ID").and_then(|v| v.parse().ok()),
+            }),
             stripe: both("STRIPE_SECRET_KEY", "STRIPE_WEBHOOK_SECRET").map(
                 |(secret_key, webhook_secret)| StripeConfig {
                     secret_key,
@@ -139,7 +146,7 @@ impl Config {
         Features {
             google: self.google.is_some(),
             apple: self.apple.is_some(),
-            magic: self.resend.is_some(),
+            magic: self.brevo.is_some(),
             billing: self.stripe.is_some(),
         }
     }
@@ -155,7 +162,7 @@ fn apple_from_env() -> Option<AppleConfig> {
     })
 }
 
-/// Une variable vide vaut une variable absente : `RESEND_API_KEY=` désactive l'e-mail
+/// Une variable vide vaut une variable absente : `BREVO_API_KEY=` désactive l'e-mail
 /// au lieu de faire échouer chaque appel avec une clé vide.
 fn env(key: &str) -> Option<String> {
     std::env::var(key)

@@ -1,7 +1,7 @@
 //! Authentification — contrat §5.2.
 //!
 //! Trois portes d'entrée (Google OIDC, Apple, magic link) qui convergent toutes vers
-//! `session::find_or_create_user` puis `session::create_session`.
+//! `session::find_or_create_user_referred` puis `session::create_session`.
 
 pub mod apple;
 pub mod google;

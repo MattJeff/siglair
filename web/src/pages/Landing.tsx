@@ -122,8 +122,8 @@ export default function Landing() {
   // Ce couple titre/description existe aussi dans web/scripts/prerender.mjs, qui sert la même
   // page aux robots. Les deux ont déjà divergé par le passé : les modifier ensemble.
   usePageMeta(
-    'Siglair | Signatures email pour organismes de formation',
-    'Programmez une bannière de session : elle apparaît dans les signatures de tous vos formateurs pendant les inscriptions, puis disparaît toute seule.',
+    'Siglair | Signatures email animées et campagnes datées',
+    'Programmez une bannière : elle apparaît dans les signatures de toute votre équipe pendant la campagne, puis disparaît toute seule.',
   );
 
   return (
@@ -141,22 +141,23 @@ export default function Landing() {
         <section className={`${s.wrap} ${s.hero}`}>
           <div className={s.heroCenter}>
             {/*
-              L'accroche nomme le métier visé, pas une catégorie de logiciel. « Un canal
-              marketing à part entière » décrivait une ambition et s'adressait à tout le monde,
-              donc à personne — c'est aussi la catégorie que Sigstr a le plus financée sans
-              jamais la faire tenir seule. L'eyebrow « Créez gratuitement… » a disparu : il
-              répétait le bouton et retardait la phrase qui compte.
+              L'accroche nomme un moment concret (la campagne datée), pas un métier ni une
+              catégorie de logiciel. Elle a visé les organismes de formation pendant un temps :
+              la mécanique décrite était la bonne, la cible était trop étroite pour une page
+              d'accueil — les pages métier de /seo la portent déjà. On garde donc la phrase
+              concrète et on retire le segment. Ce qu'il ne faut pas y remettre : « un canal
+              marketing à part entière », qui décrit une ambition et ne montre rien.
+              L'eyebrow « Créez gratuitement… » reste supprimé : il répétait le bouton.
             */}
             <h1>
-              Votre prochaine session de formation,
+              Votre prochaine campagne,
               <br />
               <span className={s.gradientText}>dans la signature de toute l’équipe.</span>
             </h1>
             <p className={s.heroCopy}>
-              <strong>Pour les organismes de formation :</strong> vous programmez la date
-              d’ouverture et de fermeture, la bannière apparaît dans les emails de tous vos
-              formateurs pendant la période d’inscription, puis disparaît toute seule. Personne
-              ne recolle sa signature, personne n’oublie de la retirer.
+              Vous programmez sa date d’ouverture et de fermeture, la bannière apparaît dans les
+              emails de toute l’équipe pendant la période, puis disparaît toute seule. Personne ne
+              recolle sa signature, personne n’oublie de la retirer.
             </p>
             <BrandHero />
             <ul className={`${s.micro} ${s.microList} ${s.microCenter}`}>

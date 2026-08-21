@@ -353,8 +353,10 @@ function Privacy() {
           <strong>Stripe</strong> — paiement et facturation.
         </li>
         <li>
-          <strong>Resend</strong> — envoi des emails transactionnels (lien de connexion,
-          invitations).
+          <strong>Brevo</strong> (France, serveurs dans l’Union européenne) — envoi des emails
+          transactionnels (lien de connexion, invitations) et, lorsque nous vous adressons des
+          communications sur le produit, gestion de la liste de contacts correspondante. Vous
+          pouvez vous en désinscrire depuis le lien présent dans chacun de ces emails.
         </li>
         <li>
           <strong>Google</strong> et <strong>Apple</strong> — connexion par compte tiers,

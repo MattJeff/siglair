@@ -60,7 +60,8 @@ masque le bouton correspondant. On branche les clés une par une, quand on en a 
 | `SIGLAIR_SECRET_KEY` | **obligatoire** — signature des cookies | `openssl rand -base64 32` |
 | `GOOGLE_CLIENT_ID` / `_SECRET` | « Continuer avec Google » | <https://console.cloud.google.com/apis/credentials> |
 | `APPLE_*` | « Continuer avec Apple » (exige HTTPS, donc pas en local) | <https://developer.apple.com/account/resources/identifiers/list/serviceId> |
-| `RESEND_API_KEY` / `RESEND_FROM` | lien magique, invitations | <https://resend.com/api-keys> |
+| `BREVO_API_KEY` / `BREVO_FROM` | lien magique, invitations | <https://app.brevo.com/settings/keys/api> |
+| `BREVO_LIST_ID` | inscrits poussés dans une liste marketing Brevo | <https://app.brevo.com/contact/list-listing> |
 | `STRIPE_*` | abonnements Pro et Team | <https://dashboard.stripe.com/apikeys> |
 | `AI_MODEL` / `AI_API_KEY` (+ `AI_BASE_URL`) | affine « colle ton site » (repli déterministe sans clé) | <https://console.x.ai> |
 

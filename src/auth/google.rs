@@ -159,7 +159,7 @@ async fn exchange(st: &AppState, headers: &HeaderMap, q: CallbackQuery) -> Resul
     })?;
 
     session::find_or_create_user_referred(
-        &st.db,
+        st,
         &email,
         true,
         claims.name.as_deref(),

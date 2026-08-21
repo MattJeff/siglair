@@ -125,7 +125,7 @@ pub async fn consume(
 
     // Recevoir le lien prouve la possession de la boîte : l'adresse est vérifiée.
     let user_id = session::find_or_create_user_referred(
-        &st.db,
+        &st,
         &email,
         true,
         None,

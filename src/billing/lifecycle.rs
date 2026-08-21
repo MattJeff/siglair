@@ -403,7 +403,7 @@ fn billing_url(state: &AppState) -> String {
 /// E-mail au propriétaire de l'organisation — c'est lui qui paie, et lui seul qui peut
 /// corriger une carte (cf. `billable_org`).
 ///
-/// Ne renvoie pas d'erreur : un Resend indisponible ne doit pas faire répondre 500 au
+/// Ne renvoie pas d'erreur : un Brevo indisponible ne doit pas faire répondre 500 au
 /// webhook Stripe, ce qui ferait rejouer l'événement et re-tenter l'envoi en boucle.
 async fn notify_owner(
     state: &AppState,
@@ -456,8 +456,8 @@ pub async fn dispute_opened(state: &AppState, id: &str, amount_cents: i64, reaso
     );
 
     // ponytail : pas de variable d'environnement de plus pour une adresse d'exploitant.
-    // `RESEND_FROM` est notre propre boîte ; c'est là que ça doit arriver.
-    let Some(to) = state.cfg.resend.as_ref().map(|r| r.from.clone()) else {
+    // `BREVO_FROM` est notre propre boîte ; c'est là que ça doit arriver.
+    let Some(to) = state.cfg.brevo.as_ref().map(|r| r.from.clone()) else {
         return;
     };
     let amount = format!("{:.2} €", amount_cents as f64 / 100.0);

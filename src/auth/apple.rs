@@ -205,7 +205,7 @@ async fn exchange(st: &AppState, headers: &HeaderMap, form: AppleCallback) -> Re
         .filter(|n| !n.is_empty());
 
     session::find_or_create_user_referred(
-        &st.db,
+        st,
         &email,
         verified,
         name.as_deref(),

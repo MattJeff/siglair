@@ -333,7 +333,7 @@ struct InviteReq {
     role: Option<String>,
 }
 
-/// Vérification minimale : Resend tranchera pour de bon. Refuser ici une adresse valide
+/// Vérification minimale : Brevo tranchera pour de bon. Refuser ici une adresse valide
 /// avec une regex trop maligne coûte plus cher qu'un e-mail qui rebondit.
 fn clean_email(raw: &str) -> Result<String> {
     let e = raw.trim().to_lowercase();
@@ -450,7 +450,7 @@ async fn create_invite(
     }
 
     // §11.1 `team_invite` : « la boucle interne d'une organisation tourne-t-elle ». Après
-    // l'envoi réussi seulement — une invitation que Resend a refusée n'est pas partie, et
+    // l'envoi réussi seulement — une invitation que Brevo a refusée n'est pas partie, et
     // la ligne vient d'être supprimée juste au-dessus.
     let (db, salt) = (st.db.clone(), st.cfg.ip_salt.clone());
     let (org_id, inviter_id, role) = (id, access.user_id, role.to_string());

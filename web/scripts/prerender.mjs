@@ -23,13 +23,13 @@ const pages = [
     path: '/',
     // Doit rester identique à `usePageMeta` dans web/src/pages/Landing.tsx : c'est la même page,
     // servie une fois aux robots et une fois aux navigateurs. Les deux ont déjà divergé.
-    title: 'Siglair | Signatures email pour organismes de formation',
+    title: 'Siglair | Signatures email animées et campagnes datées',
     description:
-      'Programmez une bannière de session : elle apparaît dans les signatures de tous vos formateurs pendant les inscriptions, puis disparaît toute seule.',
-    kicker: 'Signatures email pour organismes de formation',
-    heading: 'Votre prochaine session de formation, dans la signature de toute l’équipe.',
+      'Programmez une bannière : elle apparaît dans les signatures de toute votre équipe pendant la campagne, puis disparaît toute seule.',
+    kicker: 'Signatures email animées et campagnes datées',
+    heading: 'Votre prochaine campagne, dans la signature de toute l’équipe.',
     intro:
-      'Pour les organismes de formation : vous programmez la date d’ouverture et de fermeture, la bannière apparaît dans les emails de tous vos formateurs pendant la période d’inscription, puis disparaît toute seule. Personne ne recolle sa signature, personne n’oublie de la retirer.',
+      'Vous programmez sa date d’ouverture et de fermeture, la bannière apparaît dans les emails de toute l’équipe pendant la période, puis disparaît toute seule. Personne ne recolle sa signature, personne n’oublie de la retirer.',
     points: [
       'Créez une signature aux couleurs de votre marque avec un éditeur visuel.',
       'Ajoutez une campagne, une bannière ou un CTA sous vos conversations.',

@@ -140,7 +140,7 @@ dire pour un pipeline de rendu vidéo.
 
 Dans l'ordre où ils rapportent quelque chose :
 
-1. **Resend** — sans lui, personne ne peut se connecter par e-mail. À faire en premier.
+1. **Brevo** — sans lui, personne ne peut se connecter par e-mail. À faire en premier.
 2. **Stripe** — en mode Test d'abord. Le webhook doit pointer sur
    `https://votredomaine.fr/api/stripe/webhook`.
 3. **Google OAuth** — le bouton n'apparaît qu'une fois configuré.
@@ -191,7 +191,7 @@ régénère tout — mais une republication de masse coûte du temps de rendu.
 | « service de rendu indisponible » | `docker compose exec db psql -U siglair -d siglair -c "SELECT error FROM render_jobs WHERE status='failed' ORDER BY created_at DESC LIMIT 3"` |
 | Rendu tué en silence | RAM. `docker stats`, puis vérifier le swap |
 | Certificat absent | `docker compose logs caddy` — presque toujours le DNS, ou le proxy Cloudflare laissé en orange |
-| Connexion impossible | `RESEND_API_KEY` absente, ou `APP_URL` qui ne correspond pas au domaine réel |
+| Connexion impossible | `BREVO_API_KEY` absente, ou `APP_URL` qui ne correspond pas au domaine réel |
 
 ---
 
