@@ -1,0 +1,36 @@
+[package]
+name = "agentos-providers"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agentos-domain.workspace = true
+async-trait.workspace = true
+aes-gcm.workspace = true
+# `llm_cli` declares this process's tools to the `claude` CLI over MCP, which is
+# an HTTP server on loopback. Already a workspace dependency (apps/server), so
+# no new third-party code enters the tree — and hand-rolling HTTP parsing in a
+# production path to save it would be the worse trade.
+axum.workspace = true
+base64.workspace = true
+chrono.workspace = true
+ed25519-dalek.workspace = true
+hmac.workspace = true
+rand.workspace = true
+reqwest.workspace = true
+secrecy.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-tungstenite.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+trybuild.workspace = true

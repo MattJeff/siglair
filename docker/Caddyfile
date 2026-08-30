@@ -1,6 +1,13 @@
-# SITE_ADDRESS=:80 → HTTP local. SITE_ADDRESS=siglair.com → TLS
-# automatique via Let's Encrypt. SITE_WWW_ADDRESS couvre www en HTTPS
-# avant de rediriger vers l'apex.
+# siglair.com sert maintenant l'API d'InternationalAgent (agentos-server).
+# Il n'y a plus de front : la console vit dans orizn-web et appelle cette API
+# par HTTP. Tout ce que Caddy fait ici, c'est terminer le TLS et relayer.
+#
+# SITE_ADDRESS=:80 → HTTP local. SITE_ADDRESS=siglair.com → TLS automatique via
+# Let's Encrypt. SITE_WWW_ADDRESS couvre www avant de rediriger vers l'apex.
+#
+# NOTE : le domaine est derrière Cloudflare. Si Cloudflare est en mode « proxifié »
+# avec un certificat d'origine, c'est Cloudflare qui parle à Caddy et le challenge
+# HTTP-01 de Let's Encrypt peut ne jamais arriver. Voir le rapport de transposition.
 {$SITE_WWW_ADDRESS} {
 	redir {$SITE_CANONICAL_URL}{uri} permanent
 }
@@ -8,21 +15,44 @@
 {$SITE_ADDRESS} {
 	encode zstd gzip
 
-	# Tout ce que l'API sert : l'app, les URL publiques collées dans les mails
-	# (/s, /c, /v) et les fichiers du stockage (/f). Le reste est le SPA.
+	# --- ce qui ne doit JAMAIS être public ---------------------------------
 	#
-	# /v/* est la page de vérification. Oublier de l'ajouter ici ne casse rien en local —
-	# le binaire répond directement — mais en production Caddy la servirait au SPA React,
-	# qui afficherait sa page « introuvable » sur une URL imprimée dans des e-mails déjà
-	# partis. Le genre de panne qui ne se voit qu'après le déploiement.
-	@api path /api/* /s/* /c/* /v/* /f/* /health /ready
-	handle @api {
-		header X-Robots-Tag "noindex, nofollow"
-		reverse_proxy api:8080
+	# SPEC.md §20 : /livez, /readyz et /metrics sont HORS de la pile
+	# d'authentification — aucun credential ne les protège, par construction,
+	# parce qu'une sonde qui a besoin d'une clé est une sonde qui signale une
+	# panne le jour où le trousseau est mal configuré.
+	#
+	# Ce qu'ils publient à qui les lit :
+	#   /metrics → le mélange des raisons de refus et la profondeur de la file
+	#              d'approbation ;
+	#   /readyz  → le retard de l'outbox, et la liste des adaptateurs en mock ;
+	#   /livez   → peu de chose, mais rien qui ait à être joignable de dehors.
+	#
+	# 404 et pas 403 : un 403 confirme que le chemin existe.
+	@prive path /metrics /livez /readyz
+	handle @prive {
+		respond 404
 	}
 
+	# --- tout le reste --------------------------------------------------------
+	#
+	# Y compris les chemins publics par nécessité, qu'il ne faut PAS fermer :
+	#   POST /v1/webhooks/{path}   un fournisseur signe, il n'a pas de clé à nous ;
+	#   GET  /v1/mcp/oauth/callback  c'est un navigateur qui revient ;
+	#   GET  /.well-known/agent-card.json
+	#   GET  /.well-known/http-message-signatures-directory
+	#        un vérificateur qui n'a jamais entendu parler de nous n'a rien pour
+	#        s'authentifier, et une clé que personne ne peut lire ne vérifie rien.
+	#
+	# Le reste de /v1/* et /a2a/jsonrpc est derrière `Authorization: Bearer`.
+	#
+	# PAS de limite de débit ici. Celle du serveur est de 600 requêtes par tenant
+	# et par minute, appliquée APRÈS l'authentification : le trafic anonyme sur
+	# les chemins ci-dessus n'est donc limité par rien dans ce processus. C'est à
+	# Cloudflare de le faire, pas à un plugin Caddy qu'il faudrait compiler.
 	handle {
-		reverse_proxy web:80
+		header X-Robots-Tag "noindex, nofollow"
+		reverse_proxy api:8080
 	}
 
 	header {
@@ -30,20 +60,13 @@
 		X-Content-Type-Options nosniff
 		Referrer-Policy strict-origin-when-cross-origin
 
-		# HSTS : une fois le domaine visité, le navigateur REFUSE le HTTP en clair pendant un
-		# an, sans même émettre la requête. Ça ferme la fenêtre de la toute première requête,
-		# celle qu'un réseau hostile peut détourner avant que la redirection 301 arrive.
-		# Sans `preload` volontairement : l'inscription à la liste des navigateurs est
-		# difficilement réversible et n'a de sens qu'une fois le domaine stabilisé.
+		# HSTS : une fois le domaine visité, le navigateur REFUSE le HTTP en clair
+		# pendant un an. Sans `preload` volontairement — l'inscription à la liste
+		# des navigateurs est difficilement réversible.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
-		# Anti-détournement de clic. `frame-ancestors 'self'` et non `DENY` : l'éditeur affiche
-		# son propre aperçu dans une iframe de même origine, que DENY casserait.
-		# Aucune directive `script-src` ici — une CSP de scripts se mesure avant de s'imposer,
-		# et une CSP cassée sur une SPA se voit par une page blanche, pas par un avertissement.
-		Content-Security-Policy "frame-ancestors 'self'"
-
-		# Rien dans Siglair n'a besoin de la caméra, du micro ou de la position.
+		# Rien ici n'est une page : une API JSON n'a aucune raison d'être encadrée.
+		Content-Security-Policy "frame-ancestors 'none'"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
 	}
 }

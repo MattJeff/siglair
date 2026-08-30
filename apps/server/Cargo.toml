@@ -1,0 +1,41 @@
+[package]
+name = "agentos-server"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+# agentos-providers is deliberately absent: the server may not touch a provider
+# directly, it goes through agentos-app's Effects facade which requires an
+# Authorized<A> token minted by the Policy Gate.
+[dependencies]
+agentos-app.workspace = true
+agentos-domain.workspace = true
+agentos-store.workspace = true
+# Promoted out of `[dev-dependencies]` by `crate::bridge`, which implements
+# `agentos_app::hosted::BridgeRuntime` — a trait declared with `#[async_trait]`,
+# so an implementation has to be too. Same reasoning as `base64` above: already
+# in the workspace, already linked into `agentos-app`, nothing new in the lock
+# file. And still not a crack in the `agentos-providers` rule below: this is the
+# macro that spells `async fn` in a trait, not a provider.
+async-trait.workspace = true
+axum.workspace = true
+# Promoted out of `[dev-dependencies]` by `routes::files`, which carries a
+# document's bytes as base64 inside JSON — see that module for why they travel
+# that way and not as a raw body. Already in the workspace and already linked
+# into three other crates, so this adds nothing to the lock file.
+base64.workspace = true
+chrono.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]

@@ -1,0 +1,81 @@
+[package]
+name = "agentos-app"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+agentos-domain.workspace = true
+agentos-providers.workspace = true
+agentos-store.workspace = true
+a2a-lf.workspace = true
+a2a-server-lf.workspace = true
+async-trait.workspace = true
+# RFC 9421 puts a signature on the wire as base64, and a JWK's `x` member is
+# base64url. Was a dev-dependency; `http_signature` and `peer_keys` need it in
+# the build proper.
+base64.workspace = true
+rmcp.workspace = true
+chrono.workspace = true
+rand.workspace = true
+# One outbound GET: a peer's JWKS. It lives here rather than behind a port in
+# `agentos-providers` because the SSRF check and the connect must be in the same
+# function — split across a crate boundary, the check is one refactor away from
+# being skipped. Same reasoning, same place, as `mcp.rs`, which already dials
+# out from this crate. Already in the lock via `agentos-providers`.
+reqwest.workspace = true
+# `api_keys` hashes every presented bearer token with HMAC-SHA256. Already in
+# the lock; `sha2` beside it is the only other half it needs. Not hand-rolled
+# like `providers::telephony`'s HMAC-SHA1 — that one exists because the
+# workspace pins no SHA-1, and this one has a vetted crate one line away.
+hmac.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+sqlx.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+url.workspace = true
+uuid.workspace = true
+
+[features]
+# `tests/orizn.rs`'s live tests: they start a stdio→HTTP MCP bridge in front of
+# the real `orizn-visa-mcp` server and dial it through `mcp::McpServer::bind`.
+#
+# One of them, `the_keyed_tool_prices_a_visa_…`, also needs **`ORIZN_API_KEY` in
+# the environment**. `check_visa_requirement` is advertised keyless and fails at
+# call time, and the hosted HTTP endpoint ignores the key in every header form —
+# the key works on the stdio package, which is what the bridge wraps and what
+# `supergateway` inherits this process's environment for. So the bridge is not
+# an operator's convenience for that tool; it is the only path to it. The test
+# asserts the variable is *set* and never reads or prints its value.
+#
+# A feature and not a runtime skip, and the difference is `scripts/test.sh`. That
+# script fails the build when a test prints `SKIP:` — because ~34 tests in this
+# workspace skip themselves without a database and a green run of nothing is the
+# one failure mode nobody notices. A test that needs `npx` and the open internet
+# cannot satisfy that guard by being satisfiable, so it opts out of the default
+# build entirely: `#[cfg(feature = "live-orizn")]` means the test is *absent*
+# from a normal run rather than present and quietly passing. Run it with
+# `cargo test -p agentos-app --features live-orizn`.
+live-orizn = []
+
+[dev-dependencies]
+trybuild.workspace = true
+# Tests only, and for one test: `model_access` must prove a customer's API key
+# reaches no log line. The only honest way to ask that is to install a
+# subscriber, render what `tracing` actually emits, and search the bytes — an
+# assertion about the *absence* of a string in a buffer nothing wrote to is an
+# assertion about nothing, so the same test also proves the log happened.
+# Already in the lock via apps/server.
+tracing-subscriber.workspace = true
+# `test-util` only, and only here: `mcp::CALL_TIMEOUT` is sixty seconds, and the
+# test that a quiet server is abandoned rather than waited on has to run those
+# sixty seconds on a virtual clock or not at all. tokio's `full` does not include
+# it, and tokio says not to enable it in a production build — a dev-dependency is
+# how it stays out of one, since dev-dependencies are not compiled for
+# `cargo build`.
+tokio = { workspace = true, features = ["test-util"] }

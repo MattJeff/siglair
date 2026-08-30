@@ -1,0 +1,10 @@
+error[E0451]: fields `message` and `known_good_at` of struct `agentos_app::vertical::Approach` are private
+  --> tests/ui/vertical_approach_without_evidence.rs:16:9
+   |
+15 |     Approach {
+   |     -------- in this type
+16 |         message: Outreach {
+   |         ^^^^^^^ private field
+...
+20 |         known_good_at: chrono::Utc::now(),
+   |         ^^^^^^^^^^^^^ private field

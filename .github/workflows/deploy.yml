@@ -1,9 +1,14 @@
 name: Déploiement
 
 # Le build se fait ICI, pas sur le serveur. Les runners GitHub sont gratuits et
-# rapides ; le CX23 a 2 vCPU et fait tourner Chromium. Compiler Rust en release
-# dessus prend ~15 minutes pendant que la production sert des GIF, et le pic de
-# mémoire peut faire tuer un rendu en cours par l'OOM.
+# rapides ; le VPS a 2 vCPU. Compiler ce workspace Rust en release dessus prend
+# un quart d'heure pendant que la production sert des requêtes, et le pic de
+# mémoire peut faire tuer autre chose par l'OOM.
+#
+# Le code déployé est celui d'InternationalAgent (`agentos-server`). Le dépôt,
+# l'image, le répertoire /opt/siglair et le domaine gardent le nom `siglair` :
+# la clé SSH du déploiement est à commande forcée sur un chemin précis, et
+# renommer obligerait à toucher au serveur.
 on:
   push:
     branches: [main]
@@ -11,77 +16,127 @@ on:
 
 concurrency:
   # Deux déploiements simultanés se marcheraient dessus au moment du `up -d`.
-  # On ne les annule pas : un déploiement à moitié fait est pire qu'un déploiement
-  # qui attend son tour.
+  # On ne les annule pas : un déploiement à moitié fait est pire qu'un
+  # déploiement qui attend son tour.
   group: deploy-production
   cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
-  # En minuscules, forcément : le propriétaire GitHub s'écrit « MattJeff », or un nom
-  # de dépôt Docker n'accepte que des minuscules. `github.repository_owner` tel quel
-  # fait échouer buildx sur « repository name must be lowercase ».
+  # En minuscules, forcément : le propriétaire GitHub s'écrit « MattJeff », or un
+  # nom de dépôt Docker n'accepte que des minuscules. `github.repository_owner`
+  # tel quel fait échouer buildx sur « repository name must be lowercase ».
   IMAGE_REPO: ghcr.io/mattjeff/siglair
 
 jobs:
-  # Les tests tournent avant tout build : inutile de fabriquer 1,5 Go d'image
-  # pour découvrir ensuite qu'un test échoue.
+  # Les tests tournent avant tout build : inutile de fabriquer une image pour
+  # découvrir ensuite qu'un test échoue.
   tests:
     runs-on: ubuntu-latest
+    # `scripts/test.sh` compile le workspace, le teste paquet par paquet contre
+    # un vrai Postgres, puis passe clippy deux fois (avec et sans les features).
+    timeout-minutes: 60
+
+    services:
+      # pgvector, pas postgres:16-alpine : `migrations/0004_knowledge.sql` fait
+      # `create extension vector`. Même image que compose.yml, délibérément.
+      postgres:
+        image: pgvector/pgvector:pg18
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+
+    # scripts/test.sh lit ces variables ; aucune étape ne code un hôte en dur.
+    # DATABASE_URL n'est délibérément PAS posée : test.sh en fabrique une par
+    # paquet, et une variable globale configurerait en silence l'étape `doctor`.
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: postgres
+
     steps:
-      - uses: actions/checkout@v4
-      # Pas @stable : la version vient de rust-toolchain.toml, la même que le
-      # Dockerfile. Sinon une nouvelle version de Rust casse la CI un mardi matin
-      # sans qu'aucune ligne de code n'ait bougé.
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: '1.90.0'
-          components: clippy
+      - uses: actions/checkout@v5
+
+      # Le premier garde-fou de scripts/test.sh est `command -v psql`. L'image du
+      # runner embarque postgresql-client aujourd'hui — propriété d'une image de
+      # base que personne ici ne contrôle. Conditionnel, donc gratuit sur le
+      # chemin normal, et `update` d'abord parce qu'un `install` nu finit en 404
+      # sur des listes apt périmées.
+      - name: psql, pour le premier garde-fou du script de test
+        run: >-
+          command -v psql ||
+          { sudo apt-get update &&
+            sudo apt-get install -y --no-install-recommends postgresql-client; }
+
+      # Pas de `toolchain:` épinglé ici. rust-toolchain.toml est la seule
+      # référence (1.98.0 aujourd'hui, avec rustfmt et clippy) et les proxys
+      # rustup l'installent à la première utilisation. Une version répétée dans
+      # un workflow est une version qui se périme — et ce workflow épinglait
+      # 1.90.0 quand le dépôt en demandait 1.98.0. Ces quatre lignes sont le
+      # reçu : le journal montre ce qui a réellement tourné.
+      - name: chaîne d'outils Rust (épinglée par rust-toolchain.toml)
+        run: |
+          cargo --version
+          rustc --version
+          cargo fmt --version
+          cargo clippy --version
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test --all-targets
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - run: npm ci
-        working-directory: web
-      - run: npx tsc --noEmit
-        working-directory: web
-      - run: npm run build
-        working-directory: web
-      - run: npm test
-        working-directory: web
-      - run: npm run lint
-        working-directory: web
-      - run: npm run test:seo
-        working-directory: web
+      # Une base par paquet, sérialisée à l'intérieur d'un paquet. Voir
+      # scripts/test.sh pour pourquoi un simple `cargo test --workspace` est
+      # instable contre un vrai Postgres, et pourquoi le script refuse de tourner
+      # sans base. Il passe aussi `cargo fmt --check` et clippy `-D warnings`,
+      # donc rien à ajouter ici.
+      - name: suite de tests
+        run: ./scripts/test.sh
 
-  # Les migrations ne sont vérifiées par rien d'autre : `sqlx::migrate!` les applique au
-  # DÉMARRAGE de l'API. Une erreur de syntaxe ne se voyait donc qu'en production, sur un
-  # conteneur qui redémarre en boucle — après que l'image a été construite et déployée.
+      # Le doctor est le premier contrat de l'opérateur : sans configuration il
+      # doit le dire et sortir non-zéro. Un doctor qui réussit en silence est
+      # pire que pas de doctor.
+      #
+      # `env -i` parce que ce job exporte les PG* — les hériter reviendrait à
+      # tester un doctor configuré. PATH est gardé, le doctor appelle curl.
+      - name: le doctor échoue quand rien n'est configuré
+        run: |
+          cargo build -p agentos-server --bin agentos-server
+          if env -i PATH="$PATH" ./target/debug/agentos-server doctor; then
+            echo "::error::le doctor est sorti en 0 sans configuration"
+            exit 1
+          fi
+
+  # Les migrations ne sont vérifiées par rien d'autre : `sqlx::migrate!` les
+  # applique au DÉMARRAGE du serveur, avant que le listener ne se lie. Une erreur
+  # de syntaxe ne se verrait donc qu'en production, sur un conteneur qui redémarre
+  # en boucle — après que l'image a été construite et déployée.
   migrations:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg18
         env:
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: siglair
+          POSTGRES_DB: agentos
         ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      # sqlx identifie une migration par son NUMÉRO, pas par son nom de fichier. Deux
-      # fichiers portant le même numéro, et il en applique un puis refuse de démarrer sur
-      # « migration N was previously applied but has been modified » — l'API redémarre en
-      # boucle et le site tombe en 502. C'est arrivé : 0009_purge_engagement.sql a été
-      # ajouté à côté de 0009_product_analytics_deletion.sql. Un `psql -f` sur chaque
-      # fichier ne le voit pas, les deux SQL étant valides isolément.
+      # sqlx identifie une migration par son NUMÉRO, pas par son nom de fichier.
+      # Deux fichiers portant le même numéro, et il en applique un puis refuse de
+      # démarrer sur « migration N was previously applied but has been
+      # modified » — le serveur redémarre en boucle. C'est arrivé des deux côtés :
+      # ici avec 0009, et dans InternationalAgent avec une collision récente. Un
+      # `psql -f` sur chaque fichier ne le voit pas, les deux SQL étant valides
+      # isolément.
       - name: Aucun numéro de migration en double
         run: |
           doublons=$(ls migrations/*.sql | xargs -n1 basename | cut -d_ -f1 | sort | uniq -d)
@@ -91,27 +146,26 @@ jobs:
             exit 1
           fi
 
+      # Une migration qui ne s'applique qu'à une base portant déjà l'état
+      # précédent est une migration qui casse au premier déploiement réel.
       - name: Appliquer toutes les migrations sur une base neuve
         env:
           PGPASSWORD: postgres
         run: |
           for f in migrations/*.sql; do
             echo "→ $f"
-            psql -h localhost -U postgres -d siglair -v ON_ERROR_STOP=1 -q -f "$f"
+            psql -h localhost -U postgres -d agentos -v ON_ERROR_STOP=1 -q -f "$f"
           done
-      - name: Vérifier la purge par rétention de plan
-        env:
-          PGPASSWORD: postgres
-        run: psql -h localhost -U postgres -d siglair -v ON_ERROR_STOP=1 -f scripts/check-migrations.sql
 
   build:
     needs: [tests, migrations]
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     permissions:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
 
       - uses: docker/login-action@v3
@@ -120,9 +174,19 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # linux/amd64 explicitement : le serveur est en x86. Un runner ARM produirait
-      # une image qui ne démarre pas, et l'erreur n'apparaîtrait qu'au déploiement.
-      - name: Image API + renderer
+      # Une seule image : il n'y a plus de renderer ni de front. La console vit
+      # dans orizn-web et appelle cette API par HTTP.
+      #
+      # linux/amd64 explicitement : le serveur est en x86. Un runner ARM
+      # produirait une image qui ne démarre pas, et l'erreur n'apparaîtrait qu'au
+      # déploiement.
+      #
+      # Deux tags. Le sha est celui sur lequel on revient à la main ; `latest`
+      # existe parce que la clé SSH de déploiement est à commande forcée et ne
+      # peut donc RIEN passer en argument — le serveur tire `latest` et rien
+      # d'autre. Le retour arrière automatique de scripts/deploy.sh ne s'appuie
+      # pas dessus : il note l'IDENTIFIANT de l'image en place avant le pull.
+      - name: Image du serveur
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -135,30 +199,28 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Image web
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./docker/Dockerfile.web
-          platforms: linux/amd64
-          push: true
-          tags: |
-            ${{ env.IMAGE_REPO }}-web:latest
-            ${{ env.IMAGE_REPO }}-web:${{ github.sha }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+      # L'image se construit — mais démarre-t-elle ? Le doctor sur le binaire
+      # debug du job `tests` ne dit rien de l'étape runtime : glibc, uid 10001,
+      # entrypoint. Ici, avec zéro configuration et sans réseau, il doit sortir
+      # non-zéro en nommant les variables manquantes. C'est trente secondes
+      # contre la classe d'erreur qui se manifeste en boucle de crash à 3 h du
+      # matin — et cette image n'avait jamais démarré nulle part.
+      - name: L'image démarre et son doctor refuse proprement
+        run: |
+          docker pull "${IMAGE_REPO}:${{ github.sha }}"
+          ! docker run --rm --network none "${IMAGE_REPO}:${{ github.sha }}" doctor
 
   deploy:
     needs: build
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       # Rien à synchroniser : les migrations sont EMBARQUÉES dans le binaire par
       # sqlx::migrate!, et le code applicatif vient de l'image. compose.yml, le
       # Caddyfile et les scripts changent rarement — quand c'est le cas, on les
-      # pousse à la main (cf. docs/DEPLOY.md § Modifier la configuration).
+      # pousse à la main.
       - name: Clé de déploiement
         run: |
           mkdir -p ~/.ssh
@@ -166,10 +228,10 @@ jobs:
           chmod 600 ~/.ssh/id_ed25519
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      # La clé est à commande forcée : quelle que soit la commande envoyée, le serveur
-      # exécute /opt/siglair/scripts/deploy.sh et rien d'autre. Ce n'est pas de la
-      # coquetterie — le secret GitHub ne donne alors pas un shell root, seulement le
-      # droit de redéployer.
+      # La clé est à commande forcée : quelle que soit la commande envoyée, le
+      # serveur exécute /opt/siglair/scripts/deploy.sh et rien d'autre. Ce n'est
+      # pas de la coquetterie — le secret GitHub ne donne alors pas un shell
+      # root, seulement le droit de redéployer.
       - name: Déployer et valider
         run: |
           ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes \
