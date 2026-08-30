@@ -251,9 +251,14 @@ budget par réplique et non par grappe.
 
 Rien de ce qui suit n'a été exécuté.
 
-1. **Appliquer §0.1 et §0.2**, pousser, laisser la CI construire et publier
-   l'image. Le job `build` la démarre et vérifie que son `doctor` refuse
-   proprement — c'est la seule preuve qu'on ait qu'elle démarre.
+1. **Fusionner la transposition dans `main`** — §0 est appliqué — et laisser la
+   CI construire et publier l'image. Le job `build` la démarre et vérifie que
+   son `doctor` refuse proprement : c'est la seule preuve qu'on ait qu'elle
+   démarre. **Fusionner ne suffit pas** : le workflow ne synchronise aucun
+   fichier, il lance `/opt/siglair/scripts/deploy.sh` par SSH, et ce script,
+   ce `compose.yml` et ce Caddyfile sont encore ceux de l'ancien siglair tant
+   que l'étape 3 n'est pas faite. Un déploiement lancé avant elle recrée
+   l'ancienne pile avec la nouvelle image.
 2. **Rendre le paquet `ghcr.io/mattjeff/siglair` accessible** au serveur. Il
    était déjà tiré par ce VPS sous l'ancien code, donc l'authentification est
    probablement en place ; le premier `pull` le dira.
