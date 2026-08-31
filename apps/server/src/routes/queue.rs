@@ -1,0 +1,1422 @@
+//! `POST /v1/employees/{id}/queue/export`: the file the founder uploads.
+//!
+//! [`agentos_app::queue`] shipped with ten unit tests, a compile-fail case and
+//! no caller. This is the caller, and there is exactly one of it, because the
+//! module's own rule leaves room for exactly one shape:
+//!
+//! > **Commit `record_queued` before writing the file.**
+//!
+//! A cadence cannot honour that. A `Lead` it built would live in one process's
+//! memory, so marking a prospect contacted for it records a person as approached
+//! who was never approached — the one bookkeeping error in this vertical that
+//! costs a real prospect. So the export is a **pull**: [`queue::plan`], `record_queued`
+//! and [`queue::csv`] run in one transaction, and that transaction commits before the
+//! bytes leave the process, in the same request that hands them to the person
+//! who will upload them.
+//!
+//! # `POST`, and it is not a matter of taste
+//!
+//! This marks up to forty strangers as contacted and moves their follow-up
+//! clocks three days out. Running it twice returns two different files; the
+//! second is usually empty, which is the point. That is a write, and a `GET`
+//! that writes is a `GET` some proxy, link-prefetcher, browser or retry policy
+//! will eventually run for you — spending the founder's day of prospects on
+//! nobody. The `Accept`-shaped thing about it, that a file comes back, is not
+//! evidence about the verb.
+//!
+//! It carries no request body on purpose: everything the export needs is
+//! already a stored value. A body would be a second place to write a limit.
+//!
+//! # The lost response, which is the interesting failure
+//!
+//! The rows are marked and the bytes are built in one transaction, so those two
+//! cannot disagree. What can still happen is that the transaction commits and
+//! the **response** never arrives — the client disconnects, the proxy times out.
+//! Then forty people are marked contacted and nobody has the file.
+//!
+//! That is the failure the module chooses, and this follows it rather than
+//! arguing: mark-then-send loses an opener for `FOLLOW_UP_AFTER` (72 hours), send-then-
+//! mark mails a stranger the same cold email twice. A prospect who gets that
+//! reports it, and a sending domain does not recover from that on a schedule.
+//! One is three days of silence for forty prospects; the other is the reputation
+//! of the only domain the company sends on.
+//!
+//! **But it is recoverable, and that is why the response is JSON.** The API
+//! stack already replays a keyed request from a stored record —
+//! `main::replay_idempotent` — and it records **only** JSON responses, because
+//! the column is `jsonb`. A `text/csv` body would be released rather than
+//! recorded, so a retry would re-run the handler and get the *empty* file the
+//! second run correctly produces, and the lost openers would stay lost. Sent as
+//! `{"queued": n, "csv": "…"}` under an `Idempotency-Key`, a retry replays the
+//! exact same bytes. The founder's command is:
+//!
+//! ```text
+//! curl -sX POST -H "Authorization: Bearer $KEY" \
+//!      -H "Idempotency-Key: $(uuidgen)" \
+//!      "$HOST/v1/employees/$ID/queue/export" | jq -r .csv > leads.csv
+//! ```
+//!
+//! Reuse that key to retry. A new key is a new day's export.
+//!
+//! # Every refusal the send path applies
+//!
+//! None of them is re-derived here — a second place to write a limit is one
+//! place to forget to tighten it. [`queue::plan`] applies all four, from values this
+//! handler only fetches:
+//!
+//! * **Suppression** — [`queue::suppression`], through the schema's own
+//!   `SECURITY DEFINER` lookup, which is the only reader that can see a
+//!   *global* suppression. The database says it twice more: an opt-out
+//!   deactivates the contact rows it names *and* clears their
+//!   `next_follow_up_at`, and [`queue::due`] filters on both.
+//! * **`max_new_contacts_per_day` minus today** — the limit through
+//!   [`policy::load`], so it is the intersected platform ∧ tenant ∧ team ∧
+//!   employee number the gate itself enforces, and not the role pack's shipped
+//!   `0` nor an employee layer a team has since tightened. Today's spend
+//!   through [`contacted_since`](agentos_store::revenue::contacted_since) from
+//!   UTC midnight, which is the column `record_queued` writes and the same day
+//!   boundary the turn ledger keys on. **That count is read with no lock**, and
+//!   the selection under it takes `FOR UPDATE OF c SKIP LOCKED` — so two pulls
+//!   at once get disjoint prospects, neither blocks, and both used to take the
+//!   whole day. [`agentos_store::outreach::reserve`] is the row lock that closes
+//!   it, taken in the transaction below, before anybody is marked.
+//! * **`may_propose(EmailSend)` and `Channel::Email`** — the sales role pack's,
+//!   carrying those loaded limits.
+//!
+//! And one the send path has no need of, because it never holds a claim for
+//! longer than a turn: **`MAX_FINDING_AGE` on the opener**. A file is uploaded
+//! by hand a day later; the sentence in it names a date and says *"here is how
+//! to see it again"*. [`queue::due`] applies the bar in SQL, on the same
+//! `checked_at` `vertical::follow_up` measures.
+//!
+//! # The tenant, and the employee
+//!
+//! From [`Principal`], i.e. from the API key, never from the path. The employee
+//! id in the path selects *whose limits* — it is not an authorisation and it
+//! cannot widen anything. Another tenant's employee is invisible to RLS and
+//! answered **404**, not 403, which would confirm the id exists.
+//!
+//! The export itself is tenant-wide rather than per-employee: `contacts` are not
+//! assigned to an employee, `contacted_since` counts the tenant's day, and the
+//! founder has one seller. If a second one is ever hired, the two would share
+//! one budget through this route — the fix is a `WHERE a.employee_id = $n` in
+//! [`queueable`](agentos_store::revenue::queueable), and it is not written
+//! because a column nobody fills makes every export empty.
+//!
+//! # An empty export is a 200
+//!
+//! With the header row, `queued: 0`. Nothing is wrong with a quiet morning: no
+//! finding was fresh, or yesterday spent the budget, or the operator has not
+//! raised it off `0` yet. A 404 would say the resource does not exist and a 4xx
+//! would say the founder made a mistake, and neither is true. The header row is
+//! there because Smartlead's importer needs one to map columns, so an empty file
+//! that still loads is worth more than an empty body.
+//!
+//! # September, and what this route does now
+//!
+//! The second sink is built: [`queue::push`], over the same `&[Lead]` slice this
+//! handler already holds. Which one runs is one `if` in [`export`], on
+//! [`may_upload_leads`](agentos_domain::policy::may_upload_leads) — a
+//! `PolicyLimits` flag that intersects across platform ∧ tenant ∧ role ∧
+//! employee and is `false` in every document this repository ships. **What is
+//! delivered is the export**, and turning it on is an operator writing a policy
+//! layer, not a deploy.
+//!
+//! Two things about the send path differ from the file path and neither is
+//! optional:
+//!
+//! * **[`queue::reconcile_opt_outs`] runs first**, before [`queue::due`] is
+//!   asked anything. An unsubscribe that happened on the platform lives only
+//!   there until somebody asks, and the moment it matters is the moment a queue
+//!   is about to be built.
+//! * **The push happens after the commit**, not inside it. It has to:
+//!   `PolicyGate::authorize` opens its own transaction, and no HTTP call may run
+//!   with one of ours held open. That is the same mark-then-write trade this
+//!   route already made, and `queue::push` restates it.
+//!
+//! What is **not** built is the adapter behind the trait — one campaign id and
+//! one read endpoint the founder has to name. See [`agentos_providers::leads`]
+//! and this crate's `mocks`, where the absence is argued rather than faked.
+
+use std::sync::Arc;
+
+use agentos_app::effects::{Effects, Ports};
+use agentos_app::gate::{PolicyGate, Principal as GatePrincipal};
+use agentos_app::queue;
+use agentos_app::rolepack_sales::RolePack;
+use agentos_domain::ids::EmployeeId;
+use agentos_store::db::{Db, StoreError};
+use agentos_store::outreach::{self, ContactBudgetError};
+use agentos_store::policy;
+use agentos_store::revenue as revenue_store;
+use axum::Json;
+use axum::Router;
+use axum::extract::{Path, State};
+use axum::response::{IntoResponse, Response};
+use axum::routing::post;
+use chrono::{DateTime, Timelike, Utc};
+use serde::Serialize;
+use uuid::Uuid;
+
+use crate::auth::Principal;
+use crate::error::ApiError;
+
+/// How many due prospects are looked at before the budget is applied.
+///
+/// ponytail: a constant, not a query parameter. It bounds the *scan*, not the
+/// export — [`queue::plan`] truncates to `max_new_contacts_per_day` afterwards
+/// — and it only has to stay comfortably above any budget an operator would
+/// set, so that a run of suppressed addresses at the front of the queue cannot
+/// starve a file. The founder's whole list is 1,133 distinct people. Raise it
+/// the day a tenant's daily budget is within an order of magnitude of it.
+const SCANNED: i64 = 500;
+
+/// This unit's routes. Merged into the API router, so it inherits auth, the
+/// rate limit and the idempotency layer from `with_api_stack` — which is where
+/// the 401 for a missing credential comes from, and where the replay in the
+/// module docs happens.
+pub fn router(db: Db, gate: PolicyGate, ports: Arc<Ports>) -> Router {
+    Router::new()
+        .route("/v1/employees/{id}/queue/export", post(export))
+        .with_state(QueueApi { db, gate, ports })
+}
+
+/// What the route needs to reach either sink.
+///
+/// The gate and the ports are here for the **send** path only, and they are
+/// unused on the export path — which is every deployment today. That is not
+/// dead weight: they are what makes the branch in [`export`] one `if` instead of
+/// a second route with its own auth, its own idempotency and its own copy of the
+/// four refusals. A second route is how the two paths would drift.
+#[derive(Clone)]
+struct QueueApi {
+    db: Db,
+    gate: PolicyGate,
+    ports: Arc<Ports>,
+}
+
+/// What came back, and enough to know why it was that size.
+#[derive(Debug, Serialize)]
+struct Export {
+    employee_id: Uuid,
+    /// How many prospects are in the file, and how many were just marked
+    /// contacted. The same number by construction — they are the same slice.
+    queued: u32,
+    /// What was left of `max_new_contacts_per_day` when this ran. `0` with an
+    /// empty file is an operator who has not raised the limit, which is the
+    /// ordinary reason a new deployment exports nothing; it reads very
+    /// differently from a budget that was there and found nobody.
+    ///
+    /// Measured against [`contacted_since`](agentos_store::revenue::contacted_since)
+    /// alone, which is the number the file path spends. In a deployment that has
+    /// also been *sending* today the `outreach_buckets` ledger may be further
+    /// along, so this can over-report headroom the reservation below then
+    /// refuses; `queued` is always the truth about the file.
+    budget: u32,
+    /// How many the tenant had already written to today, before this call.
+    spent_today: u32,
+    /// RFC 4180, CRLF, ten columns. Empty of rows is still a header.
+    ///
+    /// Present on **both** paths. On the send path the platform already has the
+    /// rows, and the bytes are still worth the response: they are what the
+    /// idempotency layer replays, and they are the founder's own record of what
+    /// went out, in the shape he has been reading since June. Building them
+    /// costs a `String`.
+    csv: String,
+    /// How many prospects the sending platform accepted.
+    ///
+    /// `null` on the export path — which is not the same fact as `0`. `null`
+    /// means nobody tried, because this employee's policy says the queue is a
+    /// file; `0` means the queue went to the platform and the platform took
+    /// nobody, which is either an empty queue or something an operator needs to
+    /// look at. Conflating them would make the day the founder switches the
+    /// flag on look identical to the day the API key expires.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    staged: Option<u32>,
+    /// How many the gate or the platform refused, of the `queued` that were
+    /// offered to it. `null` on the export path, same reasoning.
+    ///
+    /// **A non-zero value here is prospects who were marked contacted and were
+    /// not written to** — see `queue::push`, which argues why that direction is
+    /// the survivable one. It is on the response rather than only in the logs
+    /// because it is the number that tells the founder the two contact counters
+    /// have drifted.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    not_staged: Option<u32>,
+    /// How many addresses the sending platform reported as unsubscribed, all of
+    /// which are now suppressed here on every channel. `null` on the export
+    /// path: nothing was asked, because there is no platform in play.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    opted_out: Option<u32>,
+}
+
+/// `POST /v1/employees/{id}/queue/export`.
+///
+/// One transaction, and it is the whole point — see the module docs. Read the
+/// candidates, read the suppression list, read today's spend, [`queue::plan`],
+/// [`queue::record_queued`], [`queue::csv`], commit, answer.
+///
+/// **Where the September sink goes:** beside the `csv(&leads)` line, over the
+/// same `leads`, before this same commit. Nothing above it moves.
+async fn export(
+    State(state): State<QueueApi>,
+    principal: Principal,
+    Path(id): Path<Uuid>,
+) -> Result<Response, ApiError> {
+    let QueueApi { db, gate, ports } = state;
+    let employee_id = EmployeeId::from_uuid(id);
+    let now = Utc::now();
+
+    // The employee's own effects handle, and an **operator** actor rather than
+    // an employee one: this is a human pulling a route with an API key, and the
+    // trail should say so. `Principal::operator` puts the key's own label in
+    // `audit_log.actor`, which is the same string every other route on this
+    // surface attributes to.
+    let acting = GatePrincipal {
+        tenant_id: principal.tenant_id,
+        employee_id,
+        actor: principal.actor.clone(),
+    };
+    let effects = Effects::new(db.clone(), ports, acting.clone());
+
+    let mut tx = db.tenant_tx(principal.tenant_id).await?;
+
+    // Existence first, so an unknown id is a 404 rather than a policy load
+    // failure that reads like a server fault. No `WHERE tenant_id`: RLS adds
+    // it, and a hand-written filter would be a second place to forget it.
+    let exists: Option<i32> = sqlx::query_scalar("SELECT 1 FROM employees WHERE id = $1")
+        .bind(id)
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(StoreError::from)?;
+    if exists.is_none() {
+        tx.rollback().await?;
+        return Err(ApiError::not_found());
+    }
+
+    // The intersected ceiling — platform ∧ tenant ∧ team ∧ employee — and the
+    // same value the gate measures a real send against. Not the employee
+    // layer's own row, which a team may since have tightened.
+    let policy = policy::load(&mut tx, employee_id).await.map_err(|err| {
+        // The detail stays server-side, as everywhere else on this surface.
+        tracing::error!(
+            employee_id = %id,
+            error = %err,
+            "the stored policy could not be loaded, so nothing may be exported"
+        );
+        ApiError::internal()
+    })?;
+    // **Replaced, not intersected**, and `with_limits` is documented as exactly
+    // this: "a provisioner that has intersected tenant and employee layers hands
+    // the result back here". The pack's shipped numbers are the defaults for an
+    // employee nobody has provisioned — `max_new_contacts_per_day: 0`, cold
+    // outreach off — and intersecting them would take the minimum with that `0`
+    // and make every export empty forever, which is the one thing an operator
+    // raising the limit is trying to stop. What is *not* lost by replacing is
+    // any refusal: the loaded value is the narrower one on every allowlist,
+    // including `allowed_channels`, so a tenant that names no email channel
+    // exports nobody. `may_propose(EmailSend)` is the pack's own and is not a
+    // limit at all, so it survives untouched.
+    let pack = RolePack::sales_development().with_limits(policy.limits().clone());
+
+    // **Which sink**, and it is the only thing this flag decides. Read through
+    // the domain's own evaluator so it can only ever be the intersected
+    // platform ∧ tenant ∧ role ∧ employee answer — see
+    // `agentos_domain::policy::may_upload_leads`, which takes an
+    // `EffectivePolicy` precisely so a single layer cannot be passed here.
+    // `false` on every shipped document, so this is the export path until an
+    // operator writes a layer that says otherwise.
+    let sending = agentos_domain::policy::may_upload_leads(&policy);
+
+    // Everything above this line is a read. Committing it here rather than
+    // holding it open is what lets the reconcile below make an HTTP call
+    // without a Postgres transaction pinned behind it — the rule
+    // `agentos_app::effects` states and this route has no licence to break.
+    //
+    // Nothing is lost by splitting: the property this route exists to keep is
+    // that `due`, `record_queued` and `csv` are atomic, and all three are in the
+    // transaction below. An operator who changes the policy in the gap gets the
+    // policy they wrote applied to the next pull instead of this one.
+    tx.commit().await?;
+
+    // **Before anything is selected.** A person who unsubscribed on the
+    // platform yesterday must not be in the file built today, and the only way
+    // to know is to ask. It runs on the send path alone: with no platform in
+    // play there is nobody to ask, and asking the mock would be inventing an
+    // answer. `queue::reconcile_opt_outs` is where the argument lives.
+    //
+    // It fails the whole pull rather than exporting against a stale list, which
+    // is the same choice `queue::suppression` makes one seam down: export
+    // nobody, mark nobody, commit nothing.
+    let opted_out = if sending {
+        Some(
+            u32::try_from(
+                queue::reconcile_opt_outs(&db, &effects, principal.tenant_id, now)
+                    .await
+                    .map_err(refused)?,
+            )
+            .unwrap_or(u32::MAX),
+        )
+    } else {
+        None
+    };
+
+    let mut tx = db.tenant_tx(principal.tenant_id).await?;
+    let ready = queue::due(&mut tx, now, SCANNED).await.map_err(refused)?;
+    let suppression = queue::suppression(&mut tx, &ready).await.map_err(refused)?;
+
+    // Today's spend off the column `record_queued` writes, from UTC midnight —
+    // the day the turn and spend ledgers already key on, so one employee never
+    // has two todays. Passing `0` here would turn a daily limit into a per-run
+    // one, which is the same number meaning something else.
+    let spent_today = u32::try_from(
+        revenue_store::contacted_since(&mut tx, midnight(now))
+            .await
+            .map_err(refused)?,
+    )
+    .unwrap_or(u32::MAX);
+
+    let mut leads = queue::plan(ready, &pack, &suppression, spent_today);
+
+    // **The day's strangers, reserved under a row lock, before anybody is
+    // marked.** `spent_today` above is a `count(*)` read with no lock at all,
+    // and the selection under it takes `FOR UPDATE OF c SKIP LOCKED` — which is
+    // right, and is exactly what defeats the budget: two concurrent pulls get
+    // *disjoint* prospects, so neither ever blocks, both read "nobody contacted
+    // yet", and both take the whole day's allowance. Two files, twice the
+    // ceiling, and the number that was doubled is the one an operator answers
+    // for in front of a supervisory authority.
+    //
+    // `agentos_store::outreach` is the ledger that closes it, and it is the same
+    // shape `turns` and `spend` have had all along. It cannot widen anything:
+    // `plan` has already truncated to `max_new_contacts_per_day - spent_today`,
+    // and this only ever truncates further.
+    //
+    // **Only on the file path.** On the send path `queue::push` authorises every
+    // lead through `PolicyGate`, which charges this same bucket one stranger at
+    // a time — so reserving here as well would charge every prospect twice and
+    // halve the founder's day.
+    if !sending {
+        let granted = match outreach::reserve(
+            &mut tx,
+            employee_id,
+            now.date_naive(),
+            &policy,
+            u32::try_from(leads.len()).unwrap_or(u32::MAX),
+        )
+        .await
+        {
+            Ok(granted) => granted as usize,
+            Err(ContactBudgetError::Store(err)) => {
+                tx.rollback().await?;
+                return Err(ApiError::from(err));
+            }
+            // The day is spent. An empty file is a 200 here for the same reason
+            // it is when `plan` truncates to nothing — see the module docs.
+            Err(_) => 0,
+        };
+        leads.truncate(granted);
+    }
+
+    // Before the bytes, in the same transaction as the bytes. The order is the
+    // module's and the argument is in this one's docs.
+    queue::record_queued(&mut tx, &leads, now)
+        .await
+        .map_err(refused)?;
+    let csv = queue::csv(&leads);
+    let queued = u32::try_from(leads.len()).unwrap_or(u32::MAX);
+
+    tx.commit().await?;
+
+    // **The whole seam, and it is these four lines.** Marked and committed
+    // above, staged below — the same order as mark-then-write, for the same
+    // reason, and `queue::push` argues it. Nothing above this branch knows or
+    // cares which way it goes.
+    let (staged, not_staged) = if sending {
+        let outcomes = queue::push(&gate, &effects, &acting, &leads).await;
+        let sent = outcomes.iter().filter(|o| o.is_sent()).count();
+        for refusal in outcomes.iter().filter(|o| !o.is_sent()) {
+            // Per prospect, at error, with the code and never the address: a
+            // refusal here is somebody marked contacted who was not written to,
+            // which is the one bookkeeping error on this path that costs a real
+            // prospect. The address is already in the audit row the gate wrote.
+            tracing::error!(
+                employee_id = %id,
+                reason = refusal.code(),
+                "a queued prospect was marked contacted and did not reach the sending platform"
+            );
+        }
+        (
+            Some(u32::try_from(sent).unwrap_or(u32::MAX)),
+            Some(u32::try_from(outcomes.len() - sent).unwrap_or(u32::MAX)),
+        )
+    } else {
+        (None, None)
+    };
+
+    tracing::info!(
+        employee_id = %id,
+        queued,
+        spent_today,
+        suppressed = suppression.len(),
+        sending,
+        "an operator pulled the outreach queue"
+    );
+
+    Ok(Json(Export {
+        employee_id: id,
+        queued,
+        budget: pack
+            .limits()
+            .max_new_contacts_per_day
+            .saturating_sub(spent_today),
+        spent_today,
+        csv,
+        staged,
+        not_staged,
+        opted_out,
+    })
+    .into_response())
+}
+
+/// The revenue store's vocabulary, on this one path.
+///
+/// ponytail: a function here and not a `From` impl in `error.rs`. This is the
+/// only route that touches `RevenueError` — a blanket conversion would be a
+/// decision made once for every future caller by the first one, and the
+/// interesting arm below is interesting *because* of what this path is doing.
+///
+/// Whatever it answers, the transaction is dropped un-committed, so nobody was
+/// marked and no bytes were handed over. That is the property worth keeping:
+/// this route has no half-way.
+fn refused(err: revenue_store::RevenueError) -> ApiError {
+    match err {
+        revenue_store::RevenueError::Store(err) => ApiError::from(err),
+        // Somebody replied STOP between the read at the top of this transaction
+        // and the mark at the bottom, and the database refused the write —
+        // `mark_contacted` answers `NotFound` for an inactive contact and the
+        // trigger refuses it underneath. Rolling the whole export back is the
+        // right answer rather than exporting the rest: the rest were already
+        // marked in this same transaction, and committing that without the
+        // bytes is the error this route exists to avoid. Run it again and they
+        // are simply gone from the queue.
+        revenue_store::RevenueError::Suppressed(_) => ApiError::conflict(
+            "suppressed_during_export",
+            "a prospect opted out while the export was being built; run it again",
+        ),
+        other => {
+            tracing::error!(error = %other, "the outreach queue could not be built");
+            ApiError::internal()
+        }
+    }
+}
+
+/// The start of `now`'s UTC day.
+///
+/// UTC and not a tenant-local midnight, for the reason
+/// [`agentos_store::turns`] gives: the ledgers already key on it, and an
+/// employee with two todays has two budgets.
+fn midnight(now: DateTime<Utc>) -> DateTime<Utc> {
+    now.with_hour(0)
+        .and_then(|t| t.with_minute(0))
+        .and_then(|t| t.with_second(0))
+        .and_then(|t| t.with_nanosecond(0))
+        // Unreachable: every one of those is in range for any `DateTime<Utc>`,
+        // and a UTC day has no DST gap to fall into. The fallback counts the
+        // last 24 hours, which is a wider window and therefore a smaller
+        // export — the safe direction.
+        .unwrap_or(now - chrono::TimeDelta::days(1))
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use agentos_app::mocks::MockLeadSink;
+    use agentos_app::queue::COLUMNS;
+    use agentos_domain::action::Channel;
+    use agentos_domain::ids::TenantId;
+    use agentos_domain::policy::PolicyLimits;
+    use axum::body::{Body, to_bytes};
+    use axum::http::{Request as HttpRequest, StatusCode, header as http_header};
+    use chrono::TimeDelta;
+    use serde_json::Value;
+    use tower::ServiceExt;
+
+    use super::*;
+    use crate::auth::ApiKeys;
+
+    /// Long enough for `ApiKeys::MIN_SECRET_LEN`, and distinct per tenant.
+    const SECRET_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    const SECRET_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+    /// The founder's real file, as `agentos_app::queue`'s own tests use it: the
+    /// header, a plain row, a row whose `company_name` contains a comma, and a
+    /// row that is not ASCII. The assertion that this route hands back *that*
+    /// shape is the only one that matters to the person uploading it.
+    const REAL: &str =
+        include_str!("../../../../crates/app/tests/fixtures/smartlead_getorizn_prospection.csv");
+
+    struct Harness {
+        app: Router,
+        db: Db,
+        a: TenantId,
+        b: TenantId,
+        /// The platform, as this process can see it. Held so the send-path
+        /// tests can assert what actually reached it and seed an unsubscribe;
+        /// through the `Arc<dyn LeadSink>` in `Ports` it is unreadable.
+        leads: Arc<MockLeadSink>,
+    }
+
+    impl Harness {
+        async fn new() -> Option<Self> {
+            let db = Db::connect(&url()?).await.expect("connect");
+            db.migrate().await.expect("migrate");
+
+            let a = new_tenant(&db).await;
+            let b = new_tenant(&db).await;
+            let keys = ApiKeys::parse(&format!(
+                "ops-a:{}:{SECRET_A},ops-b:{}:{SECRET_B}",
+                a.as_uuid(),
+                b.as_uuid()
+            ))
+            .expect("keyring");
+
+            let leads = Arc::new(MockLeadSink::new());
+            let ports = Arc::new(Ports {
+                leads: leads.clone(),
+                ..agentos_app::mocks::ports()
+            });
+
+            Some(Self {
+                app: crate::with_api_stack(
+                    router(db.clone(), PolicyGate::new(db.clone()), ports),
+                    db.clone(),
+                    crate::auth::Keyring::new(keys, db.clone(), crate::auth::TEST_MASTER_KEY),
+                ),
+                db,
+                a,
+                b,
+                leads,
+            })
+        }
+
+        async fn export(&self, employee: Uuid, secret: &str) -> (StatusCode, Value) {
+            let req = HttpRequest::builder()
+                .method("POST")
+                .uri(format!("/v1/employees/{employee}/queue/export"))
+                .header(http_header::AUTHORIZATION, format!("Bearer {secret}"))
+                .body(Body::empty())
+                .expect("request");
+
+            let response = self.app.clone().oneshot(req).await.expect("service");
+            let status = response.status();
+            let bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
+                .await
+                .expect("body");
+            (
+                status,
+                serde_json::from_slice(&bytes).unwrap_or(Value::Null),
+            )
+        }
+
+        async fn teardown(self) {
+            for tenant in [self.a, self.b] {
+                let mut tx = self.db.admin_tx_bypassing_rls().await.expect("admin tx");
+                sqlx::query("DELETE FROM tenants WHERE id = $1")
+                    .bind(tenant.as_uuid())
+                    .execute(&mut *tx)
+                    .await
+                    .expect("delete tenant");
+                tx.commit().await.expect("commit");
+            }
+        }
+    }
+
+    /// `DATABASE_URL`, or the loud skip `scripts/test.sh` fails the build on.
+    fn url() -> Option<String> {
+        std::env::var("DATABASE_URL").ok().or_else(|| {
+            eprintln!("SKIP: DATABASE_URL is unset; the queue route needs a real Postgres");
+            None
+        })
+    }
+
+    async fn new_tenant(db: &Db) -> TenantId {
+        let tenant = TenantId::new_v7(Utc::now());
+        let mut tx = db.admin_tx_bypassing_rls().await.expect("admin tx");
+        sqlx::query("INSERT INTO tenants (id, slug, name) VALUES ($1, $2, 'queue-test')")
+            .bind(tenant.as_uuid())
+            .bind(tenant.as_uuid().to_string())
+            .execute(&mut *tx)
+            .await
+            .expect("insert tenant");
+        tx.commit().await.expect("commit");
+        tenant
+    }
+
+    async fn employee(db: &Db, tenant: TenantId, slug: &str) -> Uuid {
+        let id = Uuid::now_v7();
+        let mut tx = db.tenant_tx(tenant).await.expect("tenant tx");
+        sqlx::query(
+            "INSERT INTO employees (id, tenant_id, slug, display_name, lifecycle) \
+             VALUES ($1, $2, $3, $3, 'active')",
+        )
+        .bind(id)
+        .bind(tenant.as_uuid())
+        .bind(slug)
+        .execute(&mut **tx)
+        .await
+        .expect("insert employee");
+        tx.commit().await.expect("commit");
+        id
+    }
+
+    /// What an operator writes to turn cold outreach on: a channel the seller
+    /// may use, and a number of strangers a day.
+    ///
+    /// The tenant layer rather than the platform one, for the reason
+    /// `routes::turns`'s tests give: the intersection takes the minimum, so a
+    /// test writes its own tenant's row and needs no global lock. `Email` is
+    /// spelled here because `PolicyLimits::default()` grants **no** channel and
+    /// the intersection would then permit none — which is the fail-closed
+    /// direction and is also what an unconfigured tenant really gets.
+    async fn contact_budget(db: &Db, tenant: TenantId, per_day: u32) {
+        limits(db, tenant, per_day, false).await;
+    }
+
+    /// The same, plus the switch that turns the queue from a file into a send.
+    ///
+    /// This is the whole operator act, and the tests below are the only place in
+    /// the workspace where it is `true`: nothing shipped — not
+    /// `docs/orizn-ceiling.json`, not `docs/orizn-roles/*.json`, not
+    /// `RolePack::sales_development()`, not `store::policy::default_ceiling()` —
+    /// grants it.
+    async fn sending_budget(db: &Db, tenant: TenantId, per_day: u32) {
+        limits(db, tenant, per_day, true).await;
+    }
+
+    async fn limits(db: &Db, tenant: TenantId, per_day: u32, lead_upload: bool) {
+        policy::install(
+            db,
+            tenant,
+            policy::Scope::Tenant,
+            &PolicyLimits {
+                max_new_contacts_per_day: per_day,
+                allowed_channels: [Channel::Email].into_iter().collect(),
+                allow_lead_upload: lead_upload,
+                ..PolicyLimits::default()
+            },
+        )
+        .await
+        .expect("install the contact budget");
+    }
+
+    /// One row of the founder's file, become the rows the export reads back:
+    /// an account, a contact due now, and an `evidence` row carrying the opener
+    /// its finding came to.
+    ///
+    /// The opener goes in through `insert_evidence`, which is the only writer of
+    /// that column in the workspace — the same call `vertical::file_finding`
+    /// makes with a real `Evidence` in hand.
+    async fn seed_row(
+        db: &Db,
+        tenant: TenantId,
+        row: &str,
+        subject: &str,
+        body: &str,
+        checked_at: DateTime<Utc>,
+    ) -> (Uuid, String) {
+        let values = split_row(row);
+        assert_eq!(values.len(), 8, "the founder's file has eight columns");
+        let account = Uuid::now_v7();
+        let contact = Uuid::now_v7();
+        let now = Utc::now();
+        // What the importer writes: the two name columns joined and trimmed,
+        // which for every row of the founder's lists is the empty string.
+        let full_name = format!("{} {}", values[1].trim(), values[2].trim())
+            .trim()
+            .to_owned();
+
+        let mut tx = db.tenant_tx(tenant).await.expect("tenant tx");
+        revenue_store::insert_account(
+            &mut tx,
+            account,
+            &revenue_store::NewAccount {
+                legal_name: &values[3],
+                // Unique per seeded row, and not the website's host: two rows of
+                // one fixture must not collide on `accounts_domain_key`.
+                domain: &format!("{}.example", account.simple()),
+                segment: "insurer",
+                country: "ZZ",
+                employee_id: None,
+                location: Some(&values[7]),
+                website: Some(&values[5]),
+            },
+        )
+        .await
+        .expect("account");
+        revenue_store::insert_contact(
+            &mut tx,
+            contact,
+            &revenue_store::NewContact {
+                account_id: account,
+                full_name: &full_name,
+                email: Some(&values[0]),
+                phone: None,
+                role: None,
+                language: None,
+                is_primary: false,
+                lawful_basis: "legitimate_interest",
+                next_follow_up_at: Some(now),
+            },
+        )
+        .await
+        .expect("contact");
+        revenue_store::insert_evidence(
+            &mut tx,
+            Uuid::now_v7(),
+            &revenue_store::NewEvidence {
+                account_id: account,
+                employee_id: None,
+                kind: "missing_visa_info",
+                passport_country: "FR",
+                destination_country: "VN",
+                travel_date: None,
+                source_url: "https://example.com/booking",
+                reproduction: "1. open the page\n2. enter FR → VN",
+                artifact_ref: None,
+                observed_claim: "(their panel displayed nothing for this pair)",
+                correct_claim: "not established, and not needed",
+                authority_url: None,
+                checked_at,
+                opener_subject: Some(subject),
+                opener_body: Some(body),
+            },
+        )
+        .await
+        .expect("evidence");
+        tx.commit().await.expect("commit");
+
+        (contact, values[0].clone())
+    }
+
+    /// Split one RFC 4180 line — the fixture needs it, because
+    /// `"Faye (Zenner, Inc.)"` is a quoted field with a comma in it.
+    fn split_row(line: &str) -> Vec<String> {
+        let mut fields = vec![String::new()];
+        let mut quoted = false;
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            match c {
+                '"' if quoted && chars.peek() == Some(&'"') => {
+                    chars.next();
+                    fields.last_mut().expect("field").push('"');
+                }
+                '"' => quoted = !quoted,
+                ',' if !quoted => fields.push(String::new()),
+                _ => fields.last_mut().expect("field").push(c),
+            }
+        }
+        fields
+    }
+
+    fn csv_of(body: &Value) -> String {
+        body["csv"].as_str().expect("a csv string").to_owned()
+    }
+
+    /// What an export with no rows in it is, and what every export starts with.
+    fn header() -> String {
+        format!("{}\r\n", COLUMNS.join(","))
+    }
+
+    // -----------------------------------------------------------------------
+
+    /// The one that matters to the person uploading the file: his own rows go
+    /// in, his own bytes come out, with the two custom variables appended.
+    #[tokio::test]
+    async fn the_export_is_the_founders_own_column_shape() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+
+        let rows: Vec<&str> = REAL.lines().skip(1).collect();
+        assert_eq!(rows.len(), 3, "the fixture holds three real rows");
+        for row in &rows {
+            seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+        }
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 3);
+
+        let csv = csv_of(&body);
+        assert!(
+            csv.starts_with(&header()),
+            "the header is the founder's own eight columns plus the two \
+             Smartlead custom variables: {csv}"
+        );
+        assert_eq!(
+            csv.matches("\r\n").count(),
+            4,
+            "CRLF, and one terminator per row plus the header: {csv:?}"
+        );
+        for row in rows {
+            assert!(
+                csv.contains(&format!("{row},s,b\r\n")),
+                "a row of the founder's file must come back out of the export \
+                 unchanged, with the opener appended and nothing else touched. \
+                 wanted {row:?} in:\n{csv}"
+            );
+        }
+
+        h.teardown().await;
+    }
+
+    /// An empty queue is a fact about a quiet morning, not a mistake the caller
+    /// made. It still loads into Smartlead, because it still has a header.
+    #[tokio::test]
+    async fn an_empty_queue_is_a_200_with_a_header() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 0);
+        assert_eq!(csv_of(&body), header());
+
+        h.teardown().await;
+    }
+
+    /// The founder will run it twice. `record_queued` committed in the first
+    /// call is what stops the second one exporting the same person again — and
+    /// it is the `contacts` table doing it, not a file this route remembers.
+    #[tokio::test]
+    async fn running_it_twice_does_not_export_the_same_prospect_twice() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        let (_, address) = seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        let (_, first) = h.export(id, SECRET_A).await;
+        assert_eq!(first["queued"], 1);
+        assert!(csv_of(&first).contains(&address));
+
+        let (status, second) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{second}");
+        assert_eq!(
+            second["queued"], 0,
+            "the prospect was queued once and must not come back until \
+             FOLLOW_UP_AFTER has passed"
+        );
+        assert_eq!(csv_of(&second), header());
+        // And the first run is visible as spend, so a second run cannot be
+        // handed the whole day's budget again.
+        assert_eq!(second["spent_today"], 1);
+        // It is visible in the *reserved* ledger too, which is the half a
+        // concurrent pull can see. Delete the reservation from `export` and this
+        // is the line that goes red.
+        assert_eq!(taken_today(&h).await, 1);
+
+        h.teardown().await;
+    }
+
+    /// **The budget is a reserved row now, not a count somebody read.**
+    ///
+    /// The pull's own counter — [`contacted_since`](revenue_store::contacted_since),
+    /// over `contacts.last_contacted_at` — is read with no lock, and the
+    /// selection under it takes `FOR UPDATE OF c SKIP LOCKED`, so two pulls at
+    /// once get *disjoint* prospects and neither ever blocks. Both read "nobody
+    /// written to today", both take the whole day, and the ceiling an operator
+    /// answers to a supervisory authority for is doubled.
+    ///
+    /// Arranged rather than raced, for the reason
+    /// `gate::a_policy_change_cannot_land_between_the_ruling_and_the_reservation`
+    /// gives: a slot taken out of `outreach_buckets` behind this route's back is
+    /// precisely what a concurrent pull leaves there, and it leaves `contacts`
+    /// untouched — so `contacted_since` still reports zero, `budget` still
+    /// reports the whole day, and the only thing left that can empty the file is
+    /// the reservation.
+    #[tokio::test]
+    async fn a_pull_spends_a_reserved_ledger_and_not_a_count_it_read() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 2).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        for row in REAL.lines().skip(1).take(2) {
+            seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+        }
+
+        // A concurrent pull got there first and took both of today's strangers.
+        let employee_id = EmployeeId::from_uuid(id);
+        let mut tx = h.db.tenant_tx(h.a).await.expect("tenant tx");
+        let policy = policy::load(&mut tx, employee_id).await.expect("policy");
+        assert_eq!(
+            outreach::reserve(&mut tx, employee_id, Utc::now().date_naive(), &policy, 2)
+                .await
+                .expect("the whole day"),
+            2
+        );
+        tx.commit().await.expect("commit");
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body["spent_today"], 0,
+            "nobody has been written to, which is the whole trap"
+        );
+        assert_eq!(
+            body["budget"], 2,
+            "and the unlocked count still says the day is untouched"
+        );
+        assert_eq!(
+            body["queued"], 0,
+            "the reserved ledger is what actually decides"
+        );
+        assert_eq!(csv_of(&body), header());
+
+        h.teardown().await;
+    }
+
+    /// What `outreach_buckets` says tenant A's seller has been cleared to reach
+    /// today. One employee per test, so the tenant is enough to find it.
+    async fn taken_today(h: &Harness) -> u32 {
+        let mut tx = h.db.tenant_tx(h.a).await.expect("tenant tx");
+        let taken: Option<i32> =
+            sqlx::query_scalar("SELECT contacts_taken FROM outreach_buckets WHERE day = $1")
+                .bind(Utc::now().date_naive())
+                .fetch_optional(&mut **tx)
+                .await
+                .expect("read the bucket");
+        tx.rollback().await.expect("rollback");
+        u32::try_from(taken.unwrap_or(0)).unwrap_or(0)
+    }
+
+    /// A file the founder uploads *is* a send, with the safety checks a day
+    /// later and a system boundary away. Both refusals bite here.
+    #[tokio::test]
+    async fn a_suppressed_address_and_an_over_budget_day_both_bite() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        let id = employee(&h.db, h.a, "seller").await;
+        let rows: Vec<&str> = REAL.lines().skip(1).collect();
+
+        let mut seeded = Vec::new();
+        for row in &rows {
+            seeded.push(seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await);
+        }
+        let (stopped_contact, stopped) = seeded[0].clone();
+
+        // One of the three replied STOP.
+        let mut tx = h.db.tenant_tx(h.a).await.expect("tenant tx");
+        revenue_store::suppress(
+            &mut tx,
+            Uuid::now_v7(),
+            &revenue_store::NewSuppression {
+                scope: revenue_store::Scope::Tenant,
+                channel: revenue_store::Channel::Email,
+                address: &stopped,
+                reason: "opt_out",
+                contact_id: Some(stopped_contact),
+                note: Some("replied STOP"),
+                suppressed_at: Utc::now(),
+            },
+        )
+        .await
+        .expect("suppress");
+        tx.commit().await.expect("commit");
+
+        // Cold outreach off, which is what `sales_development()` ships and what
+        // an operator's layer says until they change it. Three prospects are
+        // due and the file is still empty.
+        contact_budget(&h.db, h.a, 0).await;
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 0, "an unraised budget is an empty file");
+        assert_eq!(body["budget"], 0);
+
+        // Raised to one: the budget truncates the queue to one row, and the
+        // suppressed address is not it.
+        //
+        // **Which lock that is** — the database's, and it is worth saying,
+        // because deleting `plan`'s own suppression filter leaves this test
+        // green. Recording the opt-out above set `active = false` and
+        // `next_follow_up_at = NULL` on that contact in the same statement, and
+        // `queueable` filters on both, so the address never reaches `plan` at
+        // all and cannot spend a slot a contactable one wanted. `plan`'s filter
+        // and `queue::suppression` are the third lock, and no data on this path
+        // can get past the first two to exercise them —
+        // `revenue::tests::the_export_lookup_sees_a_suppression_the_table_hides`
+        // is what holds the lookup itself honest, and
+        // `queue::tests::a_suppressed_address_cannot_reach_the_export` is what
+        // holds the filter honest.
+        contact_budget(&h.db, h.a, 1).await;
+        let (_, body) = h.export(id, SECRET_A).await;
+        assert_eq!(body["queued"], 1, "the contact budget caps the queue");
+        let csv = csv_of(&body);
+        assert!(
+            !csv.contains(&stopped),
+            "an opted-out address must not be in the bytes the founder \
+             uploads: {csv}"
+        );
+
+        // The day is now spent, so the two remaining prospects wait for
+        // tomorrow rather than for a second run.
+        let (_, body) = h.export(id, SECRET_A).await;
+        assert_eq!(body["queued"], 0);
+        assert_eq!(body["spent_today"], 1);
+        assert_eq!(body["budget"], 0);
+
+        h.teardown().await;
+    }
+
+    /// A claim of the form "on this date your page did this, here is how to see
+    /// it again" that has gone stale is the one mistake in this job that cannot
+    /// be walked back. The export applies the same bar `follow_up` does.
+    #[tokio::test]
+    async fn a_stale_finding_is_not_exported() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        seed_row(
+            &h.db,
+            h.a,
+            row,
+            "s",
+            "b",
+            Utc::now() - TimeDelta::days(8), // MAX_FINDING_AGE is seven.
+        )
+        .await;
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            body["queued"], 0,
+            "a finding older than MAX_FINDING_AGE has no business being \
+             re-asserted to a prospect a day after this file is uploaded"
+        );
+
+        h.teardown().await;
+    }
+
+    /// B holds a valid credential and A's real employee id, and learns nothing.
+    /// A 403 would confirm the employee exists; the prospects are not even
+    /// reachable, because RLS never shows them.
+    #[tokio::test]
+    async fn another_tenants_key_gets_nothing() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        contact_budget(&h.db, h.b, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        let (_, address) = seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        let (status, body) = h.export(id, SECRET_B).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+
+        // An id nobody owns reads identically.
+        let (status, _) = h.export(Uuid::now_v7(), SECRET_A).await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // And B's own export is empty rather than A's: the employee id is not
+        // the thing that scopes the data, the credential is.
+        let theirs = employee(&h.db, h.b, "seller").await;
+        let (status, body) = h.export(theirs, SECRET_B).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 0);
+        assert!(!csv_of(&body).contains(&address));
+
+        // A's prospect is untouched by all of that and still exportable.
+        let (_, body) = h.export(id, SECRET_A).await;
+        assert_eq!(body["queued"], 1);
+
+        h.teardown().await;
+    }
+
+    /// The lost response, made recoverable. Same key, same bytes — which only
+    /// works because the body is JSON: `main::record` releases a key whose
+    /// response is not, and a re-run would hand back the empty file the second
+    /// run correctly produces.
+    #[tokio::test]
+    async fn a_retry_under_one_key_replays_the_same_file() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        let key = Uuid::now_v7().to_string();
+        let send = |key: String| {
+            let app = h.app.clone();
+            async move {
+                let req = HttpRequest::builder()
+                    .method("POST")
+                    .uri(format!("/v1/employees/{id}/queue/export"))
+                    .header(http_header::AUTHORIZATION, format!("Bearer {SECRET_A}"))
+                    .header("idempotency-key", key)
+                    .body(Body::empty())
+                    .expect("request");
+                let response = app.oneshot(req).await.expect("service");
+                let status = response.status();
+                let bytes = to_bytes(response.into_body(), 4 * 1024 * 1024)
+                    .await
+                    .expect("body");
+                let value: Value = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+                (status, value)
+            }
+        };
+
+        let (status, first) = send(key.clone()).await;
+        assert_eq!(status, StatusCode::OK, "{first}");
+        assert_eq!(first["queued"], 1);
+
+        // The response the founder never received, handed back intact.
+        let (status, replay) = send(key).await;
+        assert_eq!(status, StatusCode::OK, "{replay}");
+        assert_eq!(csv_of(&replay), csv_of(&first));
+
+        h.teardown().await;
+    }
+
+    // -----------------------------------------------------------------------
+    // The send path
+    // -----------------------------------------------------------------------
+
+    /// **The one that has to hold on 1 September and every day before it.**
+    ///
+    /// The shipped policy does not grant `allow_lead_upload`, so a tenant with
+    /// prospects due, a budget raised, and a lead sink wired into `Ports` still
+    /// hands the founder a file and tells the platform nothing. Everything is
+    /// present for the send except the operator's act.
+    #[tokio::test]
+    async fn what_ships_is_the_file_and_the_platform_hears_nothing() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        contact_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        let (_, address) = seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 1, "the prospect is queued");
+        assert!(
+            csv_of(&body).contains(&address),
+            "and is in the bytes the founder uploads"
+        );
+
+        assert_eq!(
+            h.leads.staged_count(),
+            0,
+            "the sending platform must receive nobody until an operator grants \
+             allow_lead_upload; a deployment that mails strangers because the \
+             code was merged is the failure this flag exists to prevent"
+        );
+        // `null`, not `0`: nobody tried. See `Export::staged`.
+        assert!(
+            body["staged"].is_null() && body["not_staged"].is_null(),
+            "the export path must not report a send it did not attempt: {body}"
+        );
+        assert!(
+            body["opted_out"].is_null(),
+            "and must not claim to have asked a platform it never called: {body}"
+        );
+
+        h.teardown().await;
+    }
+
+    /// Switched on, the same queue goes to the platform — and the founder still
+    /// gets the bytes.
+    ///
+    /// The assertion that matters is the last one: **one `allow` audit row per
+    /// prospect, carrying that prospect's address as the counterparty.** That is
+    /// the gate being in the path rather than beside it, and it is what makes a
+    /// staged lead spend `max_new_contacts_per_day` — `PolicyGate::contacts`
+    /// aggregates exactly that key. Without it the send path would be the one
+    /// road to a stranger's inbox with no ruling on it.
+    #[tokio::test]
+    async fn switched_on_the_queue_reaches_the_platform_through_the_gate() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        sending_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+
+        let rows: Vec<&str> = REAL.lines().skip(1).collect();
+        let mut addresses = Vec::new();
+        for row in &rows {
+            addresses.push(seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await.1);
+        }
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["queued"], 3);
+        assert_eq!(
+            body["staged"], 3,
+            "every queued prospect reached it: {body}"
+        );
+        assert_eq!(body["not_staged"], 0);
+
+        let mut staged = h.leads.staged_addresses();
+        staged.sort();
+        let mut wanted = addresses.clone();
+        wanted.sort();
+        assert_eq!(staged, wanted, "and they are the same three people");
+
+        // The bytes still come back: the platform has them, and so does the
+        // founder, in the shape he has been reading since June.
+        let csv = csv_of(&body);
+        assert!(csv.starts_with(&header()));
+        for address in &addresses {
+            assert!(csv.contains(address), "{address} missing from {csv}");
+        }
+
+        // The gate ruled on each one, by name.
+        let mut tx = h.db.tenant_tx(h.a).await.expect("tenant tx");
+        let ruled: Vec<String> = sqlx::query_scalar(
+            "SELECT payload->>'counterparty' FROM audit_log \
+              WHERE decision = 'allow' AND payload->>'counterparty' IS NOT NULL \
+              ORDER BY 1",
+        )
+        .fetch_all(&mut **tx)
+        .await
+        .expect("read audit");
+        tx.commit().await.expect("commit read");
+        assert_eq!(
+            ruled, wanted,
+            "every staged lead must have its own allow ruling under its own \
+             address — that key IS the cold-outreach budget, and one ruling for \
+             a batch would spend one contact for all of them"
+        );
+
+        h.teardown().await;
+    }
+
+    /// A replayed pull must not mail anybody twice.
+    ///
+    /// The lock that does it is the `contacts` table, not anything the platform
+    /// or this route remembers: `record_queued` committed in the first call
+    /// moves the prospect out of `queueable` for `FOLLOW_UP_AFTER`, so the
+    /// second pull has nobody to offer and the platform is never called again.
+    #[tokio::test]
+    async fn a_second_pull_the_same_day_stages_nobody_again() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        sending_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        let (_, first) = h.export(id, SECRET_A).await;
+        assert_eq!(first["staged"], 1);
+        assert_eq!(h.leads.staged_count(), 1);
+
+        let (status, second) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{second}");
+        assert_eq!(
+            second["queued"], 0,
+            "record_queued moved the follow-up clock in the first pull, so the              second has nobody to offer"
+        );
+        assert_eq!(second["staged"], 0);
+        assert_eq!(
+            h.leads.staged_count(),
+            1,
+            "a replayed pull must not put the same stranger on the list twice"
+        );
+
+        h.teardown().await;
+    }
+
+    /// **The return trip, and it is the half that makes the send path lawful.**
+    ///
+    /// Somebody clicks unsubscribe in a campaign mail. That fact lives on the
+    /// platform and nowhere else until this route asks for it — and once asked,
+    /// it must be final here: off this queue, off every channel, and not
+    /// recoverable by re-importing the founder's CSV.
+    #[tokio::test]
+    async fn an_unsubscribe_on_the_platform_is_final_here() {
+        let Some(h) = Harness::new().await else {
+            return;
+        };
+        sending_budget(&h.db, h.a, 10).await;
+        let id = employee(&h.db, h.a, "seller").await;
+        let row = REAL.lines().nth(1).expect("a real row");
+        let (contact, address) = seed_row(&h.db, h.a, row, "s", "b", Utc::now()).await;
+
+        // They asked the platform to stop, and nothing here knows yet.
+        h.leads.seed_opt_out(address.clone());
+
+        let (status, body) = h.export(id, SECRET_A).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["opted_out"], 1, "the platform was asked: {body}");
+        assert_eq!(
+            body["queued"], 0,
+            "and the answer arrived before the queue was built, so they are not \
+             in today's file at all"
+        );
+        assert!(!csv_of(&body).contains(&address));
+        assert_eq!(h.leads.staged_count(), 0);
+
+        // Final, and the schema is what makes it so: the contact is deactivated
+        // on every channel, its follow-up clock is cleared, and the suppression
+        // row cannot be edited or deleted by anybody.
+        let mut tx = h.db.tenant_tx(h.a).await.expect("tenant tx");
+        let (active, next): (bool, Option<DateTime<Utc>>) =
+            sqlx::query_as("SELECT active, next_follow_up_at FROM contacts WHERE id = $1")
+                .bind(contact)
+                .fetch_one(&mut **tx)
+                .await
+                .expect("read contact");
+        assert!(
+            !active,
+            "an unsubscribe deactivates the contact row itself, \
+                          which is the join every channel goes through"
+        );
+        assert!(
+            next.is_none(),
+            "and clears the follow-up clock in the same statement"
+        );
+
+        let reason: Option<String> =
+            sqlx::query_scalar("SELECT revenue_suppression_of($1, null::text)")
+                .bind(&address)
+                .fetch_one(&mut **tx)
+                .await
+                .expect("suppression lookup");
+        assert_eq!(reason.as_deref(), Some("opt_out"));
+
+        // Append-only: the row a person's opt-out is recorded in outlives every
+        // attempt to remove it, superusers included.
+        let deleted = sqlx::query("DELETE FROM suppressions WHERE address = $1")
+            .bind(&address)
+            .execute(&mut **tx)
+            .await;
+        assert!(
+            deleted.is_err(),
+            "a suppression that can be deleted is a person who can be mailed again"
+        );
+        tx.rollback().await.expect("rollback");
+
+        h.teardown().await;
+    }
+}

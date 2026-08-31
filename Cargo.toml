@@ -1,69 +1,77 @@
-[package]
-name = "siglair"
-version = "0.1.0"
-edition = "2021"
-rust-version = "1.85"   # une dépendance transitive (time-macros) exige l'édition 2024
+[workspace]
+resolver = "3"
+members = [
+  "crates/domain",
+  "crates/eval",
+  "crates/store",
+  "crates/providers",
+  "crates/app",
+  "apps/server",
+]
 
-[[bin]]
-name = "api"
-path = "src/bin/api.rs"
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+# sqlx 0.9.0 declares rust-version = 1.94.0; anything lower cannot build the workspace.
+rust-version = "1.94"
 
-[[bin]]
-name = "renderer"
-path = "src/bin/renderer.rs"
+[workspace.dependencies]
+agentos-domain = { path = "crates/domain" }
+agentos-store = { path = "crates/store" }
+agentos-providers = { path = "crates/providers" }
+agentos-app = { path = "crates/app" }
 
-[dependencies]
-axum = { version = "0.8", features = ["macros", "multipart"] }
-tokio = { version = "1", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["fs", "trace", "compression-gzip", "set-header", "cors", "limit"] }
-hyper = "1"
-
-sqlx = { version = "0.8", default-features = false, features = [
-    "runtime-tokio", "tls-rustls", "postgres", "uuid", "chrono", "json", "migrate", "macros",
-] }
-
+anyhow = "1"
+async-trait = "0.1"
+axum = { version = "0.8.9", features = ["macros"] }
+base64 = "0.22"
+chrono = { version = "0.4", features = ["serde"] }
+# Ed25519 signing. Default features only: "zeroize" is one of them, and the
+# "rand_core" feature is deliberately NOT enabled — it wants rand_core 0.6 while
+# the workspace is on rand 0.9, and seeding from `rand::rng()` avoids carrying
+# two copies of rand_core for one 32-byte fill.
+ed25519-dalek = "2"
+hmac = "0.12"
+rand = "0.9"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+aes-gcm = "0.10"
+secrecy = "0.10"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-serde_urlencoded = "0.7"
-
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "multipart"] }
-
-uuid = { version = "1", features = ["v4", "serde"] }
-chrono = { version = "0.4", features = ["serde"] }
-time = "0.3"
-
-# crypto / auth
 sha2 = "0.10"
-hmac = "0.12"
-subtle = "2"
-base64 = "0.22"
-rand = "0.8"
-jsonwebtoken = "9"
-
-# rendu
-chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
-futures = "0.3"
-image = { version = "0.25", default-features = false, features = ["gif", "ico", "jpeg", "png", "webp"] }
-
-# divers
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+# CDP is JSON-RPC over a websocket, and Browserbase launches Chrome for us, so a
+# websocket client is all we need — chromiumoxide would bring a whole browser
+# model we never drive.
+tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect", "rustls-tls-webpki-roots"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "request-id", "limit", "timeout"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-thiserror = "2"
-anyhow = "1"
-dotenvy = "0.15"
+unicode-normalization = "0.1"
 url = "2"
-mime_guess = "2"
-infer = "0.16"
-percent-encoding = "2"
-tokio-util = { version = "0.7", features = ["io"] }
-async-trait = "0.1"
+uuid = { version = "1", features = ["v7", "serde"] }
+zeroize = "1"
 
-[dev-dependencies]
-tokio-test = "0.4"
+sqlx = { version = "0.9", default-features = false, features = [
+  "runtime-tokio", "tls-rustls-ring", "postgres", "uuid", "chrono", "json", "migrate", "macros",
+] }
+pgvector = { version = "0.4", features = ["sqlx"] }
 
-[profile.release]
-opt-level = 2
-lto = "thin"
-codegen-units = 4
-strip = true
+rmcp = { version = "3.1.4", default-features = false, features = [
+  "client", "transport-streamable-http-client", "transport-streamable-http-client-reqwest", "client-side-sse",
+] }
+a2a-lf = "0.3"
+a2a-server-lf = "0.4"
+
+# dev
+proptest = "1"
+trybuild = "1"
+
+[profile.dev]
+# The workspace is test-heavy and the dependency tree is large; without this a
+# `cargo test` cycle spends most of its time in codegen for crates we never step through.
+opt-level = 0
+debug = 1

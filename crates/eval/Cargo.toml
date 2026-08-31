@@ -1,0 +1,46 @@
+[package]
+name = "agentos-eval"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+# Nothing here is a library anyone deploys: it measures the ones that are.
+publish = false
+
+[dependencies]
+agentos-domain.workspace = true
+agentos-app.workspace = true
+agentos-providers.workspace = true
+# For `policy::default_ceiling` alone: the fixtures here are policies an
+# operator actually has, and a restated copy of the shipped ceiling in a crate
+# whose job is measurement would be a number measured against a deployment
+# nobody runs. Already in the graph via agentos-app.
+agentos-store.workspace = true
+chrono.workspace = true
+serde_json.workspace = true
+# One digest of the rendered system prompt, so a prompt edit invalidates the
+# recorded live scores instead of silently outdating them. Already in the lock.
+sha2.workspace = true
+# Only the `--live` path is async; the deterministic suites are plain functions.
+tokio.workspace = true
+
+# --- `--dry-run` only, and optional for exactly that reason -------------------
+# The dry run wires a real `Turn` to a real database, which needs the four
+# crates above plus the pieces below. None of them is reachable from the
+# deterministic suites, so a default build does not compile one of them.
+async-trait = { workspace = true, optional = true }
+tokio-util = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+
+[features]
+# `--dry-run`: Orizn stood up in a real database, working against the real
+# model through the local `claude` CLI.
+#
+# A feature and not a runtime skip, for the reason `crates/app`'s identically
+# named feature gives: `scripts/test.sh` fails the build when anything prints
+# `SKIP:`, because ~34 tests in this workspace skip themselves without a
+# database and a green run of nothing is the failure nobody notices. This needs
+# a database *and* a logged-in `claude` binary *and* about ten minutes, so it
+# opts out of the default build entirely — the code is *absent* rather than
+# present and quietly doing nothing.
+live-orizn = ["dep:async-trait", "dep:tokio-util", "dep:uuid"]

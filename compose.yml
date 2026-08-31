@@ -1,131 +1,139 @@
 name: siglair
 
+# Le nom du projet reste `siglair`, comme le répertoire /opt/siglair, l'image
+# ghcr.io/mattjeff/siglair et le domaine. Renommer obligerait à toucher au
+# serveur — c'est exactement ce qu'on cherche à éviter. Le CODE est celui
+# d'InternationalAgent (agentos-server) ; l'infrastructure est restée en place.
+#
 # `.env` est lu automatiquement par docker compose : c'est lui qui porte les
-# secrets et les clés tierces. Les valeurs ci-dessous ne surchargent que ce qui
-# est spécifique au réseau des conteneurs (hôte `db`, chemins internes).
-# En production, renseigner SIGLAIR_DATABASE_URL fait pointer l'API et le
-# renderer vers une base PostgreSQL externe sans changer DATABASE_URL en local.
+# secrets. La liste complète des variables et leur effet est dans
+# apps/server/src/config.rs, seul endroit du binaire qui lit l'environnement.
+#
+# Un seul fichier compose, volontairement. Il en existait deux (compose.yml
+# hérité de siglair, docker-compose.yml venu d'InternationalAgent) et docker
+# compose n'en lit qu'un : `compose.yml` gagne et l'autre était ignoré en
+# silence — un `docker compose up -d` lancé pour avoir la base de dev aurait
+# démarré la pile de production.
+
+x-logs: &logs
+  driver: json-file
+  # Le serveur écrit du JSON sur stdout à `agentos_server=debug`. Sans plafond,
+  # un conteneur bavard remplit le disque du serveur et emporte la base avec.
+  options: { max-size: "10m", max-file: "5" }
 
 services:
   db:
-    image: postgres:16-alpine
+    # PAS postgres:16-alpine. `migrations/0004_knowledge.sql` fait
+    # `create extension vector` et `Db::migrate()` tourne au DÉMARRAGE, avant
+    # que le listener ne se lie : sans pgvector le serveur ne démarre pas, il
+    # redémarre en boucle. Une extension PostgreSQL est un fichier sur le
+    # serveur, pas un GRANT — c'est une propriété de l'IMAGE, `CREATE EXTENSION`
+    # ne peut pas l'installer. pg18 + pgvector >= 0.8.6 : les images 0.8.0-0.8.2
+    # ont une corruption d'index HNSW au vacuum. Même image que la CI.
+    image: pgvector/pgvector:pg18
     environment:
-      POSTGRES_USER: siglair
-      # Mot de passe défini dans .env. Le défaut ne sert qu'au développement local :
-      # en production, POSTGRES_PASSWORD doit être aléatoire. Attention, il n'est lu
-      # qu'à la CRÉATION du volume — le changer ensuite ne change rien à la base.
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-siglair}
-      POSTGRES_DB: siglair
+      # `postgres`, superutilisateur, et pas un rôle applicatif : les migrations
+      # font `create extension` et `create role app_role` — deux droits de
+      # cluster. `Db::tenant_tx` fait ensuite `SET LOCAL ROLE app_role` et les
+      # tables sont en FORCE ROW LEVEL SECURITY, donc se connecter en
+      # superutilisateur est sûr *et* c'est ce que le code attend.
+      POSTGRES_USER: postgres
+      # Défini dans .env. Le défaut ne sert qu'au développement local : en
+      # production POSTGRES_PASSWORD doit être aléatoire. Attention, il n'est lu
+      # qu'à la CRÉATION du volume — le changer ensuite ne change rien.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+      POSTGRES_DB: agentos
     ports:
-      # 127.0.0.1 par défaut, et ce n'est pas de la prudence excessive : Docker publie
-      # ses ports via des règles DNAT insérées AVANT celles d'ufw. Un « ufw deny 5432 »
-      # ne protège pas un port publié ici. Sur une machine publique, un 0.0.0.0 sur
-      # Postgres, c'est une base ouverte sur Internet — avec le mot de passe du .env.
-      # Surchargez BIND_ADDR uniquement si vous savez pourquoi.
-      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
+      # 127.0.0.1 par défaut, et ce n'est pas de la prudence excessive : Docker
+      # publie ses ports via des règles DNAT insérées AVANT celles d'ufw. Un
+      # « ufw deny 5442 » ne protège pas un port publié ici. Sur une machine
+      # publique, un 0.0.0.0 sur Postgres c'est une base ouverte sur Internet.
+      # 5442 est le défaut de scripts/test.sh.
+      - "${BIND_ADDR:-127.0.0.1}:${POSTGRES_PORT:-5442}:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # `agentos_pgdata` et pas `pgdata`, et les deux moitiés comptent.
+      #
+      #   * Le nom : `pgdata` résoudrait vers le volume `siglair_pgdata` déjà
+      #     présent sur le serveur, qui contient un cluster PostgreSQL 16.
+      #     pg18 refuse de démarrer dessus. Un volume neuf est obligatoire.
+      #   * Le chemin : pg18 veut le montage sur /var/lib/postgresql, PAS
+      #     .../data — l'image refuse de démarrer sur l'ancien chemin
+      #     (docker-library/postgres#1259).
+      - agentos_pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U siglair -d siglair"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentos"]
       interval: 5s
       timeout: 3s
       retries: 20
+    mem_limit: 1g
     restart: unless-stopped
+    logging: *logs
 
   api:
+    # `build:` pour le développement local. En production l'image est construite
+    # par GitHub Actions et seulement tirée : sur 2 vCPU une compilation Rust en
+    # release met un quart d'heure et le pic mémoire peut faire tuer autre chose
+    # par l'OOM.
     build:
       context: .
       dockerfile: Dockerfile
     image: ${IMAGE_REPO:-siglair}:${IMAGE_TAG:-latest}
     env_file: [.env]
     environment:
-      DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://siglair:${POSTGRES_PASSWORD:-siglair}@db:5432/siglair}
-      STORAGE_DIR: /data/storage
-      PORT: "8080"
+      # Écrase ce que .env pourrait dire : dans le réseau des conteneurs l'hôte
+      # de la base est `db`, jamais localhost.
+      DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://postgres:${POSTGRES_PASSWORD:-postgres}@db:5432/agentos}
+      # DEFAULT_BIND de config.rs vaut 8080 ; .env.example dit 8090. On fixe
+      # ici, sinon un .env recopié d'un poste de dev publie sur un port que
+      # Caddy et le healthcheck du déploiement ne regardent pas.
+      APP_BIND: 0.0.0.0:8080
     ports:
-      # En production, seul Caddy est public : il termine le TLS et relaie vers l'API.
-      # Publier l'API en clair à côté offrirait un chemin sans HTTPS vers les sessions.
+      # Loopback uniquement. Seul Caddy est public : il termine le TLS et relaie.
+      # Publier l'API en clair à côté offrirait un chemin sans HTTPS vers les
+      # clés d'API. Ce port existe pour scripts/deploy.sh, qui interroge
+      # http://127.0.0.1:8080/livez depuis l'hôte — l'image runtime ne contient
+      # ni curl ni wget, donc le HEALTHCHECK doit venir de dehors.
       - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
-    volumes:
-      - storage:/data/storage
     depends_on:
       db:
         condition: service_healthy
-    restart: unless-stopped
-
-  renderer:
-    # Même image, commande différente (cf. Dockerfile).
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: ${IMAGE_REPO:-siglair}:${IMAGE_TAG:-latest}
-    command: ["renderer"]
-    env_file: [.env]
-    environment:
-      DATABASE_URL: ${SIGLAIR_DATABASE_URL:-postgres://siglair:${POSTGRES_PASSWORD:-siglair}@db:5432/siglair}
-      STORAGE_DIR: /data/storage
     volumes:
-      # Volume partagé : le renderer écrit les GIF, l'API les sert sur /s/{slug}.gif.
-      - storage:/data/storage
-    depends_on:
-      db:
-        condition: service_healthy
-      # L'API applique les migrations au démarrage ; attendre évite un crash-loop
-      # du worker sur des tables absentes au tout premier `up`.
-      api:
-        condition: service_healthy
-    # Chromium alloue ses buffers de rendu en mémoire partagée. Les 64 Mo par
-    # défaut de Docker le font planter au milieu d'une capture, sans message clair.
-    shm_size: 1gb
-    # Le bac à sable de Chromium a besoin de créer un espace de noms utilisateur.
-    # Le profil seccomp par défaut de Docker bloque cet appel : Chromium meurt au
-    # démarrage sur « Failed to move to new namespace ». Deux issues seulement :
-    #
-    #   a) --no-sandbox              → le moteur de rendu tourne SANS isolation.
-    #                                  Une faille Chromium donne alors accès au
-    #                                  conteneur, donc à DATABASE_URL.
-    #   b) seccomp=unconfined        → on retire le filtre générique de Docker, mais
-    #                                  le bac à sable de Chromium fonctionne — et il
-    #                                  applique lui-même un seccomp-bpf beaucoup plus
-    #                                  strict à ses processus de rendu.
-    #
-    # On rasterise du HTML fourni par l'utilisateur et des images distantes : c'est
-    # exactement la menace que le bac à sable de Chromium est fait pour contenir.
-    # (b) est donc le bon compromis, à condition de compenser — d'où cap_drop.
-    #
-    # Durcissement possible plus tard : un profil seccomp dédié (celui de Docker plus
-    # clone/unshare/setns), qui garderait les deux couches. ~900 lignes de JSON à
-    # maintenir, ça n'en vaut pas la peine avant d'avoir des clients.
-    security_opt:
-      - seccomp=unconfined
-    cap_drop:
-      - ALL
-    mem_limit: 2g
-    cpus: 2.0
-    healthcheck:
-      test: ["CMD-SHELL", "pgrep -x renderer > /dev/null"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
+      # Le HOME du CLI Claude : `~/.claude/` (identifiants OAuth) et
+      # `~/.claude.json`. Sans ce volume, chaque recréation de conteneur
+      # déconnecte tous les employés — et la reconnexion est manuelle (§4 de
+      # docs/DEPLOY_SIGLAIR.md). Le HOME entier plutôt que `~/.claude` seul :
+      # les deux chemins comptent.
+      - claude_home:/home/agentos
+    mem_limit: 512m
     restart: unless-stopped
+    logging: *logs
 
   web:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.web
-      args:
-        VITE_PUBLIC_HOST: ${VITE_PUBLIC_HOST:-}
-    image: ${IMAGE_REPO:-siglair}-web:${IMAGE_TAG:-latest}
-    ports:
-      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-3000}:80"
+    # La console. Son dépôt est internationagent-web et construit sa propre
+    # image ; ce fichier ne fait que la tirer. Deux pipelines, chacun
+    # propriétaire de ce qu'il produit.
+    image: ${WEB_IMAGE:-ghcr.io/mattjeff/internationagent-web}:${WEB_TAG:-latest}
+    env_file: [.env]
+    environment:
+      # **L'API n'est pas jointe par le domaine public.** Elle est jointe par
+      # le réseau des conteneurs, côté serveur, et sa clé bearer ne quitte donc
+      # jamais le processus de la console. Écrit ici plutôt que dans .env, pour
+      # la même raison que DATABASE_URL l'est : un .env recopié d'un poste de
+      # développement pointerait ailleurs.
+      AGENTS_API_URL: http://api:8080
+    # Pas de `ports:`. Seul Caddy l'atteint, et c'est tout ce qu'il faut : une
+    # console publiée en clair à côté du TLS offrirait un chemin sans HTTPS
+    # vers un cookie de session.
     depends_on:
-      - api
+      api:
+        condition: service_started
+    mem_limit: 512m
     restart: unless-stopped
+    logging: *logs
 
   caddy:
-    # Reverse proxy + TLS automatique. En local il n'apporte rien (le front est
-    # servi par `npm run dev` avec son proxy Vite), d'où le profil : on ne le
-    # démarre qu'avec `docker compose --profile proxy up -d`.
+    # Reverse proxy + TLS automatique. En local il n'apporte rien, d'où le
+    # profil : `docker compose --profile proxy up -d`.
     image: caddy:2-alpine
     profiles: ["proxy"]
     ports:
@@ -133,7 +141,7 @@ services:
       - "443:443"
       - "443:443/udp"
     environment:
-      # SITE_ADDRESS=siglair.com déclenche Let's Encrypt. Vide = HTTP local sur :80.
+      # SITE_ADDRESS=siglair.com déclenche Let's Encrypt. Vide = HTTP local :80.
       SITE_ADDRESS: ${SITE_ADDRESS:-:80}
       SITE_WWW_ADDRESS: ${SITE_WWW_ADDRESS:-www.${SITE_ADDRESS:-localhost}}
       SITE_CANONICAL_URL: ${SITE_CANONICAL_URL:-https://${SITE_ADDRESS:-localhost}}
@@ -150,9 +158,10 @@ services:
       timeout: 5s
       retries: 3
     restart: unless-stopped
+    logging: *logs
 
 volumes:
-  pgdata:
-  storage:
+  agentos_pgdata:
+  claude_home:
   caddy_data:
   caddy_config:
