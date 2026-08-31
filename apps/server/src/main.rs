@@ -703,6 +703,11 @@ fn app(
             // mounted the table was empty in every deployment, which the
             // ledger reads as "may not spend" — safe, and unusable.
             .merge(routes::spend::router(db.clone()))
+            // Beside `spend`, which is the same act one table over: an
+            // operator's key lowering a ceiling, audited in the write's own
+            // transaction. The only route that can change a `policy_layers`
+            // row, and it can only ever narrow one.
+            .merge(routes::policy::router(db.clone()))
             .merge(routes::inventory::router(db.clone()))
             // The only caller of `agentos_app::queue`, which had ten unit tests,
             // a compile-fail case and nothing calling it. The export has to be a
@@ -812,6 +817,9 @@ fn app(
         .with_state(Health {
             db: db.clone(),
             mocks: config.mock_adapters.clone().into(),
+            // The port `routes::approvals` refuses on, not a second opinion
+            // about it.
+            payment_rail: ports.payments.configured(),
         })
         .merge(metrics::router(db));
 
@@ -876,6 +884,10 @@ fn handlers(config: &Config, agent: Agent, engine: ProvisioningEngine) -> Handle
         .on(
             routes::employees::lifecycle_event(Lifecycle::Suspended),
             Arc::new(on_suspended),
+        )
+        .on(
+            routes::employees::lifecycle_event(Lifecycle::Active),
+            Arc::new(on_resumed),
         )
         .on(
             routes::employees::lifecycle_event(Lifecycle::Terminated),
@@ -1129,6 +1141,29 @@ fn on_suspended<'a>(event: &'a OutboxEvent, _tx: &'a mut TenantTx<'_>) -> Handle
         tracing::info!(
             employee_id = %event.aggregate_id,
             "employee suspended; resources deliberately kept so a resume is free"
+        );
+        Ok(())
+    })
+}
+
+/// `employee.active`: recorded, and nothing else.
+///
+/// The mirror of [`on_suspended`], and empty for the same reason it is: a
+/// suspension released nothing, so a resume has nothing to re-acquire. What
+/// stopped, stopped because the gate and a handful of `lifecycle = 'active'`
+/// filters read the column; they read it again on the next tick and the seat is
+/// simply back.
+///
+/// Registered rather than omitted because `handlers` fails an event it has no
+/// entry for, retries it eight times and dead-letters it: leaving this line out
+/// would turn every resume into a permanent error about a side effect that was
+/// never wanted. `routes::employees::resume` is the only producer —
+/// `on_step_ready` moves `draft → active` without an outbox event.
+fn on_resumed<'a>(event: &'a OutboxEvent, _tx: &'a mut TenantTx<'_>) -> Handled<'a> {
+    Box::pin(async move {
+        tracing::info!(
+            employee_id = %event.aggregate_id,
+            "employee resumed; nothing to restore because suspension released nothing"
         );
         Ok(())
     })
@@ -2356,6 +2391,17 @@ struct Health {
     db: Db,
     /// Exactly [`Config::mock_adapters`], no second opinion.
     mocks: Arc<[&'static str]>,
+    /// Whether anything is bound behind `Ports::payments`, read off the port
+    /// itself rather than off the environment.
+    ///
+    /// Not a row in `mock_adapters` and deliberately not: those adapters have a
+    /// credential that makes them real and a fake that answers meanwhile, and
+    /// this one has neither — no `PaymentProvider` exists in this workspace to
+    /// configure. Filing it there would say "set the variable"; there is no
+    /// variable. It is its own field so that a replica can be asked, rather
+    /// than an operator inferring it from a `502` — which is the shape of the
+    /// question this struct exists to answer on demand.
+    payment_rail: bool,
 }
 
 /// Readiness: this replica can usefully take traffic *right now*.
@@ -2386,6 +2432,13 @@ struct Health {
 /// be able to come up, so `mock_adapters` is reported and never fails the
 /// probe — an always-present field, empty on a fully real deployment, so an
 /// operator can diff two replicas rather than infer from a silence.
+///
+/// `payment_rail` is reported on the same terms and for the same reason: a
+/// deployment with no `PaymentProvider` is a legitimate deployment — every
+/// build in this workspace is one — that simply refuses `payment_create` at
+/// the approval, with `no_payment_rail`. Failing readiness on it would take
+/// every replica out of the load balancer over a capability most tenants never
+/// use. Reported, never fatal.
 async fn readyz(State(health): State<Health>) -> Response {
     match agentos_store::policy::platform_ceiling_installed(&health.db).await {
         Ok(true) => {}
@@ -2422,6 +2475,9 @@ async fn readyz(State(health): State<Health>) -> Response {
             "ready": true,
             "outbox_lag_secs": lag,
             "mock_adapters": &*health.mocks,
+            // False on every build today. The route that reads the same port
+            // answers `501 no_payment_rail` and leaves the approval pending.
+            "payment_rail": health.payment_rail,
         })),
     )
         .into_response()
@@ -2863,6 +2919,7 @@ mod tests {
                 .with_state(Health {
                     db,
                     mocks: Vec::new().into(),
+                    payment_rail: false,
                 })
                 .oneshot(
                     HttpRequest::get("/readyz")
