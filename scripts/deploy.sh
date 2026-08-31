@@ -85,8 +85,18 @@ attendre_sante() {
 # 502 jusqu'à ce qu'un humain regarde. C'est exactement ce qui s'est produit avec
 # le doublon de numéro de migration 0009.
 migrations_appliquees() {
+    # `|| true`, et ce n'est pas de la négligence : sous `set -euo pipefail`,
+    # une substitution de commande qui échoue tue le script. Or il existe un cas
+    # où cette requête DOIT échouer — le tout premier déploiement de cette
+    # version, où le conteneur `db` en place est encore l'ancien Postgres 16 et
+    # sa base ne s'appelle pas `agentos`. Sans cette garde, le déploiement qui
+    # remplace l'ancienne pile est exactement celui qui ne peut pas partir.
+    #
+    # Une version illisible sort donc VIDE, et le refus de retour arrière plus
+    # haut ne se déclenche que sur deux versions lues et différentes : « je ne
+    # sais pas » n'est pas « la base a bougé ».
     docker compose exec -T db psql -U postgres -d agentos -tAc \
-        'SELECT coalesce(max(version), 0) FROM _sqlx_migrations' 2>/dev/null | tr -d ' \r'
+        'SELECT coalesce(max(version), 0) FROM _sqlx_migrations' 2>/dev/null | tr -d ' \r' || true
 }
 
 retour_arriere() {
