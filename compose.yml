@@ -108,6 +108,29 @@ services:
     restart: unless-stopped
     logging: *logs
 
+  web:
+    # La console. Son dépôt est internationagent-web et construit sa propre
+    # image ; ce fichier ne fait que la tirer. Deux pipelines, chacun
+    # propriétaire de ce qu'il produit.
+    image: ${WEB_IMAGE:-ghcr.io/mattjeff/internationagent-web}:${WEB_TAG:-latest}
+    env_file: [.env]
+    environment:
+      # **L'API n'est pas jointe par le domaine public.** Elle est jointe par
+      # le réseau des conteneurs, côté serveur, et sa clé bearer ne quitte donc
+      # jamais le processus de la console. Écrit ici plutôt que dans .env, pour
+      # la même raison que DATABASE_URL l'est : un .env recopié d'un poste de
+      # développement pointerait ailleurs.
+      AGENTS_API_URL: http://api:8080
+    # Pas de `ports:`. Seul Caddy l'atteint, et c'est tout ce qu'il faut : une
+    # console publiée en clair à côté du TLS offrirait un chemin sans HTTPS
+    # vers un cookie de session.
+    depends_on:
+      api:
+        condition: service_started
+    mem_limit: 512m
+    restart: unless-stopped
+    logging: *logs
+
   caddy:
     # Reverse proxy + TLS automatique. En local il n'apporte rien, d'où le
     # profil : `docker compose --profile proxy up -d`.
@@ -128,6 +151,7 @@ services:
       - caddy_config:/config
     depends_on:
       - api
+      - web
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://127.0.0.1:2019/config/ || exit 1"]
       interval: 15s

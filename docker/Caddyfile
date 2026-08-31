@@ -1,6 +1,16 @@
-# siglair.com sert maintenant l'API d'InternationalAgent (agentos-server).
-# Il n'y a plus de front : la console vit dans orizn-web et appelle cette API
-# par HTTP. Tout ce que Caddy fait ici, c'est terminer le TLS et relayer.
+# siglair.com sert la console d'InternationalAgent, et l'API derrière elle.
+#
+# Deux conteneurs, un domaine. `web` est la console (Next.js, dépôt
+# internationagent-web) et c'est elle que voit un humain ; `api` est
+# agentos-server, et **elle n'est publique que là où elle doit l'être** — les
+# webhooks qu'un fournisseur signe, le retour OAuth qu'un navigateur suit, les
+# annuaires qu'un vérificateur lit sans credential, et la porte A2A.
+#
+# Tout le reste de `/v1/*` n'est joignable que depuis le réseau des conteneurs :
+# la console parle à `http://api:8080` **côté serveur**, sa clé bearer ne quitte
+# jamais son processus, et il n'existe donc aucune raison de publier ces routes.
+# Une API d'entreprise exposée « au cas où » est une surface qu'il faut ensuite
+# défendre.
 #
 # SITE_ADDRESS=:80 → HTTP local. SITE_ADDRESS=siglair.com → TLS automatique via
 # Let's Encrypt. SITE_WWW_ADDRESS couvre www avant de rediriger vers l'apex.
@@ -34,25 +44,36 @@
 		respond 404
 	}
 
-	# --- tout le reste --------------------------------------------------------
+	# --- l'API, sur les seuls chemins qui doivent être publics --------------
 	#
-	# Y compris les chemins publics par nécessité, qu'il ne faut PAS fermer :
-	#   POST /v1/webhooks/{path}   un fournisseur signe, il n'a pas de clé à nous ;
+	# Chacun l'est par nécessité et pour une raison qui lui est propre :
+	#   POST /v1/webhooks/{path}     un fournisseur signe, il n'a pas de clé à nous ;
 	#   GET  /v1/mcp/oauth/callback  c'est un navigateur qui revient ;
 	#   GET  /.well-known/agent-card.json
 	#   GET  /.well-known/http-message-signatures-directory
 	#        un vérificateur qui n'a jamais entendu parler de nous n'a rien pour
-	#        s'authentifier, et une clé que personne ne peut lire ne vérifie rien.
-	#
-	# Le reste de /v1/* et /a2a/jsonrpc est derrière `Authorization: Bearer`.
+	#        s'authentifier, et une clé que personne ne peut lire ne vérifie rien ;
+	#   POST /a2a/jsonrpc            l'agent d'une autre entreprise, qui porte
+	#        une clé de tenant : c'est le serveur qui l'authentifie, pas Caddy.
 	#
 	# PAS de limite de débit ici. Celle du serveur est de 600 requêtes par tenant
 	# et par minute, appliquée APRÈS l'authentification : le trafic anonyme sur
 	# les chemins ci-dessus n'est donc limité par rien dans ce processus. C'est à
 	# Cloudflare de le faire, pas à un plugin Caddy qu'il faudrait compiler.
-	handle {
+	@api path /v1/webhooks/* /v1/mcp/oauth/callback /a2a/* /.well-known/*
+	handle @api {
 		header X-Robots-Tag "noindex, nofollow"
 		reverse_proxy api:8080
+	}
+
+	# --- la console ----------------------------------------------------------
+	#
+	# Tout le reste. Elle garde sa propre garde de session : `/` sans cookie
+	# redirige vers `/connexion`, et son proxy `/api/agents/*` exige la session
+	# AVANT de relayer quoi que ce soit vers `api`. Caddy ne défend rien ici et
+	# ne doit pas faire semblant.
+	handle {
+		reverse_proxy web:3000
 	}
 
 	header {
@@ -65,7 +86,9 @@
 		# des navigateurs est difficilement réversible.
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
-		# Rien ici n'est une page : une API JSON n'a aucune raison d'être encadrée.
+		# Une console d'administration n'a aucune raison d'être encadrée par qui
+		# que ce soit : `frame-ancestors 'none'` est ce qui empêche un clic
+		# détourné d'approuver un paiement dans une iframe invisible.
 		Content-Security-Policy "frame-ancestors 'none'"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), interest-cohort=()"
 	}
