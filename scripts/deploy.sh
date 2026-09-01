@@ -142,7 +142,18 @@ retour_arriere() {
 AVANT_MIGRATIONS=$(migrations_appliquees)
 
 log "Images"
-docker compose pull --quiet api
+# `api` ET `web`.
+#
+# Il n'y avait que `api` ici, et pendant ce temps la console ne bougeait plus :
+# son image est taguée `latest`, et `up -d` ne retélécharge pas un tag qu'il a
+# déjà en local. Le déploiement se déclarait valide, l'API était bien à jour, et
+# siglair.com servait toujours le front d'avant — un succès qui ne se voyait pas
+# sur la page. C'est le genre de panne qui ne fait aucun bruit.
+#
+# Le retour arrière plus bas ne couvre que `api`, et c'est assumé : la console
+# est sans état, elle ne migre rien, et une version qui s'affiche mal se corrige
+# par le déploiement suivant. Une base migrée par une image trop neuve, non.
+docker compose pull --quiet api web
 
 log "Bascule"
 # `--remove-orphans` : au tout premier déploiement de cette version, il supprime
