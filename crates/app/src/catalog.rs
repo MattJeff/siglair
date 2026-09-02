@@ -583,6 +583,147 @@ const GOOGLE_TOKEN: &str = "https://oauth2.googleapis.com/token";
 ///
 /// Each token entry below carries the reason it is a static bearer token, because
 /// that is the question every one of them raises.
+///
+/// # Les trois qu'on a demandés le 2026-09-02, et qui ne sont pas ici
+///
+/// Chacun a été sondé, chacun manque d'un fait précis, et chacun redevient une
+/// ligne de code le jour où ce fait existe. Les écrire ici plutôt que dans un
+/// ticket, c'est ce qui fait qu'on ne les redemandera pas dans six mois.
+///
+/// * **Smartlead** — bloqué par [`OptOuts`], et c'est le cas d'école que le
+///   test `a_sender` décrit. Ce serveur poste au nom du client vers des gens qui
+///   n'ont rien demandé, donc il lui faut une variante d'[`OptOuts`] qui nomme
+///   par où les désabonnements rentrent.
+///
+///   **Première lecture, et elle était fausse.** On avait conclu « une écriture
+///   sans lecture en face » parce que la liste d'outils du serveur MCP expose
+///   `unsubscribe_lead_globally` sans rien qui liste les désabonnés, et parce
+///   que la référence publique ne documente aucun point d'entrée de liste de
+///   blocage. La conclusion ne tenait pas : Smartlead ne se **tire** pas, il
+///   **pousse**.
+///
+///   `api.smartlead.ai/core/webhooks` sert un catalogue d'événements qui
+///   contient `EMAIL_UNSUBSCRIBED` — à côté de `EMAIL_BOUNCED`, `EMAIL_REPLIED`,
+///   `EMAIL_SENT` — enregistrables par `POST /webhooks`. C'est donc
+///   [`OptOuts::Pushed`] et pas [`OptOuts::Pulled`], et la même page montre la
+///   vérification : un HMAC-SHA256 sur le corps brut, comparé en temps constant.
+///
+///   Ce qui manque n'est plus une catégorie, c'est **un nom** : le
+///   `provider` d'un endpoint choisit le schéma de signature dans
+///   `routes::webhooks`, et le nom de l'en-tête que Smartlead envoie n'est
+///   documenté nulle part sur cette page. L'écrire au jugé, ce serait soit des
+///   livraisons authentiques répondues `401`, soit — bien pire — un
+///   vérificateur qui accepte ce qu'il ne devrait pas.
+///
+///   **Le 2026-09-02, tout ce qui pouvait être écrit sans ce nom l'a été.** La
+///   migration existe (`0077`, `webhook_endpoints_provider_is_wired` accepte
+///   `'smartlead'`), le troisième schéma de signature existe
+///   (`routes::webhooks`, HMAC-SHA256 hexadécimal sur le corps brut, comparaison
+///   en temps constant), l'ingestion existe
+///   ([`crate::inbound::record_smartlead_unsubscribe`], qui écrit sa ligne de
+///   `suppressions` par la même fonction que la porte tirée) et son handler est
+///   enregistré. **Il n'y a toujours pas d'entrée dans [`CATALOG`]**, et il n'y
+///   en aura pas tant que le nom manquera : la voie d'enregistrement refuse avec
+///   [`crate::webhooks::EndpointError::SignatureHeaderUnposed`], et la route
+///   refuse toute livraison. Un connecteur qui refuse de s'enregistrer est un
+///   connecteur pas fini ; un en-tête deviné qui accepte ce qu'il ne devrait pas
+///   est pire.
+///
+///   **Et la recherche du même jour conclut que cet en-tête n'existe pas.**
+///   Trois lignes d'évidence indépendantes convergent — l'API d'enregistrement
+///   des webhooks n'a aucun champ où saisir un secret partagé, deux sources
+///   attestent que Smartlead renvoie son propre secret *dans le corps JSON*
+///   (champ `secret_key`), et une intégration en production documente que ses
+///   livraisons authentiques ont toutes été refusées `401` par un vérificateur
+///   d'en-tête deviné. Les URLs et le détail sont au-dessus de
+///   [`crate::inbound::SMARTLEAD_SIGNATURE_HEADER`].
+///
+///   **Ce qui débloque, donc, et ce n'est plus la même liste :** une livraison
+///   réelle vers une URL qu'on contrôle, et la lecture de ses en-têtes. S'il y
+///   en a un, c'est un `Some("…")` à poser dans ce const et tout ce qui est
+///   déjà écrit se met à marcher. S'il n'y en a pas — ce que la recherche
+///   prédit — alors le schéma à câbler est le quatrième et pas le troisième :
+///   chemin de livraison non devinable qui fait office de credential, plus
+///   égalité en temps constant sur le champ `secret_key` du corps, comparé
+///   **après** parse et jamais avant. Ce jour-là il faudra aussi décider où le
+///   `secret_key` est appris, puisque Smartlead le génère et qu'on ne le
+///   choisit pas.
+///
+/// * **Docker** — le serveur officiel (`github.com/docker/hub-mcp`) existe, mais
+///   il n'a **ni endpoint hébergé ni paquet publié** : on clone et on compile.
+///   `mcp.docker.com/.well-known/oauth-authorization-server` rend 404,
+///   `hub-mcp.docker.com` ne résout pas. [`Provision::Host`] veut un
+///   [`Package::spec`] que *ce binaire* nomme et qu'on accepte de faire tourner ;
+///   « clonez et compilez » n'est pas un spec, c'est un chantier.
+///
+///   **Rien ne nous empêche de le publier nous-mêmes** : `docker/hub-mcp` est
+///   sous Apache 2.0 (Docker, Inc., 2025), et le moteur lui-même est sous la
+///   même licence. La licence n'est pas le mur ; le mur est qu'on n'a encore
+///   rien publié. Et il faut distinguer les deux Docker qu'on nous demande :
+///
+///   1. **Docker Hub** — des dépôts d'images, des tags, des vulnérabilités.
+///      C'est ce que sert `hub-mcp`, et c'est une entrée `Host` ordinaire le
+///      jour où un paquet épinglé existe : `env: Some("HUB_PAT_TOKEN")`, rien
+///      de neuf sous le soleil.
+///   2. **Le démon Docker d'un serveur** — « est-ce que ça tourne, pourquoi
+///      c'est tombé, redémarre-le ». C'est ça qu'on veut vraiment dire par
+///      « connecter un serveur », et **c'est là que se pose la seule question
+///      qui compte.**
+///
+///   L'API du moteur est documentée et ouverte ; écrire un serveur MCP qui la
+///   parle est une journée de travail. Le piège est qu'un `POST
+///   /containers/{id}/exec`, ou un `run` sur une image que le client choisit,
+///   **est exactement l'interpréteur que [`Credential`] passe quatre-vingt-dix
+///   lignes à refuser sous le nom de SSH** — `docker run -v /:/host alpine sh`
+///   est root sur la machine, avec un autre chapeau. Un connecteur Docker qui
+///   expose `exec` n'est pas un connecteur, c'est une session.
+///
+///   Donc la décision, et elle est nôtre et pas celle de Docker : **on expose
+///   la moitié qui est une liste, jamais celle qui est un interpréteur.**
+///
+///   | Exposé | Refusé |
+///   |---|---|
+///   | lister les conteneurs, leur état, leurs journaux | `exec` sous toutes ses formes |
+///   | inspecter, lire les statistiques, suivre les événements | `create`/`run` avec une image que le client nomme |
+///   | démarrer, arrêter, redémarrer **un conteneur qui existe déjà, par son id** | tout montage hôte, `--privileged`, `network: host` |
+///   | lister les images présentes | `commit`, `push`, la suppression de volumes |
+///
+///   Cette moitié-là répond à ce qu'une équipe demande dix fois par jour et ne
+///   contient aucun verbe qui invente un programme. `floor` serait `Write` : un
+///   redémarrage se refait, il ne se perd pas.
+///
+///   En attendant qu'un paquet existe, le chemin qui marche **aujourd'hui** est
+///   [`CUSTOM`] — le client fait tourner ce serveur sur sa machine et branche
+///   son adresse, ce qui est exactement l'argument « SSH est un déploiement,
+///   pas un connecteur ».
+///
+///   **Le 2026-09-02, cette moitié-là a été écrite** : `packages/docker-mcp`
+///   sert les neuf outils du tableau ci-dessus et aucun de la colonne de
+///   droite, et son `test/forbidden.test.js` lit la table et le source pour que
+///   ce soit vérifiable et pas promis (éprouvé en y ajoutant un vrai
+///   `container_exec` : quatre tests sur seize tombent, cinq si on élargit
+///   aussi `ALLOWED_PATHS`). **Il n'y a toujours pas d'entrée dans [`CATALOG`]**,
+///   et pour deux raisons distinctes qu'il ne faut pas confondre :
+///
+///   1. Le paquet n'est pas publié, donc il n'existe pas de `Package::spec`
+///      épinglé à nommer. C'est une étape d'exploitation, pas du code.
+///   2. Et même publié, **[`Provision::Host`] ne conviendrait pas pour le démon
+///      d'un client.** Un bridge hébergé tourne chez nous, le démon est chez
+///      lui ; et [`crate::hosted`] exige du bridge une racine en lecture seule
+///      et aucun montage, or parler à `/var/run/docker.sock` réclame justement
+///      ce montage — qui donne root sur l'hôte. [`CUSTOM`] n'est donc pas une
+///      étape en attendant mieux ici, c'est la réponse. `Provision::Host`
+///      conviendrait au *premier* Docker de la liste ci-dessus, celui qui parle
+///      à une API distante (Docker Hub), pas au second.
+///
+/// * **Vercel** — sondé, et refusé pour une raison mesurée :
+///   `mcp.vercel.com/.well-known/oauth-authorization-server` annonce
+///   `token_endpoint_auth_methods_supported: ["none"]`, et rien d'autre. C'est
+///   un client **public**, en PKCE seul. Ce déploiement ne sait pas s'en servir,
+///   et prendre le chemin sans secret parce qu'il est le seul offert reviendrait
+///   à accepter que n'importe qui rejoue notre `client_id`. Netlify annonce
+///   `client_secret_post` en plus de `none` ; c'est toute la différence entre
+///   les deux, et c'est pour cela qu'il y en a un des deux dans la liste.
 pub const CATALOG: &[Connector] = &[
     Connector {
         key: "github",
@@ -638,6 +779,98 @@ pub const CATALOG: &[Connector] = &[
         // that takes an address of somebody who has not asked for anything. So
         // there is no unsubscribe list at GitHub for us to bring home, which is
         // a different sentence from "we did not look".
+        opt_outs: OptOuts::NoStrangers,
+    },
+    Connector {
+        key: "sentry",
+        label: "Sentry",
+        // Le serveur MCP distant de Sentry, en Streamable HTTP.
+        provision: Provision::Dial("https://mcp.sentry.dev/mcp"),
+        reach: Reach::Public,
+        // Relevé le 2026-09-02, pas deviné :
+        //
+        //   GET https://mcp.sentry.dev/.well-known/oauth-protected-resource/mcp
+        //   → resource: "https://mcp.sentry.dev/mcp",
+        //     authorization_servers: ["https://mcp.sentry.dev"],
+        //     scopes_supported: ["org:read","project:write","team:write","event:write"]
+        //   GET https://mcp.sentry.dev/.well-known/oauth-authorization-server
+        //   → authorization_endpoint, token_endpoint,
+        //     token_endpoint_auth_methods_supported:
+        //       ["client_secret_basic","client_secret_post","none"],
+        //     code_challenge_methods_supported: ["plain","S256"]
+        //
+        // `Post` parce que `client_secret_post` est annoncé : le serveur accepte
+        // un client confidentiel, et c'est la condition d'entrée de ce
+        // catalogue. `none` est là aussi — un client public en PKCE seul — mais
+        // ce n'est pas ce que ce déploiement sait faire, et prendre le chemin
+        // sans secret parce qu'il est offert reviendrait à accepter que
+        // n'importe qui rejoue notre `client_id`.
+        //
+        // Les portées sont les quatre annoncées, et c'est le point désagréable :
+        // il n'y a **pas** de portée en lecture seule pour les projets. Sentry
+        // n'en expose que `org:read` de lecture pure ; suivre les erreurs d'un
+        // projet demande `project:write`. On ne peut donc pas promettre ici un
+        // employé qui regarde sans toucher, et `floor` en tire la conséquence.
+        credential: Credential::OAuth(&OAuth {
+            authorize: "https://mcp.sentry.dev/oauth/authorize",
+            token: "https://mcp.sentry.dev/oauth/token",
+            scopes: "org:read project:write team:write event:write",
+            auth: ClientAuth::Post,
+        }),
+        // `Write` et pas `Read`, pour la raison ci-dessus : le jeton qui lit une
+        // erreur peut assigner un ticket et fermer un problème. Et ce que les
+        // outils de lecture rendent — un message d'exception, une trace, le
+        // corps d'une requête capturée — est du texte écrit par quelqu'un
+        // d'autre, donc `Untrusted` dès qu'un employé le lit.
+        floor: RiskClass::Write,
+        // Lu dans la liste d'outils du serveur, pas supposé. Tout ce que Sentry
+        // sert agit dans une organisation dont les membres ont déjà un compte :
+        // un problème assigné notifie un collègue, il n'atteint pas un étranger,
+        // et aucun outil ne prend l'adresse de quelqu'un qui n'a rien demandé.
+        // Il n'y a donc pas de liste de désabonnés chez Sentry à rapatrier — ce
+        // qui est une phrase différente de « nous n'avons pas regardé ».
+        opt_outs: OptOuts::NoStrangers,
+    },
+    Connector {
+        key: "netlify",
+        label: "Netlify",
+        // Le serveur MCP distant de Netlify, en Streamable HTTP.
+        provision: Provision::Dial("https://mcp.netlify.com/mcp"),
+        reach: Reach::Public,
+        // Relevé le 2026-09-02 sur les deux documents que Netlify sert :
+        //
+        //   GET https://mcp.netlify.com/.well-known/oauth-protected-resource
+        //   → resource: "https://mcp.netlify.com/mcp",
+        //     authorization_servers: ["https://mcp.netlify.com/"]
+        //   GET https://mcp.netlify.com/.well-known/oauth-authorization-server
+        //   → authorization_endpoint, token_endpoint,
+        //     scopes_supported: ["offline_access","read","write","claudeai"],
+        //     token_endpoint_auth_methods_supported:
+        //       ["none","client_secret_post","client_secret_basic"]
+        //
+        // Trois portées sur quatre. `claudeai` est écartée : c'est une portée
+        // nommée d'après un client, pas d'après un droit, et une limite dont on
+        // ne sait pas dire ce qu'elle autorise n'est pas une limite. `read` et
+        // `write` sont demandées parce qu'un déploiement est une écriture ;
+        // `offline_access` parce que sans jeton de rafraîchissement la liaison
+        // meurt à la première expiration et que `refresh_due` n'a rien à
+        // rejouer.
+        credential: Credential::OAuth(&OAuth {
+            authorize: "https://mcp.netlify.com/oauth-server/auth",
+            token: "https://mcp.netlify.com/oauth-server/token",
+            scopes: "read write offline_access",
+            auth: ClientAuth::Post,
+        }),
+        // `Write`, et il s'en faut de peu que ce soit plus haut : ce serveur
+        // déploie un site et modifie des variables d'environnement. Ce qui le
+        // maintient ici est que rien de ce qu'il expose n'efface un compte ni ne
+        // publie vers un tiers — un déploiement se remplace, il ne se perd pas.
+        // Un outil que personne n'a déclaré reste `Destructive` de toute façon.
+        floor: RiskClass::Write,
+        // Les surfaces de Netlify — sites, déploiements, variables, journaux —
+        // sont celles d'une équipe qui a déjà un compte. Aucun outil n'envoie
+        // quoi que ce soit à une adresse qui n'a rien demandé. Les formulaires
+        // Netlify reçoivent, ils n'émettent pas.
         opt_outs: OptOuts::NoStrangers,
     },
     Connector {
@@ -1619,14 +1852,14 @@ pub const CATALOG: &[Connector] = &[
 /// It is `pub` because it is the artifact the obligation actually needs: the
 /// list of connectors this deployment asserts have no unsubscribe list
 /// anywhere, in one place, readable by whoever has to answer for it.
-pub const NO_OUTREACH: [&str; 17] = {
-    let mut out = [""; 17];
+pub const NO_OUTREACH: [&str; 19] = {
+    let mut out = [""; 19];
     let (mut i, mut n) = (0, 0);
     while i < CATALOG.len() {
         vet(&CATALOG[i]);
         if matches!(CATALOG[i].opt_outs, OptOuts::NoStrangers) {
             assert!(
-                n < 17,
+                n < 19,
                 "a connector claiming `OptOuts::NoStrangers` was added to CATALOG and \
                  NO_OUTREACH's length was not updated. That claim is read off the vendor's \
                  own tool list — every tool this server serves, and not one of them can put \
@@ -1641,7 +1874,7 @@ pub const NO_OUTREACH: [&str; 17] = {
         i += 1;
     }
     assert!(
-        n == 17,
+        n == 19,
         "a connector stopped claiming `OptOuts::NoStrangers` and NO_OUTREACH's length was \
          not updated"
     );
