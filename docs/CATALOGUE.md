@@ -105,13 +105,19 @@ refuse qu'une entrée tombe entre.
 
 # Ce qui est ajoutable aujourd'hui
 
-Vingt-deux connecteurs sont nommés dans le catalogue. La première vague en avait
-écrit huit, la deuxième en a écrit quatorze, et une seule des entrées qui
-restaient s'est révélée fermée à la mesure.
+Vingt-huit connecteurs sont nommés dans le catalogue. La première vague en
+avait écrit huit, la deuxième quatorze, l'ajout du 2026-09-02 deux, et la vague
+réseaux sociaux du même jour quatre — voir sa section en fin de document.
 
 | Connecteur | Forme | Plancher | État |
 |---|---|---|---|
 | **GitHub** | `Dial` + OAuth | `Write` | ✅ **dans le catalogue.** Reste à créer l'OAuth App et poser `AGENTOS_OAUTH_CLIENTS` |
+| **Sentry** | `Dial` + OAuth | `Write` | ✅ **dans le catalogue** (2026-09-02). Reste l'app OAuth. ⚠ pas de portée en lecture seule — voir plus bas |
+| **Netlify** | `Dial` + OAuth | `Write` | ✅ **dans le catalogue** (2026-09-02). Reste l'app OAuth |
+| **Vercel** | — | — | ❌ **IMPOSSIBLE.** `token_endpoint_auth_methods_supported: ["none"]` — client public seulement, mur n°3 |
+| **Docker Hub** | — | — | ⏳ **TRAVAIL PRODUIT.** Serveur officiel réel, mais ni endpoint hébergé ni paquet publié : on clone et on compile |
+| **Docker (le démon d'un serveur)** | `CUSTOM` | `Write` | ⏳ **ÉCRIT, PAS PUBLIÉ** (2026-09-02). `packages/docker-mcp` sert les neuf outils de la moitié « liste » et refuse la moitié « interpréteur », test à l'appui. Pas d'entrée `CATALOG` : paquet non publié, et `Provision::Host` ne peut pas piloter le démon d'un client — voir plus bas |
+| **Smartlead** | — | — | ⏳ **CÂBLÉ, PAS OUVERT** (2026-09-02). Migration, schéma de signature, ingestion et handler écrits ; l'enregistrement **refuse** et la route répond `401` tant que le nom de l'en-tête n'a pas été lu sur une livraison réelle — et la recherche conclut qu'il n'existe pas |
 | **Gmail** | `Dial` + OAuth | `Write` | ✅ **dans le catalogue.** Reste le client OAuth Web dans la Google Cloud Console |
 | **Google Drive** | `Dial` + OAuth | `Write` | ✅ **dans le catalogue.** Le même client Google |
 | **Google Calendar** | `Dial` + OAuth | `Destructive` | ✅ **dans le catalogue**, débloqué par `OptOuts::HeldHere` — ⚠ voir plus bas |
@@ -133,6 +139,10 @@ restaient s'est révélée fermée à la mesure.
 | **Cloudflare** | `Dial` + `Bearer` | `Destructive` | ✅ **dans le catalogue**, débloqué par `OptOuts::HeldHere` — ⚠⚠ voir plus bas |
 | **Exa** | `Dial` + `Bearer` | `Read` | ✅ **dans le catalogue.** `Authorization: Bearer` **vérifié par la mesure** — voir plus bas |
 | **Serpstat** | `Host` (npm) | `Read` | Reste à faire : épingler la version et capturer sa surface d'outils |
+| **X** | `Dial` + OAuth (`Basic`) | `Write` | ✅ **dans le catalogue** (2026-09-02). Reste l'app du portail développeur + `AGENTOS_OAUTH_CLIENTS` — voir la vague réseaux sociaux |
+| **Ayrshare** | `Dial` + `Bearer` | `Write` | ✅ **dans le catalogue** (2026-09-02), en `HeldHere` — mono-profil seulement |
+| **Blotato** | `Dial` + `Bearer` | `Write` | ✅ **dans le catalogue** (2026-09-02), en `HeldHere` — ⚠ `buy_credits` = argent |
+| **Zernio** | `Dial` + `Bearer` | `Write` | ✅ **dans le catalogue** (2026-09-02), en `Pulled { from: "GET /v1/sms/opt-outs" }` — ⚠ `call_tool` |
 
 ## Ce que la mesure a contredit dans ce document
 
@@ -452,3 +462,310 @@ Elles ne bloquent rien d'urgent, mais elles reviendront.
    n'est pas une table par outil ici — l'argument contre est dans les docs du
    module — c'est une **seconde entrée sur un endpoint en lecture seule**, comme
    `linear-readonly`, quand le fournisseur en publie un.
+
+
+---
+
+## L'ajout du 2026-09-02 — deux entrées, trois refus
+
+Demande : Smartlead, plus « un GitHub, un serveur et un Docker » pour qu'une
+équipe de développeurs puisse travailler.
+
+**GitHub y était déjà**, avec ses portées choisies et non recopiées : `repo`,
+`read:org`, `read:user`, et ni `delete_repo` ni `workflow`.
+
+**Deux sont entrés**, tous deux sondés en direct — les requêtes sont recopiées
+dans le commentaire de leur entrée, et se rejouent en deux `curl` :
+
+* **Sentry** — `https://mcp.sentry.dev/mcp`. Les erreurs en production : ce qui
+  casse, où, depuis quand. Un point désagréable est écrit dans l'entrée plutôt
+  qu'annoncé plus doucement : Sentry n'expose **aucune portée de lecture seule pour un projet**
+  (`org:read` est la seule lecture pure), donc on ne peut pas promettre un
+  employé qui regarde sans toucher. Le plancher est `Write` en conséquence.
+* **Netlify** — `https://mcp.netlify.com/mcp`. Les sites, les déploiements et
+  leurs variables. Trois portées sur quatre : `claudeai` est écartée parce que
+  c'est une portée nommée d'après un client et non d'après un droit, et qu'une
+  limite dont on ne sait pas dire ce qu'elle autorise n'est pas une limite.
+
+**Trois sont refusés, et la raison de chacun est un fait, pas un avis :**
+
+* **Vercel** — le mur n°3, mesuré. Son document RFC 8414 annonce
+  `token_endpoint_auth_methods_supported: ["none"]` et rien d'autre : client
+  public, PKCE seul. Netlify annonce `client_secret_post` en plus ; c'est toute
+  la différence entre les deux, et c'est pour ça qu'il y en a un dans la liste.
+* **Docker Hub** — `github.com/docker/hub-mcp` est bien le serveur officiel,
+  mais il n'a ni endpoint hébergé (`mcp.docker.com` → 404, `hub-mcp.docker.com`
+  ne résout pas) ni paquet publié : on clone et on compile. `Provision::Host`
+  veut un `Package::spec` que le binaire nomme ; « clonez et compilez » n'est pas
+  un spec. **Le chemin qui marche aujourd'hui est `CUSTOM`** : le client fait
+  tourner ce serveur sur sa machine et branche son adresse — ce qui est
+  exactement l'argument « SSH est un déploiement, pas un connecteur ».
+* **Smartlead** — bloqué par `OptOuts`, et c'est le cas d'école que le test
+  `a_sender` décrit depuis le début. **La première lecture était fausse et elle
+  est corrigée ci-dessous.**
+
+### Le Docker qu'on a fini d'écrire, et celui qu'on n'a pas commencé
+
+Il y a deux Docker dans la demande et il ne faut pas les confondre.
+
+**Docker Hub** — des dépôts d'images, des tags, des vulnérabilités. C'est ce que
+sert `docker/hub-mcp`, et le verdict ci-dessus est inchangé : ni endpoint
+hébergé, ni paquet publié.
+
+**Le démon Docker d'un serveur** — « est-ce que ça tourne, pourquoi c'est
+tombé, redémarre-le ». C'est ce qu'on veut vraiment dire par « connecter un
+serveur », et `packages/docker-mcp` l'a écrit le 2026-09-02 : neuf outils
+(`containers_list`, `container_inspect`, `container_logs`, `container_stats`,
+`images_list`, `events_recent`, `container_start`, `container_stop`,
+`container_restart`), et rien de la colonne de droite du tableau de
+`catalog.rs` — aucun `exec`, aucun `create`/`run`, aucun montage hôte, aucun
+`commit`/`push`, aucune suppression.
+
+La promesse est négative, donc elle est testée en lisant la table et le source
+plutôt qu'en appelant des outils qui n'existent pas
+(`test/forbidden.test.js`). Éprouvée plutôt que promise : ajouter un vrai
+`container_exec` fait tomber **quatre tests sur seize**, cinq si on élargit
+aussi `ALLOWED_PATHS`.
+
+**Et il n'y a pas d'entrée dans `CATALOG`**, pour deux raisons distinctes : le
+paquet n'est pas publié (donc pas de `Package::spec` à épingler), et surtout
+`Provision::Host` **ne peut pas** piloter le démon d'un client — le bridge
+tourne chez nous, le démon chez lui, et `hosted.rs` exige du bridge une racine
+en lecture seule et aucun montage, alors que parler à
+`/var/run/docker.sock` réclame ce montage, qui donne root sur l'hôte. Le
+chemin est donc `CUSTOM`, et ce n'est pas un pis-aller : c'est le même
+argument « SSH est un déploiement, pas un connecteur », une couche plus bas.
+
+### Et « connecter un serveur » ?
+
+C'est déjà là, et ça s'appelle `CUSTOM`. Le client fait tourner un serveur MCP
+sur sa machine — la sienne, ou l'une des nombreuses qui en hébergent — et colle
+son adresse ; `Reach::Private` existe pour le cas du sidecar. Ce que le
+catalogue refuse, c'est une variante `Ssh`, et l'argument tient en une phrase :
+une clé SSH est un droit d'exécuter *ce que le porteur décide*, il n'y a pas de
+serveur MCP au bout, et un programme que personne n'a écrit n'a aucune propriété
+vérifiable. Un allowlist d'un côté, un interpréteur de l'autre.
+
+
+---
+
+## Smartlead, la correction du 2026-09-02
+
+> « En abonnement payant Smartlead on a une API, c'est pas utilisable ? »
+
+Si, et la première conclusion écrite plus haut était fausse. Elle disait « une
+écriture sans lecture en face », parce que le serveur MCP expose
+`unsubscribe_lead_globally` sans rien qui liste les désabonnés, et parce que la
+référence publique ne documente aucun point d'entrée de liste de blocage.
+
+**Smartlead ne se tire pas, il pousse.** `api.smartlead.ai/core/webhooks` sert
+un catalogue d'événements qui contient **`EMAIL_UNSUBSCRIBED`** — à côté de
+`EMAIL_BOUNCED`, `EMAIL_REPLIED`, `EMAIL_OPENED`, `EMAIL_SENT`, `EMAIL_CLICKED`
+— enregistrables par `POST /webhooks`. C'est donc `OptOuts::Pushed { at }` et
+non `OptOuts::Pulled { from }` : la catégorie était la mauvaise, pas la
+plateforme.
+
+La même page documente la vérification : un **HMAC-SHA256 sur le corps brut**,
+comparé en temps constant (`hmac.compare_digest`). C'est le bon niveau
+d'exigence, et c'est ce que `routes::webhooks` sait déjà faire pour deux autres
+schémas.
+
+### Ce qui manque, et ce n'est plus une catégorie mais un nom
+
+1. **Le nom de l'en-tête de signature.** Le `provider` d'un endpoint choisit le
+   schéma dans `routes::webhooks`, et la page ne dit pas quel en-tête Smartlead
+   envoie. L'écrire au jugé donnerait soit des livraisons authentiques répondues
+   `401`, soit — bien pire — un vérificateur qui accepte ce qu'il ne devrait pas.
+2. **Une migration.** `webhook_endpoints_provider_is_wired` est contraint à
+   `('email', 'twilio')` ; la CHECK existe précisément pour qu'on ne puisse pas
+   enregistrer un handle qu'aucune ingestion ne lit.
+3. **L'ingestion** qui transforme un `EMAIL_UNSUBSCRIBED` en une ligne de
+   `suppressions` — laquelle désactive le **contact**, donc le téléphone tombe
+   avec le mail (`0011_revenue.sql`, `suppressions_deactivate_contacts`).
+
+### Ce qui a été écrit le 2026-09-02, et ce qui reste
+
+L'après-midi de travail a eu lieu. Sont dans l'arbre :
+
+1. `migrations/0077_un_desabonnement_pousse_est_un_endpoint_aussi.sql` —
+   `webhook_endpoints_provider_is_wired` accepte `'smartlead'`.
+2. Le **troisième schéma de signature** dans `apps/server/src/routes/webhooks.rs` :
+   HMAC-SHA256 hexadécimal sur le corps brut, comparaison en temps constant,
+   choisi par le `provider` de l'endpoint comme les deux autres.
+3. L'**ingestion** : `agentos_app::inbound::record_smartlead_unsubscribe` fait
+   d'un `EMAIL_UNSUBSCRIBED` (ou `LEAD_UNSUBSCRIBED` — les deux orthographes
+   sont attestées, par deux sources différentes) une ligne de `suppressions`,
+   écrite par la même fonction que la porte tirée
+   (`queue::record_platform_opt_out`), donc une personne arrivée par les deux
+   portes est une ligne et pas deux. Le contact est désactivé, donc le téléphone
+   tombe avec le mail. Un rejeu n'écrit rien de plus, à trois niveaux.
+4. Le **handler** `main::on_smartlead_webhook`, enregistré sans condition, parce
+   qu'un `event_type` sans lecteur est huit tentatives puis une lettre morte.
+
+**Ce qui n'y est pas, et ne peut pas y être : l'entrée dans `CATALOG`.**
+`webhooks::register` refuse un endpoint `smartlead` avec
+`EndpointError::SignatureHeaderUnposed`, et la route refuse chaque livraison,
+tant que `inbound::SMARTLEAD_SIGNATURE_HEADER` vaut `None`. Un connecteur qui
+refuse de s'enregistrer est un connecteur pas fini ; un en-tête deviné qui
+accepte ce qu'il ne devrait pas est pire, et un dépôt tiers documente avoir
+vécu exactement ça — toutes ses livraisons authentiques refusées `401` pendant
+des semaines par un `X-Smartlead-Signature` inventé.
+
+### Et le nom de l'en-tête n'existe probablement pas
+
+La recherche du 2026-09-02 conclut à l'absence, sur trois lignes d'évidence
+indépendantes : l'API d'enregistrement des webhooks n'a aucun champ où saisir
+un secret partagé (donc le HMAC de la doc n'a pas de clé) ; deux sources
+attestent que Smartlead renvoie son propre secret **dans le corps JSON**, champ
+`secret_key` ; et le rapport de production ci-dessus. Les trois dépôts qui
+donnent `X-Smartlead-Signature` portent tous le même triplet exact et aucun n'a
+reçu de livraison. Le détail et les URLs sont au-dessus de
+`SMARTLEAD_SIGNATURE_HEADER`, dans `crates/app/src/inbound.rs`.
+
+Donc ce qui débloque : **une livraison réelle vers une URL qu'on contrôle, et la
+lecture de ses en-têtes.** S'il y a un en-tête, c'est un `Some("…")` à poser et
+tout ce qui précède se met à marcher. S'il n'y en a pas, ce qu'il faut câbler
+est un *quatrième* schéma : chemin non devinable qui fait office de credential,
+plus égalité en temps constant sur le `secret_key` du corps, après parse. Ce
+n'est plus un mur ; c'est une valeur qui manque, et le code qui l'attend est
+écrit et testé.
+
+
+---
+
+## La vague réseaux sociaux du 2026-09-02
+
+Demande : « publier sur les réseaux sociaux, avec toute l'infrastructure —
+l'automatisation, la récupération des métriques ». Le cadre d'abord, parce
+qu'il décide de tout : **ce n'est pas un sous-système neuf.** Publier est un
+outil MCP appelé via `ActionKind::McpCall`, sous la gate ; l'automatisation est
+l'initiative qui existe déjà (cadence 5 min à 30 jours, budget en tours par
+jour, zéro par défaut) ; les métriques sont un outil de LECTURE sur le même
+connecteur. Donc « toute l'infrastructure » = des entrées de catalogue, la
+politique, l'écran. Pas de 18e `ActionKind`, pas de scheduler, pas de table.
+
+Seize candidats sondés en direct. **Quatre entrées, trois « CUSTOM est la
+réponse », deux impossibles, sept travail-produit.** Chaque littéral du
+catalogue a été resondé le jour de son écriture.
+
+Et un point de doctrine qui a décidé des planchers : un post PUBLIC ne met pas
+un message devant une personne qui n'a rien demandé — les abonnés ont choisi de
+suivre. `OptOuts::NoStrangers` peut donc être honnête pour un outil de
+publication, MAIS seulement après lecture de la liste d'outils réelle : si le
+serveur expose aussi des messages privés, la réponse change. Trois des quatre
+serveurs ci-dessous exposent des DM, et un seul ne le peut pas — par
+construction de ses scopes. Et publier ENGAGE l'entreprise publiquement : le
+plancher ne peut jamais être `Read`.
+
+### Les quatre entrées
+
+* **X** — `https://api.x.com/mcp`, OAuth confidentiel. Le document RFC 8414
+  d'`api.x.com` annonce `token_endpoint_auth_methods_supported:
+  ["none", "client_secret_basic"]` (resondé 2026-09-02) : le mur qui a tué
+  Vercel passe. Les scopes sont copiés VERBATIM du document
+  `oauth-protected-resource` — `tweet.read` … `offline.access`, **sans
+  `tweet.write` et sans `dm.*`** — et cette absence de `dm.*` est le fait
+  mesuré qui rend `NoStrangers` honnête : le serveur ne peut pas frapper de
+  jeton DM. Le serveur crée et publie des Articles, donc plancher `Write`.
+  Deux caveats d'exploitation : pas d'enregistrement dynamique
+  (`POST /2/oauth2/register` → 404 ; l'app vient du portail développeur, la
+  redirect URI y est librement enregistrable — pas le piège Canva), et
+  `GET /v1/mcp/catalog` n'affiche l'entrée qu'une fois la paire posée dans
+  `AGENTOS_OAUTH_CLIENTS`. Coût à l'usage : Post: Create $0.015/req
+  (docs.x.com/x-api/getting-started/pricing.md, 2026-09-02).
+
+* **Ayrshare** — `https://api.ayrshare.com/mcp`, clé API en Bearer. La mieux
+  lue de la vague : `initialize` **et** `tools/list` répondent sans credential
+  (resondé 2026-09-02), 27 outils énumérés en direct — dont `send_message` et
+  `get_messages`, des DM Facebook/Instagram/X/WhatsApp. `NoStrangers` serait
+  donc un mensonge, et la seconde lecture est faite : l'index complet des docs
+  (218 pages, llms.txt) ne contient ni unsubscribe, ni opt-out, ni
+  suppression — le fournisseur ne tient pas de liste, donc `HeldHere`.
+  Mono-profil seulement : le header `Profile-Key` (plan Business) n'a pas de
+  place dans `Credential::Bearer`.
+
+* **Blotato** — `https://mcp.blotato.com/mcp`, clé API en Bearer — la voie que
+  le `WWW-Authenticate` du 401 offre au premier rang (« Missing API key or
+  OAuth2.1 token », resondé 2026-09-02) ; la voie OAuth Supabase passerait le
+  mur mais ne vaut pas la danse. 35 outils
+  (help.blotato.com/api/mcp/tools.md), dont deux à ne jamais déclarer sous
+  `Destructive` : `blotato_buy_credits` (un lien Stripe Checkout — de
+  l'argent) et `blotato_send_message` (DM Instagram/Facebook — les docs disent
+  « reply only », le schéma prend un `recipientId` libre). Lecture opt-out
+  négative sur l'index complet des docs → `HeldHere`.
+
+* **Zernio** — `https://mcp.zernio.com/mcp`, clé API en Bearer (les
+  `.well-known` OAuth sont en 404/308 à la racine — la clé évite le mur
+  entièrement). 52 outils sondés en direct, MAIS `search_tools`/`call_tool`
+  atteignent **496** outils, dont DM, WhatsApp, SMS et Broadcasts —
+  `call_tool` défait la promesse du pin par-outil (le digest fige un schéma
+  qui prend un nom d'outil arbitraire) et ne se déclare jamais sous
+  `Destructive`. **La lecture opt-out a contredit l'issue attendue** : on
+  prévoyait `HeldHere`, et Zernio publie sa liste — « List SMS opt-outs »,
+  `GET /v1/sms/opt-outs`, lecture seule, export CSV
+  (docs.zernio.com/sms/list-sms-opt-outs, 2026-09-02). Donc
+  `Pulled { from: "GET /v1/sms/opt-outs" }`, le précédent PostHog appliqué :
+  `HeldHere` quand une liste existe cache une liste réconciliable. La liste
+  couvre les STOP SMS ; les canaux sociaux sont tenus par le consentement de
+  Meta (« Meta only answers for people who have MESSAGED the account »).
+
+### « CUSTOM est la réponse » — et le mode d'emploi pour aujourd'hui
+
+Trois candidats ne peuvent pas porter d'entrée nommée, pour l'argument du démon
+Docker : une entrée est une affirmation sur une adresse, et ces serveurs n'ont
+pas d'adresse que CE binaire peut nommer. Une entrée « Postiz » qui pointe vers
+l'instance du client affirmerait sur un serveur qu'on n'a jamais vu — exactement
+ce que le floor `Read` de `CUSTOM` refuse de faire.
+
+* **Zapier MCP** — l'URL est générée par compte (`mcp.zapier.com/api/mcp/…`),
+  avec le secret dans l'URL. Le client la colle dans `CUSTOM` tel quel.
+* **Postiz** — auto-hébergé, AGPL-3.0. Le backend sert `/mcp` en Bearer
+  (la clé API du compte) ; 13 outils, publication et planification, **sans
+  DM**. Le client branche `https://<son-instance>/mcp` dans `CUSTOM`.
+* **Mixpost Pro** — auto-hébergé, licence payante. 31 outils, **sans DM**,
+  MCP en Bearer sur l'instance du client. Même chemin `CUSTOM`.
+
+### Impossibles
+
+* **Buffer** — le miroir exact de Vercel, resondé 2026-09-02 :
+  `token_endpoint_auth_methods_supported: ["none"]` seul (mur n°3), aggravé de
+  `resource_parameter_supported: true` (mur n°4). Fait qui débloque : un mode
+  confidentiel ou une clé API.
+* **SocialBee** — `mcp.socialbee.io` : zéro enregistrement A (DNS NOERROR/ANSWER 0, resondé
+  2026-09-02), aucune API publique. Fait qui
+  débloque : l'existence même d'un serveur.
+
+### Travail-produit
+
+* **Les six plateformes directes** (Meta Pages + Instagram, TikTok, LinkedIn,
+  YouTube, Pinterest, Threads) — préambule partagé : aucune ne sert de MCP
+  (négatifs DNS/404/400, 2026-09-02), et l'hébergement stdio est éteint
+  (`BRIDGES_PER_TENANT = 0`, connect → 503). Le fait qui débloque est double :
+  un paquet stdio épinglé à produire, et l'hébergement rallumé. Par
+  plateforme : Meta = OAuth Graph confidentiel vert, mais app review
+  « Advanced Access » (délai) ; TikTok = `SELF_ONLY` tant que l'audit n'est
+  pas passé ; LinkedIn = `w_member_social` self-serve mais aucune analytics
+  membre, analytics d'orga derrière le Marketing API Program ; YouTube =
+  `videos.insert` 1600 unités / quota 10 000 jour ≈ 6 uploads
+  (`determine_quota_cost`, 2026-06-01) ; Pinterest = 401 générique sans
+  `www-authenticate` ≠ RFC 9728 (démasqué), API v5 verte, trial access ;
+  Threads = cinq scopes exacts, app review.
+* **Hootsuite** — métadonnées RFC 8414 valides, mais scopes
+  `[offline, analytics:read]` seuls et aucun chemin d'endpoint ne répond
+  (tous 404, resondés 2026-09-02). Deux faits qui débloquent : le chemin
+  documenté, et des outils d'écriture.
+* **Publer** — beta Enterprise, URL générée par utilisateur (→ passerait par
+  `CUSTOM`), et le paquet npm `publer-mcp-server@1.1.0` est un tiers non
+  affilié, épinglable seulement sur décision assumée.
+
+### Planification récurrente et métriques : zéro code, et c'est prouvé
+
+La sonde runtime du 2026-09-02 a cherché le trou et n'en a pas trouvé. La
+cadence est la carte Planning d'un employé
+(`PUT /v1/employees/{id}/initiative`, 300 s à 30 jours, budget en tours par
+jour à zéro par défaut, dérive 0→+2 h 24 par jour sans ancre) ; une heure
+précise est une promesse d'heure via l'Agenda ; et le résultat d'un outil de
+lecture de métriques entre par le chemin qui existe déjà — `work_items`, le
+`BOARD_BRIEF` et le journal (`loops/initiative.rs:30` et `:1261`). Un ingest
+métriques→knowledge serait une seconde porte pour des données qui en ont déjà
+une. Pas de scheduler, pas de migration, pas de table.
