@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 
 use agentos_app::brief::INBOUND_BRIEF;
 use agentos_app::effects::{Effects, Ports};
-use agentos_app::gate::{PolicyGate, Principal as ActingAs};
+use agentos_app::gate::{PolicyGate, Principal as ActingAs, TaintOrigin};
 use agentos_app::inbound::{
     self, Errand, Recorded, Secret, TelephonyLanding, Thread, record_raw_email_delivery,
 };
@@ -654,6 +654,9 @@ fn app(
             // answer — *when*. Before it, nothing in this product could name an
             // hour.
             .merge(routes::calendar::router(db.clone()))
+            // The switch that opens a seat's public booking page. Beside the
+            // calendar it writes into; the page itself is on the tier below.
+            .merge(routes::booking::router(db.clone()))
             // The one the others were workarounds for: *say something*. `work`
             // and `calendar` put a sentence in front of an employee and neither
             // can be replied to; `approvals` below is a button. This is a
@@ -691,6 +694,15 @@ fn app(
             // retire. La lecture, elle, est sur l'étage sans credential — un
             // registre public derrière une clé n'en est pas un.
             .merge(routes::public_register::router(db.clone()))
+            // Le même journal, lu pour un seul locataire : ce que la gate lui
+            // a refusé, par motif, par verbe, par siège.
+            .merge(routes::refusals::router(db.clone()))
+            // And the third reading, beside the two it reconciles: what the
+            // seats consumed at the tenant's declared rate, against what they
+            // invoiced, collected and spent. Same window parser again.
+            .merge(routes::pnl::router(db.clone()))
+            .merge(routes::controls::router(db.clone()))
+            .merge(routes::accounting::router(db.clone()))
             .merge(routes::teams::router(db.clone()))
             .merge(routes::companies::router(db.clone()))
             .merge(routes::turns::router(db.clone()))
@@ -797,6 +809,10 @@ fn app(
     // `routes::mcp::public_router` is where that argument lives.
     .merge(routes::mcp::public_router(mcp_state))
     .merge(routes::well_known::router(db.clone()))
+    // La page de réservation : un prospect n'a pas de clé. Une lecture par
+    // `(domain, slug)` qui répond 404 à tout siège qui n'a pas ouvert, et un
+    // formulaire borné — `routes::booking` porte l'argument.
+    .merge(routes::booking::public_router(db.clone()))
     // Sans credential, et délibérément pas derrière `platform/*`: cet étage-là
     // protège l'émission de clés, c'est-à-dire un pouvoir, et ceci est une
     // lecture agrégée d'un consentement déjà donné. Le module dit pourquoi
@@ -968,8 +984,72 @@ fn handlers(config: &Config, agent: Agent, engine: ProvisioningEngine) -> Handle
         .on(
             routes::webhooks::received_event(routes::webhooks::SMARTLEAD_PROVIDER),
             Arc::new(on_smartlead_webhook),
+        )
+        // Le quatrième, pour la même raison : `0081` a élargi la CHECK à
+        // `'stripe'`, et cette ligne est ce que la CHECK affirme.
+        .on(
+            routes::webhooks::received_event(routes::webhooks::STRIPE_PROVIDER),
+            Arc::new(on_stripe_webhook),
         );
     handlers
+}
+
+/// `webhook.stripe.received` : une session Checkout payée règle la facture
+/// qu'elle nomme.
+///
+/// La quatrième jointure, et la première qui fait entrer de l'argent. Comme
+/// celle de Smartlead, elle n'a rien à aller chercher : les octets vérifiés
+/// portent tout, et `agentos_app::stripe::record_stripe_payment` fait le
+/// reste dans la transaction qui retire la livraison de la file — le
+/// `paid_at`, et la ligne d'audit qui porte l'identifiant Stripe. Le tenant
+/// est celui de l'endpoint, donc celui de `tx` ; une facture d'une autre
+/// entreprise est invisible d'ici.
+///
+/// Ce qui est terminal : un corps qui n'est pas du JSON. Ce qui ne l'est pas
+/// et n'est pas une erreur non plus : un montant qui ne colle pas — une ligne
+/// `invoice_payment_mismatch` est écrite et la facture reste due, ce qui est
+/// exactement ce qu'une personne doit voir.
+fn on_stripe_webhook<'a>(event: &'a OutboxEvent, tx: &'a mut TenantTx<'_>) -> Handled<'a> {
+    Box::pin(async move {
+        let body = event
+            .payload
+            .get("body")
+            .and_then(Value::as_str)
+            .ok_or_else(|| Failure::Terminal("this stored delivery has no body".to_owned()))?;
+        let event_id = event
+            .payload
+            .get("event_id")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+
+        let settled =
+            agentos_app::stripe::record_stripe_payment(tx, body.as_bytes(), event_id, Utc::now())
+                .await
+                .map_err(|err| {
+                    let why = format!("{}: {err}", err.code());
+                    if err.is_retryable() {
+                        Failure::Retry(why)
+                    } else {
+                        Failure::Terminal(why)
+                    }
+                })?;
+
+        use agentos_app::stripe::Settlement;
+        match settled {
+            Settlement::Paid(id) => {
+                tracing::info!(invoice = %id, "an invoice was settled by stripe")
+            }
+            Settlement::Mismatch(id) => tracing::warn!(
+                invoice = %id,
+                "a stripe payment does not match the invoice it names; nothing was marked paid"
+            ),
+            Settlement::AlreadySettled(id) => {
+                tracing::debug!(invoice = %id, "a stripe payment for an invoice already settled");
+            }
+            Settlement::NotOurs => tracing::debug!("a stripe delivery that settles nothing here"),
+        }
+        Ok(())
+    })
 }
 
 /// `webhook.smartlead.received` : un désabonnement poussé devient une ligne de
@@ -2042,9 +2122,11 @@ impl Agent {
                         &knowledge::Recall::new(&inbound, Some(employee_id)),
                     )
                     .await;
-                    recalled.into_context(
-                        context.with_untrusted(&inbound, &format!("message-{message_id}")),
-                    )
+                    recalled.into_context(context.with_untrusted_from(
+                        &inbound,
+                        &format!("message-{message_id}"),
+                        TaintOrigin::message(&channel, &sender),
+                    ))
                 }
             };
 
