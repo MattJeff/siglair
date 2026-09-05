@@ -258,6 +258,18 @@ struct AnswerBody {
     /// Prose. Operator input, and therefore trusted — see the module docs for
     /// where that trust stops.
     answer: String,
+    /// Which open question the prose answers — a [`Question::code`] off
+    /// `GET /v1/interview`, or absent when the founder is just talking.
+    ///
+    /// The console asks one question at a time and the founder skips freely,
+    /// so "what is the most you will pay per unit?" on screen and the first
+    /// open gap in `gaps()` order are routinely different questions. Without
+    /// this the model was handed all thirty-five and left to guess which one
+    /// a sentence about hosting subscriptions was for; it guessed prose, and
+    /// the founder was told to say it again. A code that names no open
+    /// question is ignored rather than refused — the answer is still worth
+    /// reading, only the emphasis is lost.
+    question: Option<String>,
 }
 
 /// One seat's open questions.
@@ -272,6 +284,14 @@ struct SeatView {
     /// What is still missing, in `gaps()` order. Empty means this seat can be
     /// planned.
     questions: Vec<Question>,
+    /// The objective as it stands, through its constructors —
+    /// [`Charter::objective_json`], the same shape `POST` echoes back. What
+    /// the founder has already said, so an answered question does not simply
+    /// vanish from the screen on the next reload: the value it produced is
+    /// here to read back. Absent for a seat with no charter or an unreadable
+    /// one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    objective: Option<Value>,
     /// Set when the stored objective does not read back through its
     /// constructors, in which case there are no questions to ask about it and
     /// the remedy is a `PUT` to `/initiative`. `CharterError::code`.
@@ -534,6 +554,7 @@ async fn questionnaire(
                     slug,
                     role: None,
                     questions: vec![NO_CHARTER],
+                    objective: None,
                     unreadable: None,
                 };
             };
@@ -546,6 +567,7 @@ async fn questionnaire(
                     slug,
                     role: Some(role),
                     questions: charter.open_questions(),
+                    objective: Some(charter.objective_json()),
                     unreadable: None,
                 },
                 Err(err) => {
@@ -555,6 +577,7 @@ async fn questionnaire(
                         slug,
                         role: Some(role),
                         questions: Vec::new(),
+                        objective: None,
                         unreadable: Some(err.code()),
                     }
                 }
@@ -728,18 +751,34 @@ async fn answer(
     // objective and the questions are this system's own, and the prose is the
     // operator's own words about their own business — the same trust
     // `Charter::brief` gives `objective.what` on every turn this employee takes.
+    let answering = body.question.as_deref().and_then(|code| {
+        questions
+            .iter()
+            .find(|question| question.answerable && question.code == code)
+    });
     let asked: Vec<&str> = questions
         .iter()
-        .filter(|question| question.answerable)
+        .filter(|question| question.answerable && answering.is_none_or(|q| q.code != question.code))
         .map(|question| question.ask)
         .collect();
+    // The question on screen first and alone, when the console says which one
+    // it was; the rest stay listed because an answer can close two at once
+    // ("5,000 units at 2 euros") and the model may only fill what was said.
+    let questions_task = match answering {
+        Some(question) => format!(
+            "The question they were answering:\n\n- {}\n\nThe other open questions, for \
+             context — fill one only if the answer plainly says so:\n\n- {}",
+            question.ask,
+            asked.join("\n- "),
+        ),
+        None => format!("The questions they were asked:\n\n- {}", asked.join("\n- ")),
+    };
     let context = Context::new()
         .with_task(INTERVIEW_BRIEF)
         .with_task(format!(
-            "The objective as it stands:\n\n{}\n\nThe questions they were asked:\n\n- {}",
+            "The objective as it stands:\n\n{}\n\n{questions_task}",
             serde_json::to_string_pretty(&Value::Object(base.clone()))
                 .unwrap_or_else(|_| "{}".to_owned()),
-            asked.join("\n- "),
         ))
         .with_task(format!("What they answered:\n\n{said}"));
 
@@ -808,7 +847,18 @@ async fn answer(
         .into_response());
     };
 
-    let (built, refused) = apply(role, &base, proposal);
+    let (built, mut refused) = apply(role, &base, proposal);
+    // `{}` is the model obeying "omit anything they did not say": the answer
+    // did not answer the question. Nothing was refused, so without this line
+    // the founder would read "nothing was written" and no reason.
+    if built.is_none() && refused.is_empty() {
+        refused.push(Refusal {
+            field: String::new(),
+            why: "the employee found nothing in that answer that fits the question, so it \
+                  wrote nothing; answer the question as it is asked"
+                .to_owned(),
+        });
+    }
     let Some((charter, filled)) = built else {
         tracing::info!(
             %id,
@@ -1501,13 +1551,23 @@ mod tests {
     /// Hand-rolled rather than `ScriptedLlm`, because `apps/server` may not
     /// depend on `agentos-providers` — see that crate's `Cargo.toml`, which
     /// keeps `async-trait` in dev-dependencies for exactly this.
-    struct Script(Mutex<VecDeque<String>>);
+    struct Script {
+        replies: Mutex<VecDeque<String>>,
+        /// Every prompt the route built, oldest first — system and messages
+        /// rendered with `Debug`, which is enough to assert a sentence is in
+        /// there and in which order.
+        seen: Arc<Mutex<Vec<String>>>,
+    }
 
     #[async_trait::async_trait]
     impl Llm for Script {
-        async fn complete(&self, _: LlmRequest) -> Result<LlmResponse, ProviderError> {
+        async fn complete(&self, request: LlmRequest) -> Result<LlmResponse, ProviderError> {
+            self.seen
+                .lock()
+                .expect("not poisoned")
+                .push(format!("{}\n{:?}", request.system, request.messages));
             let said = self
-                .0
+                .replies
                 .lock()
                 .expect("not poisoned")
                 .pop_front()
@@ -1526,6 +1586,8 @@ mod tests {
         /// `POST /v1/companies` leaves every employee in.
         uncharted: Uuid,
         stranger: Uuid,
+        /// What the scripted model was shown — see [`Script::seen`].
+        prompts: Arc<Mutex<Vec<String>>>,
     }
 
     impl Harness {
@@ -1596,9 +1658,11 @@ mod tests {
             ))
             .expect("keyring");
 
-            let llm: Arc<dyn Llm> = Arc::new(Script(Mutex::new(
-                script.into_iter().map(str::to_owned).collect(),
-            )));
+            let prompts: Arc<Mutex<Vec<String>>> = Arc::default();
+            let llm: Arc<dyn Llm> = Arc::new(Script {
+                replies: Mutex::new(script.into_iter().map(str::to_owned).collect()),
+                seen: Arc::clone(&prompts),
+            });
             let app = crate::with_api_stack(
                 router(
                     db.clone(),
@@ -1620,7 +1684,18 @@ mod tests {
                 seller,
                 uncharted,
                 stranger,
+                prompts,
             })
+        }
+
+        /// The last prompt the model was shown.
+        fn last_prompt(&self) -> String {
+            self.prompts
+                .lock()
+                .expect("not poisoned")
+                .last()
+                .cloned()
+                .expect("the model was asked at least once")
         }
 
         async fn hire(db: &Db, tenant: TenantId, slug: &str) -> Uuid {
@@ -1897,6 +1972,14 @@ mod tests {
         // --- and the questionnaire agrees -----------------------------------
         let (_, seen) = h.send("GET", "/v1/interview", SECRET_A, None).await;
         assert_eq!(seen["seats"][1]["questions"], json!([]), "{seen}");
+        assert_eq!(
+            seen["seats"][1]["objective"], done["objective"],
+            "what was answered is read back, so a reload does not lose it: {seen}"
+        );
+        assert!(
+            seen["seats"][0]["objective"].is_null(),
+            "a seat with no charter has no objective to show: {seen}"
+        );
 
         // --- one audit row, for the one answer that was written -------------
         //
@@ -1939,6 +2022,70 @@ mod tests {
     /// A seat with no charter is a 404 and not a turn: there is no objective, so
     /// there is nothing to ask about, and `PUT /v1/employees/{id}/initiative` is
     /// what the questionnaire told the founder to call.
+    /// The console asks one question at a time and lets the founder skip, so
+    /// the question on screen is routinely not the first open gap. When the
+    /// body says which one it was, the model is told that one first and alone;
+    /// the others stay listed for context. A code that names nothing open is
+    /// ignored, not refused.
+    #[tokio::test]
+    async fn the_question_on_screen_is_the_one_the_model_is_told_first() {
+        let Some(h) = Harness::new(vec!["{}", "{}", "{}"]).await else {
+            return;
+        };
+        let uri = format!("/v1/employees/{}/interview", h.seller);
+
+        let (status, _) = h
+            .send(
+                "POST",
+                &uri,
+                SECRET_A,
+                Some(json!({"answer": "Lufthansa and Condor.", "question": "target_accounts"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        let prompt = h.last_prompt();
+        let first = prompt
+            .find("The question they were answering:")
+            .expect("the named question leads: {prompt}");
+        let named = prompt
+            .find("which accounts should be worked")
+            .expect("its wording is there: {prompt}");
+        let others = prompt
+            .find("The other open questions")
+            .expect("the rest follow: {prompt}");
+        let other = prompt
+            .find("which market are we selling into?")
+            .expect("and are listed: {prompt}");
+        assert!(
+            first < named && named < others && others < other,
+            "{prompt}"
+        );
+        assert!(
+            !prompt.contains("The questions they were asked:"),
+            "one heading, not both: {prompt}"
+        );
+
+        // A code that is not an open question of this seat: the plain list.
+        let (status, _) = h
+            .send(
+                "POST",
+                &uri,
+                SECRET_A,
+                Some(json!({"answer": "Germany.", "question": "delivery_country"})),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(h.last_prompt().contains("The questions they were asked:"));
+
+        // And no code at all, as before.
+        let (status, _) = h
+            .send("POST", &uri, SECRET_A, Some(json!({"answer": "Germany."})))
+            .await;
+        assert_eq!(status, StatusCode::OK);
+        assert!(h.last_prompt().contains("The questions they were asked:"));
+        assert_eq!(h.turns_taken(h.seller).await, 3);
+    }
+
     #[tokio::test]
     async fn a_seat_with_no_job_cannot_be_interviewed_about_one() {
         let Some(h) = Harness::new(Vec::new()).await else {

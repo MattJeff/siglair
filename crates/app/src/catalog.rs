@@ -751,13 +751,30 @@ const GOOGLE_TOKEN: &str = "https://oauth2.googleapis.com/token";
 ///   * LinkedIn — `w_member_social` est self-serve, mais AUCUNE analytics
 ///     membre n'existe, et les analytics d'organisation sont derrière le
 ///     Marketing API Program.
-///   * YouTube — `videos.insert` coûte 1600 unités sur un quota de
-///     10 000/jour, soit ≈ 6 uploads (page `determine_quota_cost`,
-///     2026-06-01).
+///   * YouTube — le modèle de quota a CHANGÉ : `videos.insert` et
+///     `search.list` vivent chacun dans un bucket dédié de 100 appels/jour
+///     (1 point par appel), le pool général restant 10 000 unités/jour —
+///     les vieux 1600 unités/upload sont morts (page `determine_quota_cost`,
+///     resondée le 2026-09-02).
 ///   * Pinterest — 401 générique SANS `www-authenticate`, donc pas de
 ///     RFC 9728 : le « serveur MCP » annoncé est démasqué. L'API v5 est
 ///     verte, mais en trial access.
 ///   * Threads — cinq scopes exacts, et une app review.
+///
+///   **2026-09-02, la décision** : la voie retenue n'est aucun de ces paquets
+///   à produire — c'est NOTRE propre service d'agrégation, `apps/social`
+///   (`docs/SOCIAL.md`). Raison de fond : aucun des trois agrégateurs entrés
+///   plus bas n'a pu recevoir [`OptOuts::NoStrangers`], parce que tous
+///   exposent des DM ; le nôtre n'a aucune surface DM, par construction, et
+///   un test le lit dans la table d'outils. Son entrée ici viendra quand il
+///   sera DÉPLOYÉ et sondé — une entrée [`Provision::Dial`] sur une URL qui
+///   ne répond pas encore violerait la règle du sondage en direct que chaque
+///   littéral de ce bloc respecte. La forme qu'elle aura : `Dial` vers notre
+///   hôte, [`Credential::Bearer`] (jeton par tenant), `floor` `Write`
+///   (publier engage l'entreprise, rien n'efface un compte), et
+///   `NoStrangers` PROUVÉ par le test anti-DM du service lui-même — une
+///   première pour ce registre, où la revendication tient sur un test qui
+///   casse et pas sur une lecture datée de la liste d'outils d'un tiers.
 ///
 /// * **Buffer** — le miroir exact du refus Vercel, resondé le 2026-09-02 sur
 ///   `mcp.buffer.com` : `token_endpoint_auth_methods_supported: ["none"]` et

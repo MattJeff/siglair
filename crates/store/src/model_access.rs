@@ -35,6 +35,7 @@
 //! and every `Debug` this module could ever render.
 
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 
 use agentos_domain::model_access::{ModelAccess, ModelPath};
 use agentos_domain::policy::ModelId;
@@ -48,6 +49,9 @@ struct Row {
     verified_model: String,
     verified_at: DateTime<Utc>,
     sealed_key: Option<Vec<u8>>,
+    usd_per_mtok_input: Option<f64>,
+    usd_per_mtok_output: Option<f64>,
+    usd_per_mtok_cache_read: Option<f64>,
 }
 
 impl Row {
@@ -73,7 +77,107 @@ impl Row {
                 verified_at: self.verified_at,
             },
             sealed_key: self.sealed_key,
+            tariff: Tariff {
+                usd_per_mtok_input: self.usd_per_mtok_input,
+                usd_per_mtok_output: self.usd_per_mtok_output,
+                usd_per_mtok_cache_read: self.usd_per_mtok_cache_read,
+            }
+            .declared(),
         })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The tariff
+// ---------------------------------------------------------------------------
+
+/// What the tenant says a token costs them, in USD per million tokens.
+///
+/// **A claim, not a measurement.** `migrations/0079_tenant_model_tariff.sql`
+/// argues why it sits on the connection row; what matters here is what the
+/// type is *not*: it is not a price this repository knows, and it is not
+/// `Money`. A rate per million tokens is a multiplier — `f64` in Rust, NUMERIC
+/// in the column, cast on the way in and out so `0.30` survives the round trip
+/// — and the thing it produces, tokens × rate rounded to the cent, is the
+/// `Money` that `GET /v1/pnl` reports. The float never reaches an amount: the
+/// multiplication and the rounding happen in SQL over the NUMERIC column, and
+/// only the resulting cents come back.
+///
+/// A component left `None` is unknown, never free. A partial tariff still
+/// yields a figure, but a floor — see `cost_is_floor` on the P&L.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct Tariff {
+    #[serde(default)]
+    pub usd_per_mtok_input: Option<f64>,
+    #[serde(default)]
+    pub usd_per_mtok_output: Option<f64>,
+    #[serde(default)]
+    pub usd_per_mtok_cache_read: Option<f64>,
+}
+
+impl Tariff {
+    /// `Some` if any component was declared; three `None`s are no tariff.
+    pub fn declared(self) -> Option<Self> {
+        (self.usd_per_mtok_input.is_some()
+            || self.usd_per_mtok_output.is_some()
+            || self.usd_per_mtok_cache_read.is_some())
+        .then_some(self)
+    }
+
+    /// Every token kind the ledger meters has a rate. Anything less makes a
+    /// cost computed from it a floor.
+    pub fn is_complete(self) -> bool {
+        self.usd_per_mtok_input.is_some()
+            && self.usd_per_mtok_output.is_some()
+            && self.usd_per_mtok_cache_read.is_some()
+    }
+
+    /// A rate that is not a non-negative number: below zero, NaN or infinite.
+    /// Refused by the caller so the tenant gets a sentence rather than the
+    /// check constraint's name (or a NUMERIC cast error for NaN).
+    pub fn is_malformed(self) -> bool {
+        [
+            self.usd_per_mtok_input,
+            self.usd_per_mtok_output,
+            self.usd_per_mtok_cache_read,
+        ]
+        .into_iter()
+        .flatten()
+        .any(|rate| !(rate >= 0.0 && rate.is_finite()))
+    }
+}
+
+/// Where a cost figure comes from — the label every reader of `cost_usd` has
+/// to show beside it.
+///
+/// Closed, low-cardinality and serialized as the wire string, for the reason
+/// `Verdict` is: this becomes a word on a screen, and a free-form string would
+/// invite a provider's number to be pasted in as the source.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CostSource {
+    /// Tokens × the tariff the tenant declared, on the `api_key` path — the
+    /// path whose tokens their key actually pays for.
+    DeclaredTariff,
+    /// Tokens × the tariff, but the connection is `cli`: the host's logged-in
+    /// CLI spends them and nobody meters that against this rate. Indicative.
+    DeclaredTariffOnCliPath,
+    /// No tariff declared, so no figure: `cost_usd` is null. The default,
+    /// because an empty ledger has no tariff to speak of.
+    #[default]
+    NoTariff,
+}
+
+impl CostSource {
+    /// For a connection that may not exist: no row is no tariff.
+    pub fn of(connection: Option<&Connection>) -> Self {
+        match connection {
+            Some(c) if c.tariff.is_some() => match c.access.path {
+                ModelPath::ApiKey => CostSource::DeclaredTariff,
+                ModelPath::Cli => CostSource::DeclaredTariffOnCliPath,
+            },
+            _ => CostSource::NoTariff,
+        }
     }
 }
 
@@ -97,15 +201,20 @@ pub struct Connection {
     /// What the verification call proved: the path, the model and the moment.
     /// Safe to serialize; there is no credential field on it.
     pub access: ModelAccess,
-    /// The sealed credential, or `None` on [`ModelPath::Cli`], which has none.
+    /// The sealed credential. On [`ModelPath::ApiKey`] always present; on
+    /// [`ModelPath::Cli`] it is the tenant's own subscription token
+    /// (`claude setup-token`) when they pasted one, and `None` for the host's
+    /// own login — `0084` relaxed `0050`'s biconditional exactly that far.
     ///
     /// The envelope from `agentos_providers::secrets::Envelope::to_bytes`, under
-    /// AAD `model://<tenant>`. `0050`'s CHECK constraint makes this a
-    /// biconditional with `path`: an `api_key` row always has one and a `cli`
-    /// row never does, so the `None` arm below the `ApiKey` match in
+    /// AAD `model://<tenant>`. An `api_key` row without one is still a failed
+    /// statement, so the `None` arm below the `ApiKey` match in
     /// `agentos_app::model_access::llm_for` is a database corruption and not an
     /// ordinary state.
     pub sealed_key: Option<Vec<u8>>,
+    /// What the tenant says a token costs them, if they said. Safe to serialize
+    /// and safe to be absent: `0079_tenant_model_tariff` makes it nullable.
+    pub tariff: Option<Tariff>,
 }
 
 /// Renders the ciphertext's length and never its bytes.
@@ -125,6 +234,7 @@ impl std::fmt::Debug for Connection {
                     .as_ref()
                     .map(|k| format!("{} bytes", k.len())),
             )
+            .field("tariff", &self.tariff)
             .finish()
     }
 }
@@ -140,8 +250,14 @@ impl std::fmt::Debug for Connection {
 /// query, which is what makes "the row and the key agree" a fact about one
 /// snapshot instead of a race between two.
 pub async fn load(tx: &mut TenantTx<'_>) -> Result<Option<Connection>, StoreError> {
+    // `::float8` on the NUMERIC columns: this crate has no decimal type, and a
+    // rate is a multiplier — see [`Tariff`] for why that is not a money leak.
     let row: Option<Row> = sqlx::query_as(
-        "SELECT path, verified_model, verified_at, sealed_key FROM tenant_model_access",
+        "SELECT path, verified_model, verified_at, sealed_key, \
+                usd_per_mtok_input::float8      AS usd_per_mtok_input, \
+                usd_per_mtok_output::float8     AS usd_per_mtok_output, \
+                usd_per_mtok_cache_read::float8 AS usd_per_mtok_cache_read \
+           FROM tenant_model_access",
     )
     .fetch_optional(&mut ***tx)
     .await?;
@@ -157,10 +273,10 @@ pub async fn load(tx: &mut TenantTx<'_>) -> Result<Option<Connection>, StoreErro
 ///
 /// # `sealed_key` is not optional in the sense the type suggests
 ///
-/// It is `Option` because [`ModelPath::Cli`] genuinely has no credential, not
-/// because an `api_key` connection may omit one. `0050`'s CHECK constraint makes
-/// the pairing a biconditional, so the wrong combination is a failed statement
-/// and not a row somebody discovers a week later:
+/// It is `Option` because [`ModelPath::Cli`] may run on the host's own login,
+/// not because an `api_key` connection may omit one. `0050`'s CHECK constraint,
+/// as `0084` left it, makes the wrong combination a failed statement and not a
+/// row somebody discovers a week later:
 ///
 /// ```text
 /// new row for relation "tenant_model_access" violates check constraint
@@ -203,6 +319,36 @@ pub async fn save(
     .execute(&mut ***tx)
     .await?;
     Ok(())
+}
+
+/// Write the tenant's declared tariff onto their connection row.
+///
+/// All three columns at once: a declaration replaces the previous one, so a
+/// component the caller left out becomes null (unknown), not the old value.
+/// `false` when there is no row to write on — a tenant declaring a price for a
+/// model they have not connected, which the caller turns into the sentence
+/// naming `POST /v1/model`.
+///
+/// [`save`]'s upsert deliberately does not touch these columns, so reconnecting
+/// keeps the tariff: the rate is the tenant's contract, and pasting a rotated
+/// key does not change what Anthropic charges them.
+pub async fn set_tariff(tx: &mut TenantTx<'_>, tariff: Tariff) -> Result<bool, StoreError> {
+    // `$n::float8::numeric`: the parameter arrives as float8 and lands in a
+    // NUMERIC column by an explicit cast, so `0.30` is stored as `0.3`, not as
+    // the float's 17-digit expansion.
+    let written = sqlx::query(
+        "UPDATE tenant_model_access SET \
+           usd_per_mtok_input      = $1::float8::numeric, \
+           usd_per_mtok_output     = $2::float8::numeric, \
+           usd_per_mtok_cache_read = $3::float8::numeric, \
+           updated_at = now()",
+    )
+    .bind(tariff.usd_per_mtok_input)
+    .bind(tariff.usd_per_mtok_output)
+    .bind(tariff.usd_per_mtok_cache_read)
+    .execute(&mut ***tx)
+    .await?;
+    Ok(written.rows_affected() > 0)
 }
 
 #[cfg(test)]
@@ -294,21 +440,36 @@ mod tests {
     /// the process holding the other half restarted. A constraint has no other
     /// half.
     ///
-    /// Both directions, and the second is not decoration: a `cli` row carrying a
-    /// credential is a key nothing will ever read and nobody can ever see, which
-    /// is the shape `connect`'s narrowing exists to prevent and which only the
-    /// table can enforce against a `psql` session.
+    /// A `cli` row carrying a credential used to be refused too; since `0084`
+    /// it is a tenant's own subscription token and it must round-trip.
     #[tokio::test]
-    async fn the_table_refuses_an_api_key_row_with_no_key_and_a_cli_row_with_one() {
+    async fn the_table_refuses_an_api_key_row_with_no_key_and_keeps_a_cli_rows_token() {
         let Some((db, tenant_id)) = fixture().await else {
             return;
         };
         let now = Utc::now();
 
+        let mut tx = db.tenant_tx(tenant_id).await.expect("tx");
+        let access = ModelAccess {
+            path: ModelPath::Cli,
+            model: ModelId::Opus5,
+            verified_at: now,
+        };
+        save(&mut tx, &access, Some(b"sealed-subscription"), now)
+            .await
+            .expect("a cli row may carry the tenant's subscription token");
+        let back = load(&mut tx).await.expect("load").expect("a row");
+        assert_eq!(
+            back.sealed_key.as_deref(),
+            Some(&b"sealed-subscription"[..])
+        );
+        assert_eq!(back.access.path, ModelPath::Cli);
+        tx.commit().await.expect("commit");
+
         for (path, sealed, what) in [
             (ModelPath::ApiKey, None, "api_key with no credential"),
-            (ModelPath::Cli, Some(&b"x"[..]), "cli carrying a credential"),
             (ModelPath::ApiKey, Some(&b""[..]), "an empty envelope"),
+            (ModelPath::Cli, Some(&b""[..]), "an empty envelope on cli"),
         ] {
             let mut tx = db.tenant_tx(tenant_id).await.expect("tx");
             let refused = save(
@@ -349,6 +510,9 @@ mod tests {
             verified_model: model.to_owned(),
             verified_at: now,
             sealed_key: Some(b"sealed".to_vec()),
+            usd_per_mtok_input: None,
+            usd_per_mtok_output: None,
+            usd_per_mtok_cache_read: None,
         };
 
         let read = row("api_key", "claude-opus-5")
@@ -401,6 +565,7 @@ mod tests {
                     verified_at: DateTime::from_timestamp(1_700_000_000, 0).expect("an instant"),
                 },
                 sealed_key: Some(vec![0xAB; 96]),
+                tariff: None,
             }
         );
         assert!(rendered.contains("96 bytes"), "{rendered}");
@@ -455,6 +620,78 @@ mod tests {
             err.to_string().contains("row-level security"),
             "the refusal has to be RLS, not a check constraint: {err}"
         );
+        tx.rollback().await.expect("rollback");
+    }
+
+    /// The tariff survives a reconnect, is null until declared, and comes back
+    /// as the decimal that went in — `0.30` and not the float's expansion.
+    #[tokio::test]
+    async fn a_declared_tariff_outlives_a_reconnect_and_needs_a_row_to_land_on() {
+        let Some((db, tenant_id)) = fixture().await else {
+            return;
+        };
+        let now = Utc::now();
+        let tariff = Tariff {
+            usd_per_mtok_input: Some(3.0),
+            usd_per_mtok_output: Some(15.0),
+            usd_per_mtok_cache_read: Some(0.30),
+        };
+
+        let mut tx = db.tenant_tx(tenant_id).await.expect("tx");
+        assert!(
+            !set_tariff(&mut tx, tariff).await.expect("set"),
+            "no connection, nothing to write on"
+        );
+
+        let cli = ModelAccess {
+            path: ModelPath::Cli,
+            model: ModelId::Opus5,
+            verified_at: now,
+        };
+        save(&mut tx, &cli, None, now).await.expect("save");
+        let read = load(&mut tx).await.expect("load").expect("connected");
+        assert_eq!(read.tariff, None, "not declared is null, not zero");
+        assert_eq!(CostSource::of(Some(&read)), CostSource::NoTariff);
+
+        assert!(set_tariff(&mut tx, tariff).await.expect("set"));
+        let read = load(&mut tx).await.expect("load").expect("connected");
+        assert_eq!(read.tariff, Some(tariff));
+        assert_eq!(
+            CostSource::of(Some(&read)),
+            CostSource::DeclaredTariffOnCliPath
+        );
+        let stored: String =
+            sqlx::query_scalar("SELECT usd_per_mtok_cache_read::text FROM tenant_model_access")
+                .fetch_one(&mut **tx)
+                .await
+                .expect("text");
+        assert_eq!(stored, "0.3", "NUMERIC holds the decimal, not the float");
+
+        // Reconnecting on the key path replaces the proof and keeps the rate.
+        save(
+            &mut tx,
+            &ModelAccess {
+                path: ModelPath::ApiKey,
+                ..cli
+            },
+            Some(b"sealed"),
+            now,
+        )
+        .await
+        .expect("save");
+        let read = load(&mut tx).await.expect("load").expect("connected");
+        assert_eq!(read.tariff, Some(tariff));
+        assert_eq!(CostSource::of(Some(&read)), CostSource::DeclaredTariff);
+
+        // A partial redeclaration nulls what it does not name.
+        let partial = Tariff {
+            usd_per_mtok_input: Some(1.0),
+            ..Tariff::default()
+        };
+        assert!(set_tariff(&mut tx, partial).await.expect("set"));
+        let read = load(&mut tx).await.expect("load").expect("connected");
+        assert_eq!(read.tariff, Some(partial));
+        assert!(!partial.is_complete());
         tx.rollback().await.expect("rollback");
     }
 }
