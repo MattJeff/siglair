@@ -357,14 +357,14 @@ an IP address or localhost` à toute requête dont le `Host` n'est ni une IP ni
 `localhost`, et il recopie ce `Host` tel quel dans le `webSocketDebuggerUrl`
 qu'il renvoie. Un client qui envoie `Host: browser:9222` est donc refusé :
 l'adaptateur doit résoudre `browser` et envoyer l'IP (c'est ce que fait
-chromedp). Le healthcheck contourne le problème en HTTP/1.0 sans `Host`.
+chromedp). Le healthcheck parle HTTP/1.1 avec `Host: 127.0.0.1:9222` (Chromium refuse HTTP/1.0, mesuré le 2026-09-10).
 
 ### Vérifier
 
 ```bash
 docker compose ps browser                       # (healthy)
 # ce que fait le healthcheck, à la main : la chaîne socat → Chromium
-docker compose exec browser bash -c 'exec 3<>/dev/tcp/127.0.0.1/9222; printf "GET /json/version HTTP/1.0\r\n\r\n" >&3; cat <&3'
+docker compose exec browser bash -c 'exec 3<>/dev/tcp/127.0.0.1/9222; printf "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nConnection: close\r\n\r\n" >&3; cat <&3'
 # depuis la place d'`api` — son image n'a ni curl ni wget, mais elle a node.
 # Host en IP, sinon 500 (voir ci-dessus) :
 docker compose exec api node -e "http.get({host:'browser',port:9222,path:'/json/version',headers:{Host:'127.0.0.1'}},r=>r.pipe(process.stdout))"

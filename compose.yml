@@ -129,10 +129,11 @@ services:
     # pilote un navigateur qui sort sur Internet. Seul `api` l'atteint, par nom.
     healthcheck:
       # Ni curl ni wget dans l'image, mais bash y est avec /dev/tcp. Par 9222,
-      # donc à travers socat : c'est le chemin qu'`api` emprunte. HTTP/1.0 sans
-      # en-tête Host, exprès : Chromium répond 500 à tout Host qui n'est ni une
-      # IP ni localhost — `api` doit envoyer l'IP du conteneur, pas `browser`.
-      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9222 && printf "GET /json/version HTTP/1.0\r\n\r\n" >&3 && grep -q webSocketDebuggerUrl <&3']
+      # donc à travers socat : c'est le chemin qu'`api` emprunte. HTTP/1.1 avec
+      # `Host: 127.0.0.1:9222`, mesuré sur le VPS le 2026-09-10 : Chromium
+      # refuse HTTP/1.0 (« Cannot handle request with protocol: HTTP/1.0 ») et
+      # répond 500 à tout Host qui n'est ni une IP ni localhost.
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9222 && printf "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nConnection: close\r\n\r\n" >&3 && grep -q webSocketDebuggerUrl <&3']
       interval: 5s
       timeout: 3s
       retries: 12
