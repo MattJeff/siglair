@@ -42,7 +42,10 @@ pub mod forecast;
 // l'écran d'accueil cesse de reconstituer l'activité à partir de six lectures
 // d'état — et pour que l'autonomie d'un fait se lise sur le fait lui-même.
 pub mod events;
+// la santé de la société : est-ce que ses employés pensent encore. Née du
+// 2026-09-06, quatre jours pendant lesquels tout le reste répondait vert.
 pub mod halt; // wave J: stop the whole company, and let it go again
+pub mod health;
 pub mod initiative;
 pub mod interview; // the guided conversation that finishes a company
 pub mod inventory;
@@ -52,6 +55,10 @@ pub mod inventory;
 pub mod invoices;
 pub mod knowledge;
 pub mod mcp;
+// le serveur MCP : l'autre sens de `mcp`. Celui-ci n'appelle personne — il
+// rend cette société pilotable depuis le Claude Code du fondateur, en rejouant
+// ses propres routes en interne. Une ligne de table par outil.
+pub mod mcp_server;
 pub mod model; // wave H: the tenant connects the model their employees think with
 // the one route that changes a limit. `POST /v1/companies` creates a role layer
 // where none exists; this one replaces one, and can only tighten — see its

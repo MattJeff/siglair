@@ -4,7 +4,8 @@
 # internationagent-web) et c'est elle que voit un humain ; `api` est
 # agentos-server, et **elle n'est publique que là où elle doit l'être** — les
 # webhooks qu'un fournisseur signe, le retour OAuth qu'un navigateur suit, les
-# annuaires qu'un vérificateur lit sans credential, et la porte A2A.
+# annuaires qu'un vérificateur lit sans credential, la porte A2A, et le serveur
+# MCP qu'un Claude Code appelle depuis dehors.
 #
 # Tout le reste de `/v1/*` n'est joignable que depuis le réseau des conteneurs :
 # la console parle à `http://api:8080` **côté serveur**, sa clé bearer ne quitte
@@ -55,12 +56,26 @@
 	#        s'authentifier, et une clé que personne ne peut lire ne vérifie rien ;
 	#   POST /a2a/jsonrpc            l'agent d'une autre entreprise, qui porte
 	#        une clé de tenant : c'est le serveur qui l'authentifie, pas Caddy.
+	#   POST /v1/mcp/server          le serveur MCP, que le fondateur branche sur
+	#        Claude Code depuis son Mac : le client est dehors, il n'y a pas de
+	#        session de console à emprunter, et il porte une clé de tenant que le
+	#        serveur vérifie — Caddy, ici non plus, ne défend rien.
+	#
+	# Ce chemin est écrit EN ENTIER, et surtout pas `/v1/mcp/*`. Le joker
+	# publierait tout le catalogue d'intégrations, qui n'a rien à faire dehors :
+	# `/v1/mcp/catalog`, `/v1/mcp/connect`, `/v1/mcp/servers` (et son
+	# `/{server}/discover`, et `/{server}/tools/{tool}`), `/v1/mcp/oauth/start`.
+	# Ces routes-là sont celles de la console, qui les appelle par
+	# `http://api:8080` sans jamais sortir du réseau des conteneurs. Le matcher
+	# `path` de Caddy est exact sans joker : `/v1/mcp/server` ne fait donc pas
+	# entrer `/v1/mcp/servers`, dont il n'est que le préfixe — c'est une lettre
+	# d'écart entre le serveur MCP et l'annuaire des connecteurs d'un tenant.
 	#
 	# PAS de limite de débit ici. Celle du serveur est de 600 requêtes par tenant
 	# et par minute, appliquée APRÈS l'authentification : le trafic anonyme sur
 	# les chemins ci-dessus n'est donc limité par rien dans ce processus. C'est à
 	# Cloudflare de le faire, pas à un plugin Caddy qu'il faudrait compiler.
-	@api path /v1/webhooks/* /v1/mcp/oauth/callback /a2a/* /.well-known/*
+	@api path /v1/webhooks/* /v1/mcp/oauth/callback /v1/mcp/server /a2a/* /.well-known/*
 	handle @api {
 		header X-Robots-Tag "noindex, nofollow"
 		reverse_proxy api:8080
