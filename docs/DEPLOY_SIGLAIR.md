@@ -195,6 +195,7 @@ authentique.
 | `EMAIL_API_KEY` | vide → `MockEmailProvider` | présente = vrai client Resend |
 | `TELEPHONY_API_KEY` | vide → `MockTelephony` | format `ACxxxx:auth_token` ; **une moitié seule est un refus au boot nommé** |
 | `BROWSER_API_KEY` | vide → `MockBrowser` | format `project-id:api-key`, même refus sur une moitié |
+| `BROWSER_CDP_URL` | vide → `BROWSER_FETCH` ou le faux | **`http://browser:9222`** : le Chromium du service `browser` (§5). Une clé Browserbase l'emporte |
 | `EMBEDDER_API_KEY` | vide → hash SHA-256 `mock-sha256-1536` | présente = `OpenAiEmbedder`. **La poser ne ré-embarque pas l'existant** : un corpus ingéré sur le hash cesse d'être trouvable jusqu'à réingestion |
 | `MCP_BRIDGE_BIND` | non défini | **hébergement MCP éteint. À laisser non défini** : c'est un conteneur par slug qu'un tenant peut inventer, sur cette machine-ci |
 | `MCP_BRIDGES_PER_TENANT` / `MCP_BRIDGE_IMAGE` | `0` / `node:22-alpine` | sans effet tant que `MCP_BRIDGE_BIND` est vide |
@@ -265,7 +266,8 @@ Rien de ce qui suit n'a été exécuté.
 3. **Copier à la main dans `/opt/siglair`** : `compose.yml`, `docker/Caddyfile`,
    `scripts/deploy.sh`. Le workflow ne synchronise rien — il ne fait que lancer
    `deploy.sh` par SSH. Vérifier `jq` sur la machine : `deploy.sh` en dépend.
-4. **Réécrire `/opt/siglair/.env`** (§2), mode 600. L'ancien contient les
+4. **Réécrire `/opt/siglair/.env`** (§2, et `BROWSER_CDP_URL=http://browser:9222`
+   de §5), mode 600. L'ancien contient les
    secrets de siglair et **aucune** des variables ci-dessus.
 5. **Vérifier le disque** avant le premier démarrage : 69 fichiers de migration
    s'appliquent au boot, dont une extension et un index HNSW.
@@ -311,3 +313,84 @@ bucket. Qui lance le `pg_dump`, à quelle fréquence, où atterrit-il — et
 `AGENTOS_MASTER_KEY` se sauvegarde avec, sous peine d'avoir une base qu'aucune
 identité ne peut plus signer. Le volume `claude_home` mérite le même traitement :
 il porte la connexion du CLI, qui ne se reconstruit pas depuis l'image.
+
+---
+
+## 5. Le navigateur
+
+Le service `browser` de `compose.yml` est un Chromium sans tête
+(`chromedp/headless-shell`, **épinglé par digest**) qui parle CDP. C'est « notre
+Browserbase » : `api` y ouvre un contexte par tâche, y rejoue les `BrowserStep`
+avec le pilote CDP qu'il utilisait déjà contre Browserbase, et scelle le pot de
+cookies de l'employé en base à la fin. Le contrat complet — sémaphore à trois
+onglets, cookies scellés, `blocked_by_site` — est `docs/BROWSER.md` côté
+InternationalAgent ; ici il n'y a que le conteneur.
+
+**Aucun port publié, et il faut que ça le reste.** Le port CDP n'a pas
+d'authentification : qui le joint pilote un navigateur qui sort sur Internet
+avec les cookies des employés. Il n'est joignable que par nom (`browser:9222`)
+sur le réseau des conteneurs, donc depuis `api`. Dans l'autre sens, Chromium est
+lancé avec `--host-resolver-rules` qui envoie `db`, `api`, `web`, `caddy` et
+`localhost` sur `~NOTFOUND` : un script de page ne peut pas frapper la base par
+le navigateur. `scripts/check-compose.sh`, lancé par la CI, échoue si l'une de
+ces deux propriétés disparaît de `compose.yml`.
+
+**La mémoire.** `mem_limit: 1g` sur les ~2,9 Go que laissent `db`, `api` et
+`web` : ≈ 400 Mo de base et 100-150 Mo par onglet, d'où trois onglets au plus
+côté adaptateur (`BROWSER_MAX_TABS`, défaut 3 ; au-delà on attend
+`BROWSER_QUEUE_WAIT`, défaut 60 s, puis l'étape est `Retryable`). Dépasser la
+limite tue un renderer, pas la base. `shm_size: 256m` et
+`--disable-dev-shm-usage` parce qu'un Chromium à court de `/dev/shm` plante en
+silence.
+
+**Ce que l'image contient**, relevé couche par couche : Debian trixie-slim avec
+`bash`, `dash` et `grep`, plus `socat` — **ni `curl` ni `wget`**. Et un détail
+qui fixe la forme de tout le reste : `headless_shell` n'écoute que sur
+`127.0.0.1`, `--remote-debugging-address` est ignoré. C'est `socat` qui expose
+9222 et relaie vers 9223. Le `run.sh` de l'image passe ses arguments sans
+guillemets, ce qui éclaterait `--host-resolver-rules` en cinq mots ; d'où
+l'`entrypoint` réécrit dans `compose.yml`, qui fait la même chose avec `"$@"`
+quoté.
+
+**L'en-tête `Host`.** Chromium répond `500 Host header is specified and is not
+an IP address or localhost` à toute requête dont le `Host` n'est ni une IP ni
+`localhost`, et il recopie ce `Host` tel quel dans le `webSocketDebuggerUrl`
+qu'il renvoie. Un client qui envoie `Host: browser:9222` est donc refusé :
+l'adaptateur doit résoudre `browser` et envoyer l'IP (c'est ce que fait
+chromedp). Le healthcheck parle HTTP/1.1 avec `Host: 127.0.0.1:9222` (Chromium refuse HTTP/1.0, mesuré le 2026-09-10).
+
+### Vérifier
+
+```bash
+docker compose ps browser                       # (healthy)
+# ce que fait le healthcheck, à la main : la chaîne socat → Chromium
+docker compose exec browser bash -c 'exec 3<>/dev/tcp/127.0.0.1/9222; printf "GET /json/version HTTP/1.1\r\nHost: 127.0.0.1:9222\r\nConnection: close\r\n\r\n" >&3; cat <&3'
+# depuis la place d'`api` — son image n'a ni curl ni wget, mais elle a node.
+# Host en IP, sinon 500 (voir ci-dessus) :
+docker compose exec api node -e "http.get({host:'browser',port:9222,path:'/json/version',headers:{Host:'127.0.0.1'}},r=>r.pipe(process.stdout))"
+# et côté serveur : browser_js vrai, et `browser` absent de mock_adapters
+curl -sS http://127.0.0.1:8080/readyz
+```
+
+### Couper
+
+Retirer `BROWSER_CDP_URL` de `/opt/siglair/.env` et recréer `api` :
+
+```bash
+docker compose up -d api
+```
+
+Le conteneur `browser` peut rester : sans la variable, `api` retombe sur
+`BROWSER_FETCH=http` ou sur le faux, et ne lui parle plus. `api` dépend de lui
+(`condition: service_healthy`), donc l'arrêter tout à fait demande de retirer
+aussi la dépendance dans `compose.yml` — et `scripts/check-compose.sh` le
+refusera, exprès.
+
+### Mettre à jour
+
+Relever le digest de l'index (`docker manifest inspect
+chromedp/headless-shell:stable`, ou `docker buildx imagetools inspect`), le
+remplacer dans `compose.yml`, copier le fichier dans `/opt/siglair`, puis
+`docker compose up -d` : une référence par digest qui n'est pas en local est
+tirée. `scripts/deploy.sh` ne fait `pull` que d'`api` et `web`, et n'a pas besoin
+de plus.
