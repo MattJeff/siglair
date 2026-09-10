@@ -69,6 +69,81 @@ services:
     restart: unless-stopped
     logging: *logs
 
+  browser:
+    # Le Chromium des employés — « notre Browserbase » (docs/BROWSER.md dans
+    # InternationalAgent). `api` lui parle en CDP par le réseau des conteneurs :
+    # BROWSER_CDP_URL=http://browser:9222 dans .env sélectionne l'adaptateur.
+    #
+    # Épinglée par DIGEST, pas par tag : `stable` bouge à chaque version de
+    # Chromium, et le pilote CDP a déjà vu un flux changer sous le parseur (cf.
+    # le CLI Claude, épinglé pour la même raison). C'est aussi ce qui dispense
+    # scripts/deploy.sh d'un `pull` : une référence par digest ne bouge jamais,
+    # et quand ce fichier en change, `up -d` tire la nouvelle parce qu'elle
+    # n'est pas en local. Digest de l'index multi-arch relevé le 2026-09-10 sur
+    # registry-1.docker.io (Chromium 151.0.7922.109, base debian:trixie-slim).
+    image: chromedp/headless-shell:stable@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
+    # tini comme PID 1 : Chromium laisse des zombies derrière ses renderers,
+    # la README de l'image le dit elle-même.
+    init: true
+    # Ce que l'image contient, relevé couche par couche sans Docker : bash,
+    # dash, grep, socat — ni curl ni wget. Son entrypoint `/headless-shell/run.sh`
+    # lance `socat TCP4-LISTEN:9222,fork TCP4:127.0.0.1:9223` puis
+    # `headless-shell --no-sandbox --use-gl=angle --use-angle=swiftshader
+    # --remote-debugging-address=0.0.0.0 --remote-debugging-port=9223 $@`.
+    #
+    # Deux raisons de le réécrire ici plutôt que de le laisser faire :
+    #
+    #   1. `$@` y est SANS guillemets : `--host-resolver-rules="MAP db …"`
+    #      serait éclaté en cinq mots, et Chromium ouvrirait `db` comme une URL
+    #      au lieu de l'interdire. Le "$@" ci-dessous est quoté.
+    #   2. `--remote-debugging-address` est IGNORÉ par headless_shell : sa
+    #      fabrique de socket n'écoute que 127.0.0.1 / ::1
+    #      (headless/lib/browser/headless_devtools.cc, CreateLocalHostServerSocket).
+    #      C'est pour ça que l'image passe par socat, et c'est pour ça qu'on le
+    #      garde : sans lui, `api` ne joint pas 9222.
+    #
+    # `$$@` : docker compose interpole `$`, `$$` en rend un seul.
+    entrypoint:
+      - bash
+      - -c
+      - 'socat TCP4-LISTEN:9222,fork,reuseaddr TCP4:127.0.0.1:9223 & exec /headless-shell/headless-shell "$$@"'
+      - headless-shell
+    command:
+      # Les trois premiers sont ceux de run.sh. Pas de `--headless=new` : ce
+      # binaire est le mode sans tête, le drapeau n'y ajoute rien.
+      - --no-sandbox
+      - --use-gl=angle
+      - --use-angle=swiftshader
+      - --remote-debugging-port=9223
+      - --disable-gpu
+      # Sans /dev/shm suffisant Chromium plante en silence ; ce drapeau le fait
+      # écrire dans /tmp, et shm_size ci-dessous couvre ce qu'il y met malgré tout.
+      - --disable-dev-shm-usage
+      # Un script de page ne peut pas frapper la base, l'API, la console ou le
+      # proxy par le navigateur : ces noms ne résolvent pas. Le port CDP n'étant
+      # pas publié, personne d'autre ne le peut non plus. scripts/check-compose.sh
+      # échoue si cette ligne disparaît.
+      - --host-resolver-rules=MAP db ~NOTFOUND, MAP api ~NOTFOUND, MAP web ~NOTFOUND, MAP caddy ~NOTFOUND, MAP localhost ~NOTFOUND
+    shm_size: 256m
+    # Pas de `ports:`. Le port CDP n'a AUCUNE authentification : qui le joint
+    # pilote un navigateur qui sort sur Internet. Seul `api` l'atteint, par nom.
+    healthcheck:
+      # Ni curl ni wget dans l'image, mais bash y est avec /dev/tcp. Par 9222,
+      # donc à travers socat : c'est le chemin qu'`api` emprunte. HTTP/1.0 sans
+      # en-tête Host, exprès : Chromium répond 500 à tout Host qui n'est ni une
+      # IP ni localhost — `api` doit envoyer l'IP du conteneur, pas `browser`.
+      test: ["CMD", "bash", "-c", 'exec 3<>/dev/tcp/127.0.0.1/9222 && printf "GET /json/version HTTP/1.0\r\n\r\n" >&3 && grep -q webSocketDebuggerUrl <&3']
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    # 1 Go sur les ~2,9 Go libres du VPS (3 819 Mo, db 1 Go, api et web 512 Mo) :
+    # ≈ 400 Mo de base + 100-150 Mo par onglet, d'où BROWSER_MAX_TABS=3 côté
+    # adaptateur. Au-delà de la limite c'est un renderer que le noyau tue, pas
+    # la base.
+    mem_limit: 1g
+    restart: unless-stopped
+    logging: *logs
+
   api:
     # `build:` pour le développement local. En production l'image est construite
     # par GitHub Actions et seulement tirée : sur 2 vCPU une compilation Rust en
@@ -96,6 +171,10 @@ services:
       - "${BIND_ADDR:-127.0.0.1}:${API_PORT:-8080}:8080"
     depends_on:
       db:
+        condition: service_healthy
+      # Sain, pas seulement démarré : l'adaptateur lit /json/version au premier
+      # tour, et un Chromium encore en train de se lancer serait un tour perdu.
+      browser:
         condition: service_healthy
     volumes:
       # Le HOME du CLI Claude : `~/.claude/` (identifiants OAuth) et

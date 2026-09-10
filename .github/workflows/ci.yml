@@ -37,6 +37,19 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 2s --health-timeout 3s --health-retries 30
+      # Same image and digest as compose.yml. The upstream Chromium contract
+      # suite skips itself without BROWSER_CDP_URL, and test.sh turns a skip
+      # into a red build — so this container is not optional. The port is
+      # mapped on the runner only; in production nothing publishes it.
+      # Probed on 9223, Chromium's own listener (9222 is the image's socat
+      # relay); bash with /dev/tcp because the image has neither curl nor wget.
+      browser:
+        image: chromedp/headless-shell:stable@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
+        ports: ["9222:9222"]
+        options: >-
+          --shm-size=256m
+          --health-cmd "bash -c '</dev/tcp/127.0.0.1/9223'"
+          --health-interval 2s --health-timeout 3s --health-retries 30
 
     # scripts/test.sh and the psql steps below read these; no step hardcodes a
     # host. DATABASE_URL is deliberately NOT set here — test.sh builds one per
@@ -47,9 +60,14 @@ jobs:
       PGUSER: postgres
       PGPASSWORD: postgres
       PGDATABASE: postgres
+      BROWSER_CDP_URL: http://localhost:9222
 
     steps:
       - uses: actions/checkout@v5
+
+      # Cheapest of all: no build, no database. See the script for what it
+      # refuses, and why a deploy would not have noticed.
+      - run: ./scripts/check-compose.sh
 
       # scripts/test.sh's first guard is `command -v psql`, and the virgin
       # database step below shells out to it too. The runner image ships
