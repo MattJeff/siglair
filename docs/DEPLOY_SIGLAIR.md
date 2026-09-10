@@ -216,7 +216,8 @@ qu'aucune variable ne corrige. Il est nommé dans **chaque** ligne de boot.
 ## 3. Ce qui est public, et ce qui ne doit pas l'être
 
 `siglair.com` est derrière Cloudflare, donc l'API est joignable publiquement.
-`docker/Caddyfile` renvoie **404** sur trois chemins et relaie tout le reste.
+`docker/Caddyfile` renvoie **404** sur trois chemins, en relaie cinq vers
+`api`, et envoie tout le reste sur la console.
 
 **Fermé, et il faut que ça le reste** — ils sont hors de la pile
 d'authentification par construction (SPEC.md §20), donc rien d'autre ne les
@@ -236,8 +237,16 @@ protège :
 jamais entendu parler de nous n'a rien pour s'authentifier, et une clé que
 personne ne peut lire ne vérifie rien).
 
-**Ouvert derrière `Authorization: Bearer`** : tout le reste de `/v1/*` et
-`/a2a/jsonrpc`. C'est ce que `orizn-web` appellera.
+**Ouvert derrière `Authorization: Bearer`** : `POST /a2a/jsonrpc`, et
+`POST /v1/mcp/server` — le serveur MCP, §6. Ce sont les deux seuls chemins
+publiés que Caddy relaie sans qu'aucun credential ne soit nécessaire pour
+*arriver* : c'est le serveur qui refuse derrière.
+
+**Tout le reste de `/v1/*` n'est PAS public**, et c'est la correction la plus
+importante de cette section : `docker/Caddyfile` ne relaie vers `api` que les
+chemins listés ci-dessus, et envoie tout le reste sur la console Next.js — qui
+répond 404. La console appelle l'API par `http://api:8080`, côté serveur, sur le
+réseau des conteneurs ; sa clé bearer ne quitte jamais son processus.
 
 **La limite de débit est à poser dans Cloudflare, pas ici.** Celle du serveur
 est de 600 requêtes par tenant et par minute, en mémoire du processus, et la
@@ -394,3 +403,91 @@ remplacer dans `compose.yml`, copier le fichier dans `/opt/siglair`, puis
 `docker compose up -d` : une référence par digest qui n'est pas en local est
 tirée. `scripts/deploy.sh` ne fait `pull` que d'`api` et `web`, et n'a pas besoin
 de plus.
+
+---
+
+## 6. Le serveur MCP
+
+`POST /v1/mcp/server` est le serveur MCP du produit : du JSON-RPC, authentifié
+par **la même clé d'API que le reste** (`Authorization: Bearer …`, une clé de
+tenant). Il est publié pour que le fondateur y branche Claude Code depuis son
+Mac — un client qui est dehors, qui n'a pas de session de console à emprunter et
+qui ne peut donc pas passer par `http://api:8080`.
+
+### Ce qui est publié, et ce qui ne l'est pas
+
+Le matcher `@api` de `docker/Caddyfile` porte **`/v1/mcp/server`, écrit en
+entier**. Pas de joker `/v1/mcp/*` : il publierait du même coup le catalogue
+d'intégrations, qui est à la console et à personne d'autre —
+`GET /v1/mcp/catalog`, `POST /v1/mcp/connect`, `/v1/mcp/servers` (avec son
+`/{server}/discover` et son `/{server}/tools/{tool}`) et `POST /v1/mcp/oauth/start`.
+Le matcher `path` de Caddy est exact tant qu'il ne porte pas d'astérisque :
+`/v1/mcp/server` ne fait donc **pas** entrer `/v1/mcp/servers`, dont il n'est
+que le préfixe. Une lettre sépare le serveur MCP de l'annuaire des connecteurs
+d'un tenant, et c'est pour cette lettre-là que le contrôle ci-dessous existe.
+
+`GET /v1/mcp/oauth/callback` reste publié pour sa raison propre (§3 : c'est un
+navigateur qui revient), et sans credential.
+
+`scripts/check-compose.sh`, lancé par la CI dans `ci.yml` **et** dans `deploy.yml`,
+échoue si `/v1/mcp/server` disparaît du matcher, ou si un joker apparaît sous
+`/v1/mcp`. Il ne connaît que la forme sur une ligne `@api path …` : un matcher
+réécrit en bloc est un échec délibéré, à relire à la main.
+
+### Installer côté fondateur
+
+```bash
+claude mcp add --transport http siglair https://siglair.com/v1/mcp/server \
+  --header "Authorization: Bearer <clé d'API du tenant>"
+```
+
+Forme vérifiée le **2026-09-10** dans la documentation de Claude Code :
+<https://code.claude.com/docs/en/mcp-quickstart.md> (et
+<https://code.claude.com/docs/en/mcp.md>). `--transport http` est bien la valeur
+pour un point d'entrée HTTP — `sse` est l'ancien transport, déprécié ;
+`--header` est au singulier et se répète pour plusieurs en-têtes. La portée par
+défaut est `--scope local` : la déclaration ne vaut que pour le projet courant
+sur ce Mac. `--scope user` la rend disponible dans tous les projets, ce qui est
+sans doute ce qu'on veut ici ; `--scope project` l'écrirait dans un `.mcp.json`
+versionné — donc **jamais**, la clé est dans la commande.
+
+La clé est celle d'un tenant (§4.9). Elle est en clair dans la configuration du
+CLI ; la révoquer, c'est supprimer la ligne dans `api_keys` ou la retirer de
+`AGENTOS_API_KEYS`, pas éditer un fichier sur le Mac.
+
+### Vérifier depuis le VPS
+
+Avant de soupçonner Caddy, TLS ou Cloudflare, vérifier que le serveur répond du
+tout, sur le port de l'API et sans passer par le proxy :
+
+```bash
+curl -s -X POST localhost:8080/v1/mcp/server \
+  -H 'authorization: Bearer <clé>' \
+  -H 'content-type: application/json' \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}'
+```
+
+Puis la même chose sur `https://siglair.com/v1/mcp/server` : si le premier
+répond et pas le second, c'est le Caddyfile du VPS qui n'a pas été poussé — voir
+juste en dessous. Sans en-tête, les deux doivent répondre **401** ; une réponse
+HTML ou un 404 de Next.js sur le second dit que la requête est partie sur la
+console.
+
+### Le Caddyfile ne se déploie pas tout seul
+
+Mesuré le 2026-09-10, et c'est le piège de ce changement en particulier : le job
+`deploy` **ne copie ni `compose.yml`, ni `docker/Caddyfile`, ni `scripts/`** sur
+le VPS. Il ouvre une session SSH à commande forcée qui lance
+`/opt/siglair/scripts/deploy.sh`, lequel ne fait que tirer les images. Fusionner
+ce commit et voir la CI verte **ne publie pas** `/v1/mcp/server` : le Caddy du
+VPS tourne toujours sur l'ancien fichier.
+
+```bash
+scp docker/Caddyfile root@<vps>:/opt/siglair/docker/Caddyfile
+ssh root@<vps> 'cd /opt/siglair && docker compose up -d caddy'
+```
+
+La clé SSH de déploiement est à commande forcée (en-tête de ce document) et
+ne donne pas de shell :
+ces deux lignes demandent l'accès administrateur de la machine, pas le secret
+GitHub.
