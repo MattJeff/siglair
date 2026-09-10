@@ -50,19 +50,6 @@ jobs:
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 2s --health-timeout 3s --health-retries 30
-      # Même image et même digest que compose.yml. La suite Chromium du dépôt
-      # amont saute sans BROWSER_CDP_URL, et test.sh fait d'un saut un build
-      # rouge : ce conteneur n'est donc pas optionnel. Le port n'est mappé que
-      # sur le runner ; en production rien ne le publie. Sondé sur 9223, le
-      # port de Chromium lui-même (9222 est le relais socat de l'image) ; bash
-      # et /dev/tcp parce que l'image n'a ni curl ni wget.
-      browser:
-        image: chromedp/headless-shell:stable@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04
-        ports: ['9222:9222']
-        options: >-
-          --shm-size=256m
-          --health-cmd "bash -c '</dev/tcp/127.0.0.1/9223'"
-          --health-interval 2s --health-timeout 3s --health-retries 30
 
     # scripts/test.sh lit ces variables ; aucune étape ne code un hôte en dur.
     # DATABASE_URL n'est délibérément PAS posée : test.sh en fabrique une par
@@ -77,6 +64,29 @@ jobs:
 
     steps:
       - uses: actions/checkout@v5
+      # Le Chromium de la suite amont, lancé à la main et non en `services:` :
+      # un service ne prend pas d'arguments, et il en faut deux. Le relais socat
+      # sur 9222 (l'image n'écoute que sur 127.0.0.1), et la règle qui fait
+      # résoudre `portal.example.com` vers le runner, où les tests servent leurs
+      # pages — le conteneur a son propre 127.0.0.1. Mesuré le 2026-09-10 : sans
+      # ça, trois tests en `navigation_failed` (run 34458923072). Les tests
+      # écoutent sur toutes les interfaces et s'annoncent à BROWSER_TEST_SITE_HOST.
+      - name: chromium pour la suite amont
+        run: |
+          RUNNER_IP=$(hostname -I | awk '{print $1}')
+          echo "BROWSER_TEST_SITE_HOST=$RUNNER_IP" >> "$GITHUB_ENV"
+          docker run -d --name browser -p 9222:9222 --shm-size=256m --init \
+            --entrypoint bash \
+            chromedp/headless-shell:stable@sha256:2d349b544a1ea6b5b5fd7c0fe99215ff662339c57407ee2e8c0a11af93516b04 \
+            -c 'socat TCP4-LISTEN:9222,fork,reuseaddr TCP4:127.0.0.1:9223 & exec /headless-shell/headless-shell "$@"' headless-shell \
+            --no-sandbox --use-gl=angle --use-angle=swiftshader --remote-debugging-port=9223 \
+            --disable-gpu --disable-dev-shm-usage \
+            "--host-resolver-rules=MAP portal.example.com $RUNNER_IP"
+          for i in $(seq 1 30); do
+            curl -sf -H "Host: 127.0.0.1:9222" http://127.0.0.1:9222/json/version >/dev/null && break
+            sleep 2
+          done
+          curl -sf -H "Host: 127.0.0.1:9222" http://127.0.0.1:9222/json/version | head -c 120; echo
 
       # Le moins cher de tous : ni build ni base. Le script dit ce qu'il refuse,
       # et pourquoi un déploiement ne l'aurait pas vu.
