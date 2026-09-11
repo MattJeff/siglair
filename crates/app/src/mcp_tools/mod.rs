@@ -14,7 +14,7 @@
 //! Le `name`, le `title` et la `description` d'un outil ne sont pas de la
 //! documentation : ce sont **l'interface**. C'est littéralement ce qu'un modèle
 //! lit pour décider quel outil appeler, et ce qu'un humain lit dans la liste de
-//! son terminal. Les 116 lignes ont été écrites en un jour par trois mains
+//! son terminal. Les premières lignes ont été écrites en un jour par trois mains
 //! parallèles, chacune dans son fichier ; elles marchaient toutes et elles ne
 //! se ressemblaient pas. La convention ci-dessous a été **relue sur la table
 //! entière** le 2026-09-11 plutôt qu'inventée, puis appliquée partout.
@@ -150,6 +150,48 @@ mod tests {
         }
     }
 
+    /// **Un nombre écrit en prose ne se rejoue pas.**
+    ///
+    /// Trois fichiers annonçaient « 116 outils » le 2026-09-11 alors que le
+    /// registre en portait 136 : le compte datait d'avant l'ouverture des
+    /// quatre domaines de la croissance, et personne ne l'avait revu parce que
+    /// rien ne pouvait le contredire. `crates/eval/src/cost.rs` dit déjà la
+    /// règle pour les prix — *prose cannot be re-run* — et c'est le même
+    /// problème : un chiffre juste le jour où on le tape, faux la vague
+    /// suivante, et lu comme vrai entre les deux.
+    ///
+    /// Alors le voici rejouable. Ce test lit les fichiers qui annoncent un
+    /// compte et exige qu'il soit celui du registre. Les deux issues sont
+    /// bonnes : soit on met le chiffre à jour, soit on retire la phrase qui le
+    /// porte — c'est ce qui a été fait de deux commentaires de ce module, dont
+    /// le compte n'apprenait rien à personne.
+    #[test]
+    fn every_written_count_is_the_registry_s_own() {
+        let expected = registry().len();
+        // Chemin relatif à ce paquet, comme le test de couverture ci-dessous.
+        let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../..");
+        let claims = [
+            ("crates/app/src/mcp_server.rs", "à chacun des {} outils"),
+            ("docs/MCP_SERVEUR.md", "{\"tools\": {},"),
+            ("docs/PLUGIN.md", "par-dessus les {} outils"),
+            ("docs/PLUGIN.md", "rend {} outils"),
+            ("docs/PLUGIN.md", "donne {} verbes bruts"),
+            ("docs/PLUGIN.md", "les {} lignes du registre"),
+        ];
+        for (file, shape) in claims {
+            let source = std::fs::read_to_string(format!("{root}/{file}"))
+                .unwrap_or_else(|_| panic!("lire {file}"));
+            let wanted = shape.replace("{}", &expected.to_string());
+            assert!(
+                source.contains(&wanted),
+                "{file} n'annonce plus le bon compte : le registre porte \
+                 {expected} outils, et {wanted:?} n'y est pas. Mettre le \
+                 chiffre à jour, ou retirer la phrase qui le porte et sa ligne \
+                 ici."
+            );
+        }
+    }
+
     /// **Le test qui répond à « est-ce que j'ai vraiment tout ? »**
     ///
     /// Les trois domaines prouvent chacun que leurs chemins existent. Personne
@@ -173,6 +215,12 @@ mod tests {
             (
                 "/v1/browser/live/{employee_id}",
                 "un flux SSE ; s'y abonner allume la capture d'écran et rendre l'éteindrait",
+            ),
+            (
+                "/v1/public-register",
+                "lecture anonyme servie hors de l'étage `api` ; l'exécuteur ne rejoue que \
+                 cet étage-là, donc un outil qui la déclarerait rendrait un 404 nu — voir \
+                 `aucun_outil_ne_pointe_sur_un_chemin_de_letage_public`",
             ),
         ];
         /// Les préfixes qui ne sont pas des verbes de locataire.
@@ -250,6 +298,80 @@ mod tests {
         }
     }
 
+    /// **Ce que le test au-dessus ne voyait pas, et qui coûtait un outil mort.**
+    ///
+    /// Il demande qu'un chemin soit monté *quelque part*. L'exécuteur MCP, lui,
+    /// ne rejoue qu'un seul étage — celui que `with_api_stack` enveloppe — et un
+    /// chemin servi hors de cet étage n'y est pas atteignable. Mesuré le
+    /// 2026-09-11 en marchant le chemin du fondateur depuis un terminal :
+    /// `public_register_get` déclarait `/v1/public-register`, servi uniquement
+    /// par `public_register::public_router`, et rendait un **404 nu** — sans
+    /// code, sans phrase — à chaque appel, sur chaque déploiement. Un 404 qu'un
+    /// modèle prend pour sa propre faute est pire qu'un outil absent.
+    ///
+    /// L'étage se lit dans le nom de la fonction qui monte la route : ce dépôt
+    /// appelle `public_router` (et `card_router`) ce qu'il sert sans credential.
+    /// Un chemin qui n'est monté que là, et nulle part dans un `router`
+    /// ordinaire, ne peut pas être un outil.
+    #[test]
+    fn aucun_outil_ne_pointe_sur_un_chemin_de_letage_public() {
+        let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../apps/server/src/routes");
+        let mut public_only: Vec<String> = Vec::new();
+        let mut behind_a_key: Vec<String> = Vec::new();
+
+        for entry in std::fs::read_dir(dir).expect("les routes du serveur") {
+            let path = entry.expect("entrée").path();
+            if path.extension().is_none_or(|ext| ext != "rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path).expect("lire un module de routes");
+            // Découpé sur les déclarations de fonction : chaque morceau
+            // appartient à la dernière signature vue, et le nom de celle-ci dit
+            // l'étage. `#[cfg(test)]` compris — un module de test qui monte la
+            // route dans un `router` ordinaire dit la même chose que le vrai.
+            let mut sans_credential = false;
+            for line in source.lines() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("pub fn ") || trimmed.starts_with("fn ") {
+                    sans_credential =
+                        trimmed.contains("public_router") || trimmed.contains("card_router");
+                }
+                let Some(at) = trimmed.find(".route(\"") else {
+                    continue;
+                };
+                let rest = &trimmed[at + ".route(\"".len()..];
+                let Some(end) = rest.find('"') else { continue };
+                let route = rest[..end].to_owned();
+                if !route.starts_with("/v1/") {
+                    continue;
+                }
+                if sans_credential {
+                    public_only.push(route);
+                } else {
+                    behind_a_key.push(route);
+                }
+            }
+        }
+        assert!(
+            !public_only.is_empty(),
+            "l'extraction n'a trouvé aucun chemin d'étage public : le format a changé"
+        );
+
+        let unreachable: Vec<&str> = registry()
+            .iter()
+            .map(|tool| tool.path)
+            .filter(|path| {
+                public_only.iter().any(|route| route == path)
+                    && !behind_a_key.iter().any(|route| route == path)
+            })
+            .collect();
+        assert!(
+            unreachable.is_empty(),
+            "ces chemins ne sont servis que sur l'étage public, que l'exécuteur MCP ne rejoue \
+             pas : un outil qui les déclare rend un 404 nu à chaque appel. {unreachable:#?}"
+        );
+    }
+
     /// Les seuls derniers segments qu'un nom d'outil peut porter.
     ///
     /// Fermée exprès. Une liste ouverte — « le dernier segment doit être un
@@ -302,6 +424,13 @@ mod tests {
         "release",
         "reassign",
         "amend",
+        // Soumettre à quelqu'un d'autre ce qu'il décidera. Ajouté le 2026-09-11
+        // pour `content_drafts_propose`, et il a fallu qu'aucun des trente
+        // autres ne dise le geste : `publish` et `post` promettent que c'est en
+        // ligne, `send` qu'il n'y a rien à décider, `create` et `add` que c'est
+        // chez nous. Une pull request est les trois contraires — chez le
+        // client, pas en ligne, et elle attend qu'une personne tranche.
+        "propose",
     ];
 
     /// `domaine[_objet]_verbe` : au moins deux segments, et le dernier est un
@@ -336,7 +465,7 @@ mod tests {
             .count()
     }
 
-    /// **La convention du module, tenue sur les 116 lignes.**
+    /// **La convention du module, tenue sur toute la table.**
     ///
     /// Une phrase de description ne prouve rien : c'est celle qu'on écrit en
     /// recopiant le nom de la route. Deux obligent à dire *quand* s'en servir,
