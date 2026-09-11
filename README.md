@@ -258,6 +258,35 @@ current digest and writes nothing, `PUT …/tools/{tool}` takes 64 hex character
 and 409s unless they match — and the mismatch response deliberately does not
 hand you the right answer.
 
+**The product is a server the founder installs, not a screen.** `POST
+/v1/mcp/server` speaks JSON-RPC and declares **136 tools**, and a tool here is
+**a line that declares an existing route**, not a function: one executor replays
+it in-process on the same axum `Router`, carrying the caller's `Authorization`
+header through. Nothing is duplicated, the Gate and per-tenant isolation apply
+without a line of their own, and fixing a route fixes the tool. A test reads
+every `.route(…)` under `apps/server/src/routes/` and refuses a `/v1/*` path
+that no tool declares and no exclusion names **with its reason** — which is how
+the question "do I really have everything?" gets an answer instead of a
+reassurance.
+
+Names are `domain[_object]_verb`, verb last and drawn from a closed list, so the
+list sorts by subject and the verb is the one position a test can check.
+
+**The founder's surface is a Claude Code plugin, not a catalogue.** `plugin/`
+turns those tools into four named gestures — the morning read, launching a
+campaign, clearing the approval queue, hiring a seat — each saying in which
+*order* to call, what to read between two steps, and the one thing never to do.
+`.claude-plugin/marketplace.json` at the repo root makes `/plugin marketplace
+add MattJeff/InternationalAgent` resolve it, and `scripts/verifier-plugin.py`
+fails if a gesture cites a tool that no longer exists. The tenant key is a
+`sensitive` `userConfig` field, so it lives in the keychain and never in a file
+a client would commit. `docs/PLUGIN.md` has the install, the gestures and the
+dated sources.
+
+Caddy publishes `/v1/mcp/server` and **never** a wildcard under `/v1/mcp` —
+`/v1/mcp/servers` is one letter away and is the catalogue, which is a different
+audience entirely.
+
 ## Running it
 
 ```bash
