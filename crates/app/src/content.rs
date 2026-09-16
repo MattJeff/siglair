@@ -93,6 +93,7 @@ use agentos_store::db::{StoreError, TenantTx};
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 use serde_json::{Value, json};
+use std::collections::{BTreeMap, BTreeSet};
 use url::Url;
 use uuid::Uuid;
 
@@ -334,15 +335,25 @@ async fn measure_page(
 
 /// Les domaines de ce locataire — ce que « nous » veut dire dans une mesure.
 ///
-/// C'est `tenant_domains`, la table des domaines d'envoi, et c'est un raccourci
-/// assumé : le jour où le site d'un client vit sur un domaine que ses courriels
-/// n'utilisent pas, c'est cette table qu'il faudra dédoubler, pas cette
-/// fonction. Une deuxième liste de domaines « pour le web » serait une deuxième
-/// vérité à tenir à jour dès le premier client.
+/// C'est `content_repos.site`, **les sites où ce locataire publie**, et
+/// surtout pas `tenant_domains`, qui est la rotation des domaines d'**envoi
+/// d'e-mail**. La lecture d'avant était celle-là et elle rendait la boucle
+/// juste et fausse à la fois : pour Orizn elle donnait `agents.getorizn.com`
+/// et `agent.oriznapi.uk`, jamais `visa.orizn.app`, donc le site du client
+/// pouvait sortir premier et la mesure annonçait qu'il n'était pas cité.
+/// `migrations/0106` porte l'argument entier, dont celui qui tranche : un
+/// domaine d'envoi non vérifié interdit à un siège de s'y asseoir, un domaine
+/// de site n'a rien à vérifier, et les deux ne peuvent donc pas partager une
+/// colonne `status`.
+///
+/// Vide quand aucun dépôt ne déclare son site : [`measure`] rend alors
+/// [`MeasureError::NoDomainOfOurs`], un refus lisible plutôt qu'une mesure
+/// fausse.
 pub async fn our_domains(tx: &mut TenantTx<'_>) -> Result<Vec<String>, StoreError> {
-    let rows: Vec<(String,)> = sqlx::query_as("SELECT domain FROM tenant_domains")
-        .fetch_all(&mut ***tx)
-        .await?;
+    let rows: Vec<(String,)> =
+        sqlx::query_as("SELECT DISTINCT site FROM content_repos WHERE site IS NOT NULL")
+            .fetch_all(&mut ***tx)
+            .await?;
     Ok(rows.into_iter().map(|(domain,)| domain).collect())
 }
 
@@ -380,6 +391,13 @@ struct Hit {
 /// résultats déjà lus plus un. Ce qui reste possible est un résumé commençant
 /// exactement par le rang attendu ; on n'en a pas vu, et le jour où ça arrive
 /// la mesure de cette question-là est basse d'un cran, pas fausse ailleurs.
+///
+/// **Un résultat dont la ligne d'hôte n'est pas reconnue garde sa place et perd
+/// son nom** : le rang suivant le referme, et il entre dans `competitors` avec
+/// un hôte vide. C'est volontaire, et c'est le seul sens conservateur — le
+/// laisser tomber remonterait notre rang d'un cran pour une page qui, elle, est
+/// bien devant nous. Le dernier résultat, lui, est abandonné : rien ne le
+/// referme, donc on ne sait pas s'il existe.
 fn read_results(
     text: &str,
     ours: &[String],
@@ -448,16 +466,25 @@ fn numbered(line: &str, expected: usize) -> Option<&str> {
 /// `"visa.orizn.app/docs"` → `Some("visa.orizn.app")`, `"REST API for visas"` →
 /// `None`.
 ///
-/// La règle : aucun blanc, au moins deux étiquettes, un TLD alphabétique d'au
-/// moins deux lettres. C'est, mot pour mot, la forme que
+/// La règle : aucun blanc **dans l'hôte**, au moins deux étiquettes, un TLD
+/// alphabétique d'au moins deux lettres. C'est, mot pour mot, la forme que
 /// `tenant_domains_domain_shape` impose en base — donc ce qui est reconnu ici
 /// est ce qui peut être à nous.
+///
+/// **Le blanc se cherche avant la première barre, pas sur la ligne entière**, et
+/// la différence a été mesurée le 2026-09-12 sur « how do I check visa
+/// requirements by API » : `lite.duckduckgo.com` y affichait
+/// `zylalabs.com/api-marketplace/top-search/visa requirements` — un chemin qui
+/// porte l'espace de la requête. La ligne entière portait donc un blanc, l'hôte
+/// n'était pas reconnu, le résultat partait sans hôte (voir [`read_results`]) et
+/// **notre rang descendait d'un cran** : 4 au lieu de 3, avec une chaîne vide en
+/// troisième concurrent et dans l'`outrank` du brief. Une ligne de prose, elle,
+/// est toujours refusée : son premier segment porte le blanc de la phrase.
 fn display_host(line: &str) -> Option<String> {
-    let line = line.trim();
-    if line.is_empty() || line.chars().any(char::is_whitespace) {
+    let lowered = line.trim().split('/').next()?.to_ascii_lowercase();
+    if lowered.is_empty() || lowered.chars().any(char::is_whitespace) {
         return None;
     }
-    let lowered = line.split('/').next()?.to_ascii_lowercase();
     let host = lowered.strip_prefix("www.").unwrap_or(lowered.as_str());
     let labels: Vec<&str> = host.split('.').collect();
     if labels.len() < 2 {
@@ -604,6 +631,117 @@ pub fn brief(question: &str, citation: &Citation) -> Brief {
 }
 
 // ---------------------------------------------------------------------------
+// Où la question vit déjà
+// ---------------------------------------------------------------------------
+
+/// Ce qu'une dernière mesure dit d'une question, réduit à ce que [`places`] lit.
+///
+/// Pas un [`Citation`] : ni l'extrait, ni le moteur, ni l'heure ne servent ici,
+/// et les tirer pour cent questions serait deux cents kilo-octets d'extraits
+/// relus pour compter des hôtes.
+#[derive(Debug, Clone)]
+pub struct Seen {
+    pub question: String,
+    /// Étions-nous dans ces résultats-là.
+    pub cited: bool,
+    /// Les hôtes rendus par le moteur, dans son ordre.
+    pub competitors: Vec<String>,
+}
+
+/// Un hôte qui revient dans les résultats de nos questions.
+///
+/// **Ce n'est pas une cible de lien, et le mot est choisi.** Un `Place` dit
+/// *où la question vit déjà* : un forum, un comparatif, un annuaire, ou un
+/// concurrent. Ce qu'on en fait est une décision humaine, et `docs/CONTENU.md`
+/// § 9 dit lesquelles de ces décisions sont honnêtes.
+#[derive(Debug, Clone, Serialize)]
+pub struct Place {
+    pub host: String,
+    /// Sur combien de nos questions cet hôte sort dans les résultats.
+    pub questions: usize,
+    /// Le meilleur rang qu'il y tienne, toutes questions confondues. À partir
+    /// de 1, comme [`Citation::rank`].
+    pub best_rank: i32,
+    /// Celles de ces questions où **nous ne sommes nulle part**. C'est la seule
+    /// liste actionnable de la structure : un hôte qui répond à cinq de nos
+    /// questions sans nous est un endroit où la réponse existe et où la nôtre
+    /// n'existe pas. Vide quand on est déjà cité partout où il l'est.
+    pub without_us: Vec<String>,
+}
+
+/// Ce qu'une lecture rend au plus. Une page de résultats porte une dizaine
+/// d'hôtes ; cent questions en portent donc jusqu'à mille, dont la queue est
+/// faite d'hôtes vus une fois. Le tri met les récurrents devant, et la coupe
+/// garde la réponse lisible par un humain — qui est le seul à pouvoir en faire
+/// quelque chose.
+const PLACES_CAP: usize = 50;
+
+/// **Où la question vit déjà**, à partir des mesures qu'on a déjà.
+///
+/// Pure, sans réseau et sans source nouvelle : tout ce qu'elle lit a été écrit
+/// par [`read_results`] à partir de la seule page de résultats que ce dépôt a le
+/// droit de lire. Un hôte de plus dans cette liste ne coûte donc rien qu'une
+/// mesure n'ait déjà payé.
+///
+/// # Ce qu'elle dit, et surtout ce qu'elle ne dit pas
+///
+/// Elle dit *qui sort quand on pose nos questions*. Elle ne dit **pas** qui
+/// nous cite, ni qui cite un concurrent : un lien entrant ne se lit pas dans
+/// une page de résultats, et rien de gratuit ne le rend. `docs/CONTENU.md` § 9
+/// nomme les fournisseurs qui le vendent et dit pourquoi aucun n'est appelé.
+///
+/// Nos propres sites sont retirés — par [`covers`], la règle de la Gate, pour
+/// que « à nous » veuille dire la même chose ici qu'à la mesure. Un hôte vide
+/// (un résultat dont la ligne d'hôte n'a pas été reconnue, voir
+/// [`read_results`]) est sauté : il tient une place dans un rang, il n'est pas
+/// un endroit.
+#[must_use]
+pub fn places(seen: &[Seen], ours: &[String]) -> Vec<Place> {
+    let mut by_host: BTreeMap<String, Place> = BTreeMap::new();
+
+    for row in seen {
+        // Un même hôte peut sortir deux fois sur une question ; il ne la compte
+        // qu'une, au meilleur de ses deux rangs.
+        let mut counted: BTreeSet<&str> = BTreeSet::new();
+        for (index, host) in row.competitors.iter().enumerate() {
+            if host.is_empty() || ours.iter().any(|mine| covers(host, mine)) {
+                continue;
+            }
+            let rank = i32::try_from(index).unwrap_or(i32::MAX).saturating_add(1);
+            let place = by_host.entry(host.clone()).or_insert_with(|| Place {
+                host: host.clone(),
+                questions: 0,
+                best_rank: rank,
+                without_us: Vec::new(),
+            });
+            place.best_rank = place.best_rank.min(rank);
+            if counted.insert(host.as_str()) {
+                place.questions += 1;
+                if !row.cited {
+                    place.without_us.push(row.question.clone());
+                }
+            }
+        }
+    }
+
+    let mut places: Vec<Place> = by_host.into_values().collect();
+    // Le plus utile d'abord : là où on manque le plus souvent, puis là où
+    // l'hôte revient le plus, puis là où il est le mieux placé. Le nom tranche
+    // les égalités, pour que deux lectures des mêmes mesures rendent deux fois
+    // la même liste.
+    places.sort_by(|a, b| {
+        b.without_us
+            .len()
+            .cmp(&a.without_us.len())
+            .then(b.questions.cmp(&a.questions))
+            .then(a.best_rank.cmp(&b.best_rank))
+            .then(a.host.cmp(&b.host))
+    });
+    places.truncate(PLACES_CAP);
+    places
+}
+
+// ---------------------------------------------------------------------------
 // Les questions
 // ---------------------------------------------------------------------------
 
@@ -704,7 +842,7 @@ pub mod questions {
 
 /// La série dans le temps. En ajout seul, comme la table.
 pub mod citations {
-    use super::{Citation, DateTime, Serialize, StoreError, TenantTx, Utc, Uuid};
+    use super::{Citation, DateTime, Seen, Serialize, StoreError, TenantTx, Utc, Uuid};
 
     /// Une ligne de `content_citations`, telle qu'on la relit.
     #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
@@ -804,6 +942,38 @@ pub mod citations {
         .fetch_optional(&mut ***tx)
         .await?;
         Ok(row)
+    }
+
+    /// **La dernière mesure de chaque question**, réduite à ce que
+    /// [`super::places`] lit.
+    ///
+    /// Un `DISTINCT ON` et pas une boucle de [`latest`] : la question posée est
+    /// « qu'est-ce qui revient d'une question à l'autre », donc un aller-retour
+    /// par question serait N requêtes pour une réponse qui n'existe qu'en les
+    /// réunissant. Les colonnes lourdes — `excerpt` surtout — ne sont pas
+    /// tirées ; le brief les lit, pas les endroits.
+    ///
+    /// Une question jamais mesurée n'a pas de ligne et n'apparaît pas. C'est le
+    /// même sens que `content_briefs_get` : sans mesure, il n'y a rien à dire.
+    pub async fn last_seen(tx: &mut TenantTx<'_>) -> Result<Vec<Seen>, StoreError> {
+        let rows: Vec<(String, bool, serde_json::Value)> = sqlx::query_as(
+            "SELECT DISTINCT ON (c.question_id) q.question, c.cited, c.competitors \
+               FROM content_citations c \
+               JOIN content_questions q ON q.id = c.question_id \
+              ORDER BY c.question_id, c.checked_at DESC",
+        )
+        .fetch_all(&mut ***tx)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(question, cited, competitors)| Seen {
+                question,
+                cited,
+                // Même règle qu'au-dessus : un `jsonb` qui ne serait pas le
+                // tableau qu'on a écrit rend une liste vide, pas une panne.
+                competitors: serde_json::from_value(competitors).unwrap_or_default(),
+            })
+            .collect())
     }
 }
 
@@ -989,6 +1159,12 @@ pub mod repos {
         pub branch: String,
         /// Le dossier que le générateur lit.
         pub folder: String,
+        /// **L'hôte public où les articles de ce dépôt ressortent**, p. ex.
+        /// `visa.orizn.app`. C'est ce que « nous » veut dire dans une mesure de
+        /// citation — voir [`super::our_domains`] et `migrations/0106`.
+        /// `None` : ce dépôt pousse toujours ses articles, il ne participe
+        /// simplement pas à la réponse d'`our_domains`.
+        pub site: Option<String>,
         pub created_at: DateTime<Utc>,
     }
 
@@ -1015,7 +1191,7 @@ pub mod repos {
     /// Les dépôts de ce locataire, un par siège qui en a un.
     pub async fn list(tx: &mut TenantTx<'_>) -> Result<Vec<Repo>, StoreError> {
         let rows = sqlx::query_as(
-            "SELECT employee_id, server, repo, branch, folder, created_at \
+            "SELECT employee_id, server, repo, branch, folder, site, created_at \
                FROM content_repos ORDER BY created_at ASC",
         )
         .fetch_all(&mut ***tx)
@@ -1026,7 +1202,7 @@ pub mod repos {
     /// Le dépôt d'un siège. `None` : ce siège ne publie nulle part.
     pub async fn of(tx: &mut TenantTx<'_>, employee_id: Uuid) -> Result<Option<Repo>, StoreError> {
         let row = sqlx::query_as(
-            "SELECT employee_id, server, repo, branch, folder, created_at \
+            "SELECT employee_id, server, repo, branch, folder, site, created_at \
                FROM content_repos WHERE employee_id = $1",
         )
         .bind(employee_id)
@@ -1062,6 +1238,7 @@ pub mod repos {
         repo: &str,
         branch: &str,
         folder: &str,
+        site: Option<&str>,
     ) -> Result<Option<Repo>, StoreError> {
         // Les deux lectures sont bornées au locataire par la RLS de leur table.
         let seat: Option<(Uuid,)> = sqlx::query_as("SELECT id FROM employees WHERE id = $1")
@@ -1083,12 +1260,13 @@ pub mod repos {
         let tenant = tx.tenant_id();
         let row = sqlx::query_as(
             "INSERT INTO content_repos \
-                 (employee_id, tenant_id, server, repo, branch, folder, created_at) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7) \
+                 (employee_id, tenant_id, server, repo, branch, folder, site, created_at) \
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) \
              ON CONFLICT (employee_id) DO UPDATE \
                 SET server = excluded.server, repo = excluded.repo, \
-                    branch = excluded.branch, folder = excluded.folder \
-             RETURNING employee_id, server, repo, branch, folder, created_at",
+                    branch = excluded.branch, folder = excluded.folder, \
+                    site = excluded.site \
+             RETURNING employee_id, server, repo, branch, folder, site, created_at",
         )
         .bind(employee_id)
         .bind(tenant.as_uuid())
@@ -1096,6 +1274,7 @@ pub mod repos {
         .bind(repo)
         .bind(branch)
         .bind(folder)
+        .bind(site)
         .bind(Utc::now())
         .fetch_one(&mut ***tx)
         .await?;
@@ -1107,29 +1286,42 @@ pub mod repos {
 // La proposition : un fichier poussé, et une pull request
 // ---------------------------------------------------------------------------
 
-/// Les trois outils de GitHub qu'une proposition prononce, en orthographe
-/// [`Slug`].
+/// Les quatre outils de GitHub qu'une proposition prononce, **dans cet
+/// ordre**, en orthographe [`Slug`].
 ///
 /// `agentos_app::mcp` replie les `_` d'un nom de la table d'un serveur en `-`
 /// (`handle`), donc `create_pull_request` chez GitHub est `create-pull-request`
 /// ici. **Cette liste est la surface entière** : `propose` ne prononce rien
-/// d'autre, aucune valeur de requête ne l'agrandit, et chacun des trois passe
+/// d'autre, aucune valeur de requête ne l'agrandit, et chacun des quatre passe
 /// par la Policy Gate séparément.
+///
+/// # L'ordre est le mécanisme, pas une habitude
+///
+/// [`GET_FILE_CONTENTS`] vient **avant** [`CREATE_BRANCH`], et c'est ce qui
+/// fait qu'une tentative ratée ne laisse rien chez le client. Republier un
+/// article corrigé — même titre, donc même [`file_stem`], donc même chemin —
+/// échouait sur `create-or-update-file`, qui veut le `sha` de la version
+/// remplacée ; lire ce `sha` en quatrième appel aurait réparé l'échec et gardé
+/// la branche orpheline que le deuxième avait déjà créée. Lu en premier, il
+/// n'y a rien à nettoyer : ce qui peut manquer manque avant qu'une branche
+/// existe.
 ///
 /// # Ce qui n'a pas été vérifié, et ne pouvait pas l'être
 ///
-/// Les trois noms et la forme de leurs arguments sont ceux que le serveur MCP
+/// Les quatre noms et la forme de leurs arguments sont ceux que le serveur MCP
 /// distant de GitHub publie. **Aucun appel n'a été fait contre le vrai
 /// serveur** : il demande un compte GitHub et un passage OAuth, c'est-à-dire
 /// exactement ce que ce chantier n'avait pas le droit d'ouvrir. Ce que les
 /// tests prouvent est ce que *nous* envoyons, dans quel ordre, et ce que nous
 /// faisons de la réponse ; ce qu'ils ne prouvent pas est que GitHub épelle ces
-/// trois outils comme ici. Le jour du premier vrai branchement, un nom faux
+/// quatre outils comme ici. Le jour du premier vrai branchement, un nom faux
 /// sort en `unknown_tool` au premier appel, avant qu'un octet soit écrit.
+const GET_FILE_CONTENTS: &str = "get-file-contents";
+/// Voir [`GET_FILE_CONTENTS`].
 const CREATE_BRANCH: &str = "create-branch";
-/// Voir [`CREATE_BRANCH`].
+/// Voir [`GET_FILE_CONTENTS`].
 const CREATE_OR_UPDATE_FILE: &str = "create-or-update-file";
-/// Voir [`CREATE_BRANCH`].
+/// Voir [`GET_FILE_CONTENTS`].
 const CREATE_PULL_REQUEST: &str = "create-pull-request";
 
 /// Ce qu'une proposition a produit chez le client.
@@ -1210,32 +1402,63 @@ impl ProposeError {
 /// sait fusionner : les trois outils prononcés n'écrivent que sur une branche
 /// que personne d'autre ne lit.
 ///
-/// # Trois appels, trois verdicts
+/// # Quatre appels, quatre verdicts
 ///
 /// Le jeton est émis ici, pour le principal que l'`Effects` porte, comme
-/// [`measure`] — et **trois fois**, une par outil. Ce n'est pas une économie
+/// [`measure`] — et **quatre fois**, une par outil. Ce n'est pas une économie
 /// ratée : un siège à qui la politique donne `create-branch` sans
 /// `create-pull-request` doit pouvoir échouer entre les deux, et le journal
 /// d'audit doit porter une ligne par chose faite chez le client. Un seul
-/// verdict pour trois écritures serait une décision prise sur un geste qu'elle
+/// verdict pour quatre gestes serait une décision prise sur un geste qu'elle
 /// ne nomme pas.
 ///
 /// # Ce qui reste ouvert quand ça casse au milieu
 ///
-/// Un échec au deuxième ou au troisième appel laisse une branche — et
-/// peut-être un fichier — chez le client, et rien en base. C'est assumé et
-/// c'est le sens conservateur : une branche orpheline se supprime d'un clic,
-/// là où un `proposed` écrit sans pull request serait un état que personne ne
-/// peut plus relire. La branche porte l'identifiant du brouillon, donc on sait
-/// toujours de quoi elle est le reste.
+/// **Tout ce qui peut manquer manque avant que rien soit créé.** Les deux
+/// refus ordinaires — une politique qui ne nomme pas un outil, un `sha`
+/// absent parce que l'article est déjà là — tombent sur le premier appel, qui
+/// est une lecture : le dépôt du client est exactement comme avant. C'est ce
+/// que l'ordre achète, et c'est la moitié de la réparation de la republication
+/// (`docs/CONTENU.md` § 7).
 ///
-/// ponytail: un fichier qui existe **déjà** à ce chemin sort en
-/// [`ProposeError::Refused`] et pas en écrasement. GitHub veut le `sha` de la
-/// version remplacée, le lire serait un quatrième appel et un quatrième
-/// verdict, et ce que ça achèterait est le droit d'écraser silencieusement un
-/// article déjà fusionné parce qu'un employé a réutilisé un titre. Le jour où
-/// republier un article compte, c'est ce `sha` et un état de plus — pas un
-/// écrasement par défaut.
+/// Reste le cas rare : le réseau meurt entre le deuxième et le quatrième
+/// appel. Une branche — et peut-être un fichier — est chez le client, et rien
+/// en base. C'est assumé et c'est le sens conservateur : une branche orpheline
+/// se supprime d'un clic, là où un `proposed` écrit sans pull request serait
+/// un état que personne ne peut plus relire. La branche porte l'identifiant du
+/// brouillon, donc on sait toujours de quoi elle est le reste — et rappeler
+/// `propose` sur ce brouillon-là sort en `Refused(CREATE_BRANCH)` tant que la
+/// branche n'est pas supprimée, parce que GitHub refuse une référence qui
+/// existe et que distinguer ce refus-là d'un autre demanderait de lire sa
+/// prose. Deux lignes dans le journal d'audit, et un clic.
+///
+/// ponytail: pas de nettoyage compensatoire. Supprimer la branche demanderait
+/// un cinquième outil — donc une ligne de plus dans la politique de chaque
+/// siège et dans le plafond de la plateforme, c'est-à-dire un
+/// `policy install` chez chaque client — pour rattraper un échec qui ne se
+/// produit plus par la voie qu'on sait nommer. Le jour où un journal montre
+/// des branches orphelines, c'est `delete-branch` et un cinquième verdict.
+///
+/// # Republier un article corrigé
+///
+/// Un fichier qui existe **déjà** à ce chemin — un article fusionné dont un
+/// second brouillon reprend le titre — est remplacé, et c'est le premier appel
+/// qui le rend possible : [`GET_FILE_CONTENTS`] sur la branche qui sert le
+/// site rend le `sha` de la version en place, que `create-or-update-file`
+/// exige pour écraser. Pas de fichier là : pas de `sha`, et c'est une
+/// création.
+///
+/// Ce n'est pas un écrasement silencieux, et il faut le dire parce que c'est
+/// ce que la version d'avant redoutait : ce qui est écrasé l'est **sur une
+/// branche à l'article**, que personne d'autre ne lit, et la pull request
+/// montre le diff avec l'ancienne version à la personne qui relit. Un
+/// remplacement qui traverse une revue de code n'est pas silencieux.
+///
+/// ponytail: la Gate statue quatre fois, et `get-file-contents` est une
+/// **lecture** — donc `Risk::Read` chez qui le déclare, contrairement aux
+/// trois autres. Ça reste un outil de plus à nommer dans la politique d'un
+/// siège et dans `docs/orizn-ceiling.json` ; il n'y avait pas de façon de
+/// lire ce `sha` sans le demander à GitHub.
 pub async fn propose(
     effects: &Effects,
     gate: &PolicyGate,
@@ -1252,6 +1475,28 @@ pub async fn propose(
     let branch = article_branch(draft.id);
     let path = format!("{}/{}.md", repo.folder, file_stem(&draft.title, draft.id));
 
+    // **Avant de créer quoi que ce soit.** La branche qui sert le site est la
+    // seule où un article fusionné peut être ; la branche de l'article, elle,
+    // n'existe pas encore, et c'est exactement le point.
+    //
+    // `isError` n'est pas une panne ici : GitHub répond 404 pour un fichier
+    // absent, ce qui est le cas ordinaire — un premier article. Un refus de
+    // lecture pour une autre raison (droits) se lit pareil, et ressort deux
+    // appels plus loin en `Refused(CREATE_OR_UPDATE_FILE)` : conservateur, et
+    // rien n'a été écrit entre-temps.
+    let existing = read_file(
+        effects,
+        gate,
+        &server,
+        &json!({
+            "owner": owner,
+            "repo": name,
+            "path": path,
+            "ref": repo.branch,
+        }),
+    )
+    .await?;
+
     call(
         effects,
         gate,
@@ -1266,21 +1511,20 @@ pub async fn propose(
     )
     .await?;
 
-    call(
-        effects,
-        gate,
-        &server,
-        CREATE_OR_UPDATE_FILE,
-        &json!({
-            "owner": owner,
-            "repo": name,
-            "branch": branch,
-            "path": path,
-            "message": format!("Article : {}", draft.title),
-            "content": article(&draft.title, &draft.body, now),
-        }),
-    )
-    .await?;
+    let mut writing = json!({
+        "owner": owner,
+        "repo": name,
+        "branch": branch,
+        "path": path,
+        "message": format!("Article : {}", draft.title),
+        "content": article(&draft.title, &draft.body, now),
+    });
+    if let Some(sha) = existing {
+        // Le seul octet de l'étranger qui survit à tout ce module, et il est
+        // contraint à quarante chiffres hexadécimaux — voir `blob_sha`.
+        writing["sha"] = Value::String(sha);
+    }
+    call(effects, gate, &server, CREATE_OR_UPDATE_FILE, &writing).await?;
 
     let opened = call(
         effects,
@@ -1345,6 +1589,64 @@ async fn call(
     }
     Ok(answered)
 }
+
+/// **Lire le fichier qui est peut-être déjà là**, et n'en garder que le `sha`.
+///
+/// Un appel derrière la Gate comme [`call`], à ceci près que `isError` n'est
+/// pas une erreur : c'est la réponse de GitHub pour un fichier absent, qui est
+/// le cas ordinaire. `None` veut donc dire « rien à remplacer », et le seul
+/// mensonge possible est d'appeler « absent » un fichier que nos droits ne
+/// laissent pas lire — auquel cas l'écriture qui suit refuse, et rien n'a été
+/// créé entre les deux.
+async fn read_file(
+    effects: &Effects,
+    gate: &PolicyGate,
+    server: &Slug,
+    arguments: &Value,
+) -> Result<Option<String>, ProposeError> {
+    let named = McpTool::new(
+        server.clone(),
+        Slug::parse(GET_FILE_CONTENTS).expect("une constante de ce fichier"),
+    );
+    let token = gate
+        .authorize(effects.principal(), McpCall { tool: named })
+        .await?;
+    let answered = effects
+        .call_tool(token, arguments)
+        .await?
+        .into_inner_for_rendering();
+    if answered.get("isError").and_then(Value::as_bool) == Some(true) {
+        return Ok(None);
+    }
+    Ok(blob_sha(&answered))
+}
+
+/// Le `sha` du fichier, tel que GitHub le nomme — **et rien d'autre de sa
+/// réponse**.
+///
+/// C'est la seule valeur de tout ce module qui vienne vraiment d'un étranger :
+/// [`review_url`] rebâtit son adresse à partir de nos propres chaînes, et ici
+/// c'est impossible, parce qu'un `sha` *est* ce que GitHub a à en dire. Ce qui
+/// tient lieu de garde-fou est sa forme, qui ne laisse passer qu'une chose :
+/// **quarante chiffres hexadécimaux**, la longueur d'un objet dans un dépôt.
+/// Un `sha` faux ne fait pas écrire ailleurs — le chemin et la branche
+/// viennent de nous — il fait refuser l'écriture, ce qui sort en `Refused`.
+///
+/// ponytail: le bloc de texte est reparsé en JSON plutôt que cherché à la
+/// sous-chaîne. [`review_url`] cherche, parce qu'elle sait exactement quel
+/// préfixe elle veut ; ici la clé `sha` apparaît aussi dans le contenu d'un
+/// article qu'un employé aurait écrit, et « la première » serait une règle
+/// d'ordre sur du JSON qui n'en promet pas.
+fn blob_sha(answer: &Value) -> Option<String> {
+    let text = answer.pointer("/content/0/text")?.as_str()?;
+    let said: Value = serde_json::from_str(text).ok()?;
+    let sha = said.get("sha")?.as_str()?;
+    (sha.len() == OBJECT_SHA_DIGITS && sha.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| sha.to_owned())
+}
+
+/// La longueur d'un identifiant d'objet, en chiffres hexadécimaux.
+const OBJECT_SHA_DIGITS: usize = 40;
 
 /// La branche d'un article : une par brouillon, nommée par lui.
 ///
@@ -1574,6 +1876,55 @@ mod tests {
         assert_eq!(display_host("visa"), None);
         assert_eq!(display_host("e.g"), None);
         assert_eq!(display_host("..."), None);
+        // **Un blanc dans le chemin n'est pas un blanc dans l'hôte.** Relevé
+        // sur le vrai moteur le 2026-09-12 : la requête affichée entre dans
+        // l'adresse, espace compris.
+        assert_eq!(
+            display_host("zylalabs.com/api-marketplace/top-search/visa requirements"),
+            Some("zylalabs.com".into())
+        );
+        // Et une phrase qui porte une barre reste une phrase : le blanc est
+        // avant elle.
+        assert_eq!(display_host("Check visa rules and/or entry rules"), None);
+    }
+
+    /// **Un hôte non reconnu coûtait un rang.**
+    ///
+    /// La page mesurée le 2026-09-12 sur « how do I check visa requirements by
+    /// API » affichait le troisième résultat comme
+    /// `zylalabs.com/api-marketplace/top-search/visa requirements`. La ligne
+    /// portait un blanc, l'hôte n'était pas lu, le résultat se refermait sans
+    /// nom — et nous sortions 4ᵉ avec une chaîne vide devant nous, qui
+    /// remontait telle quelle dans l'`outrank` du brief.
+    #[test]
+    fn un_hote_dont_le_chemin_porte_un_blanc_reste_un_hote() {
+        let text = "1. Global Visa Check API | Zyla API Hub\n\
+                    Real-time visa requirements for tourists.\n\
+                    zylalabs.com/api-marketplace/global-visa-check\n\
+                    2. Best Visa requirements APIs | Zyla API Hub\n\
+                    The Global Visa Check is an API.\n\
+                    zylalabs.com/api-marketplace/top-search/visa requirements\n\
+                    3. Visa Requirements API | Orizn\n\
+                    47,362 pairs across 199 passports.\n\
+                    visa.orizn.app\n";
+        let scanned = read_results(
+            text,
+            &["orizn.app".to_owned()],
+            Engine::DuckDuckGoLite,
+            Utc::now(),
+        );
+        assert_eq!(scanned.rank, Some(3), "{:?}", scanned.competitors);
+        assert!(
+            !scanned.competitors.iter().any(String::is_empty),
+            "un concurrent sans nom est un hôte qu'on n'a pas su lire : {:?}",
+            scanned.competitors
+        );
+        // Et le résumé du deuxième n'a pas avalé sa propre ligne d'adresse.
+        assert!(
+            !scanned.excerpt.contains("top-search"),
+            "l'adresse est restée dans le résumé : {:?}",
+            scanned.excerpt
+        );
     }
 
     /// Le rang doit suivre, sinon un résumé numéroté ouvre un faux résultat.
@@ -1666,6 +2017,59 @@ mod tests {
         // Absents, on nomme les trois premiers ; premiers, personne.
         assert_eq!(brief("q", &with_rank(None)).outrank.len(), 3);
         assert!(brief("q", &with_rank(Some(1))).outrank.is_empty());
+    }
+
+    /// Les endroits : ce qui revient d'une question à l'autre, ce qui est à
+    /// nous et n'est donc pas un endroit, et l'ordre qui met devant celui où
+    /// l'on manque le plus.
+    #[test]
+    fn les_endroits_comptent_les_questions_et_retirent_les_notres() {
+        let seen = |question: &str, cited: bool, hosts: &[&str]| Seen {
+            question: question.to_owned(),
+            cited,
+            competitors: hosts.iter().map(|host| (*host).to_owned()).collect(),
+        };
+        let rows = vec![
+            // Absents : le forum et le comparatif comptent contre nous.
+            seen("q1", false, &["forum.example", "", "revue.example"]),
+            // Absents encore, et le forum revient — cette fois au rang 1.
+            seen("q2", false, &["forum.example", "revue.example"]),
+            // Cités : le forum est là, mais nous aussi. Il compte une question
+            // de plus, pas un manque de plus. Et un doublon ne compte qu'une
+            // fois, au meilleur de ses rangs.
+            seen(
+                "q3",
+                true,
+                &["blog.nous.example", "revue.example", "revue.example"],
+            ),
+        ];
+        let found = places(&rows, &["nous.example".to_owned()]);
+
+        // Nos propres sites, sous-domaine compris, ne sont pas des endroits ;
+        // un hôte vide non plus.
+        assert!(
+            found
+                .iter()
+                .all(|place| place.host != "blog.nous.example" && !place.host.is_empty())
+        );
+
+        // `forum` manque deux fois, `revue` aussi — égalité ; `revue` sort
+        // devant parce qu'il revient sur trois questions contre deux.
+        let names: Vec<&str> = found.iter().map(|place| place.host.as_str()).collect();
+        assert_eq!(names, vec!["revue.example", "forum.example"]);
+
+        let revue = &found[0];
+        assert_eq!(revue.questions, 3, "un doublon ne compte pas deux fois");
+        assert_eq!(revue.best_rank, 2);
+        assert_eq!(revue.without_us, vec!["q1".to_owned(), "q2".to_owned()]);
+
+        let forum = &found[1];
+        assert_eq!(forum.questions, 2);
+        assert_eq!(forum.best_rank, 1, "le meilleur rang, pas le dernier vu");
+
+        // Cités partout où l'hôte est : rien à aller chercher.
+        let all_cited = places(&[seen("q", true, &["forum.example"])], &[]);
+        assert!(all_cited[0].without_us.is_empty());
     }
 
     // -- de bout en bout, sur un faux moteur servi en local -------------------
@@ -1806,6 +2210,12 @@ mod tests {
         url
     }
 
+    /// Déclarer le site d'un locataire, puisque c'est **ça** que `our_domains`
+    /// lit — et pas la ligne de `tenant_domains` que [`seed`] pose à côté.
+    async fn declare_site(db: &Db, principal: &Principal, site: &str) {
+        seed_repo(db, principal, Some(site)).await;
+    }
+
     /// Ce que « nous » veut dire pour ce locataire, lu comme une route le lit.
     async fn ours(db: &Db, tenant: TenantId) -> Vec<String> {
         let mut tx = db.tenant_tx(tenant).await.expect("tenant tx");
@@ -1818,11 +2228,17 @@ mod tests {
     async fn la_mesure_lit_le_rang_sur_un_faux_moteur_et_sempile_sans_se_reecrire() {
         let Some(db) = db().await else { return };
         let (principal, domain) = seed(&db).await;
+        declare_site(&db, &principal, &format!("visa.{domain}")).await;
         let site = static_site(three_results(&domain)).await;
         let effects = Effects::new(db.clone(), ports_reading(site), principal.clone());
         let gate = PolicyGate::new(db.clone());
         let url = fake_results(site, "visa requirements api");
         let ours = ours(&db, principal.tenant_id).await;
+        assert_eq!(
+            ours,
+            [format!("visa.{domain}")],
+            "« nous » est le site déclaré, jamais le domaine d'envoi"
+        );
 
         let citation = measure_page(&effects, &gate, &ours, &url, Engine::DuckDuckGoLite)
             .await
@@ -1870,6 +2286,30 @@ mod tests {
             "la première mesure a gardé son rang"
         );
 
+        // Et les endroits, lus par la même base : la DERNIÈRE mesure de chaque
+        // question, son `jsonb` décodé, notre site retiré. La seconde nous dit
+        // absents, donc les deux hôtes qui restent nous manquent.
+        let mut tx = db.tenant_tx(principal.tenant_id).await.expect("tenant tx");
+        let seen = citations::last_seen(&mut tx).await.expect("last_seen");
+        tx.commit().await.expect("commit");
+        assert_eq!(
+            seen.len(),
+            1,
+            "une question, sa dernière mesure et rien de plus"
+        );
+        assert!(!seen[0].cited, "c'est la seconde mesure qui compte");
+        let found = places(&seen, &ours);
+        assert_eq!(
+            found
+                .iter()
+                .map(|place| place.host.as_str())
+                .collect::<Vec<_>>(),
+            ["travel-buddy.ai", "visadb.io"],
+            "notre site n'est pas un endroit où aller"
+        );
+        assert_eq!(found[0].best_rank, 1);
+        assert_eq!(found[0].without_us, ["visa requirements api"]);
+
         // Le désarmement de l'ajout seul : `app_role` n'a pas le droit de
         // réécrire une mesure. Si le grant de `0100` glissait, ce `UPDATE`
         // passerait.
@@ -1892,7 +2332,8 @@ mod tests {
         let Some(db) = db().await else { return };
         // Le seul changement : le domaine cité au rang 3 n'est pas le nôtre.
         // Rien d'autre ne bouge — même page, même siège, même politique.
-        let (principal, _) = seed(&db).await;
+        let (principal, domain) = seed(&db).await;
+        declare_site(&db, &principal, &format!("visa.{domain}")).await;
         let site = static_site(three_results("quelquun-dautre.example")).await;
         let effects = Effects::new(db.clone(), ports_reading(site), principal.clone());
         let gate = PolicyGate::new(db.clone());
@@ -1918,6 +2359,7 @@ mod tests {
     async fn un_siege_sans_le_web_ne_mesure_pas() {
         let Some(db) = db().await else { return };
         let (principal, domain) = seed(&db).await;
+        declare_site(&db, &principal, &format!("visa.{domain}")).await;
         let site = static_site(three_results(&domain)).await;
         let effects = Effects::new(db.clone(), ports_reading(site), principal.clone());
         let gate = PolicyGate::new(db.clone());
@@ -1942,24 +2384,35 @@ mod tests {
         drop_tenant(&db, principal.tenant_id).await;
     }
 
-    /// Un locataire sans domaine n'écrit pas un `cited: false` qu'on ne pourrait
-    /// plus retirer.
+    /// **Un domaine d'envoi n'est pas un site, et `our_domains` ne le lit pas.**
+    ///
+    /// C'est le trou du `docs/CONTENU.md` § 7.3, refermé et tenu ici :
+    /// [`seed`] pose une ligne de `tenant_domains` — un domaine **vérifié**,
+    /// primaire, celui d'où partent les mails — et ce locataire ne déclare
+    /// aucun site. La lecture d'avant (`SELECT domain FROM tenant_domains`)
+    /// rendait ce domaine-là et mesurait une question en cherchant l'adresse
+    /// d'un expéditeur dans une page de résultats : juste, et faux.
+    ///
+    /// Ce qui est attendu maintenant est un refus lisible, pas une mesure
+    /// basse : un `cited: false` écrit dans une table en ajout seul ne se
+    /// retire plus.
     #[tokio::test]
-    async fn sans_domaine_a_nous_la_mesure_refuse() {
+    async fn un_domaine_denvoi_nest_pas_un_site_et_la_mesure_refuse() {
         let Some(db) = db().await else { return };
-        let (principal, _) = seed(&db).await;
+        let (principal, domain) = seed(&db).await;
+
+        // Le domaine d'envoi est bien là, vérifié, et il ne compte pas.
         let mut tx = db.tenant_tx(principal.tenant_id).await.expect("tenant tx");
-        // Le `WHERE` n'est pas décoratif : la policy RLS bornerait déjà la
-        // portée, mais `crates/app/tests/scoped_deletes.rs` refuse tout `DELETE`
-        // sans clause — un `DELETE FROM tenant_domains` vide la table pour
-        // chaque test qui tourne à côté le jour où quelqu'un le copie hors d'un
-        // `tenant_tx`.
-        sqlx::query("DELETE FROM tenant_domains WHERE tenant_id = $1")
-            .bind(principal.tenant_id.as_uuid())
-            .execute(&mut **tx)
+        let sending: Vec<(String,)> = sqlx::query_as("SELECT domain FROM tenant_domains")
+            .fetch_all(&mut **tx)
             .await
-            .expect("delete domain");
+            .expect("les domaines d'envoi");
         tx.commit().await.expect("commit");
+        assert_eq!(sending, [(domain.clone(),)], "le domaine d'envoi est posé");
+        assert!(
+            ours(&db, principal.tenant_id).await.is_empty(),
+            "un domaine d'envoi s'est glissé dans ce que « nous » veut dire"
+        );
 
         let site = static_site(three_results("personne.example")).await;
         let effects = Effects::new(db.clone(), ports_reading(site), principal.clone());
@@ -1972,8 +2425,16 @@ mod tests {
             Engine::DuckDuckGoLite,
         )
         .await
-        .expect_err("sans domaine, rien à chercher");
+        .expect_err("sans site à nous, rien à chercher");
         assert!(matches!(err, MeasureError::NoDomainOfOurs), "{err}");
+
+        // Et le désarmement : un site déclaré, et « nous » veut dire quelque
+        // chose — celui-là, et pas le domaine d'envoi.
+        declare_site(&db, &principal, "visa.acme-site.example").await;
+        assert_eq!(
+            ours(&db, principal.tenant_id).await,
+            ["visa.acme-site.example"]
+        );
 
         drop_tenant(&db, principal.tenant_id).await;
     }
@@ -2095,6 +2556,34 @@ mod tests {
             Some(first),
             "une typo n'est pas une publication"
         );
+
+        // **Et l'omission dépublie.** C'est la convention de la maison — un
+        // `set` efface ce qu'on ne lui redonne pas — mais sur cette
+        // colonne-là elle coûte la date à laquelle l'article est entré en
+        // ligne, c'est-à-dire le seul instant auquel la série de
+        // `content_citations` peut être comparée. Testé parce que la
+        // description de `content_drafts_amend` promettait l'inverse jusqu'au
+        // 2026-09-12 : « la date de publication est posée la première fois et
+        // ne bouge plus » se lisait comme une garantie, et elle ne vaut
+        // qu'avec l'`url`.
+        let undone = drafts::update(
+            &mut tx,
+            draft.id,
+            &drafts::Revision {
+                title: "Titre corrigé",
+                body: "Corps corrigé",
+                url: None,
+            },
+        )
+        .await
+        .expect("update")
+        .expect("le brouillon existe");
+        assert_ne!(undone.state, "published", "l'omission a laissé un publié");
+        assert!(undone.url.is_none());
+        assert!(
+            undone.published_at.is_none(),
+            "la date a survécu à l'effacement de l'adresse qu'elle date"
+        );
         tx.commit().await.expect("commit");
 
         drop_tenant(&db, principal.tenant_id).await;
@@ -2125,7 +2614,16 @@ mod tests {
         pull: String,
         /// L'outil qui répondra `isError`, s'il y en a un.
         failing: Option<&'static str>,
+        /// Ce que la branche qui sert le site porte déjà à ce chemin : le `sha`
+        /// du fichier, ou rien. `None` est un dépôt vide — GitHub répond alors
+        /// `isError`, comme pour n'importe quel 404, et c'est le cas ordinaire
+        /// d'un premier article.
+        holds: Option<&'static str>,
     }
+
+    /// Le `sha` que [`FauxGithub::holding`] rend : quarante chiffres
+    /// hexadécimaux, la seule forme que `blob_sha` laisse passer.
+    const HELD_SHA: &str = "9f1c0a7b3e5d2f48a6c9b0e1d3f5a7c9b1d3e5f7";
 
     impl FauxGithub {
         fn new(pull: &str) -> Arc<Self> {
@@ -2133,6 +2631,7 @@ mod tests {
                 seen: std::sync::Mutex::new(Vec::new()),
                 pull: pull.to_owned(),
                 failing: None,
+                holds: None,
             })
         }
 
@@ -2141,6 +2640,17 @@ mod tests {
                 seen: std::sync::Mutex::new(Vec::new()),
                 pull: pull.to_owned(),
                 failing: Some(tool),
+                holds: None,
+            })
+        }
+
+        /// Un dépôt qui porte **déjà** l'article : le cas de la republication.
+        fn holding(pull: &str, sha: &'static str) -> Arc<Self> {
+            Arc::new(Self {
+                seen: std::sync::Mutex::new(Vec::new()),
+                pull: pull.to_owned(),
+                failing: None,
+                holds: Some(sha),
             })
         }
 
@@ -2182,7 +2692,13 @@ mod tests {
                 .expect("pas empoisonné")
                 .push((name.clone(), arguments.clone()));
 
-            if ![CREATE_BRANCH, CREATE_OR_UPDATE_FILE, CREATE_PULL_REQUEST].contains(&name.as_str())
+            if ![
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST,
+            ]
+            .contains(&name.as_str())
             {
                 return Err(crate::mocks::ProviderError::Terminal {
                     code: "unknown_tool",
@@ -2192,6 +2708,20 @@ mod tests {
                 return Ok(agentos_domain::untrusted::Untrusted::new(tool_result(
                     "Reference already exists".to_owned(),
                     true,
+                )));
+            }
+            // Un fichier absent est un `isError` chez GitHub, pas une panne :
+            // c'est ce que `read_file` traduit en « rien à remplacer ».
+            if name == GET_FILE_CONTENTS {
+                let Some(sha) = self.holds else {
+                    return Ok(agentos_domain::untrusted::Untrusted::new(tool_result(
+                        "Not Found".to_owned(),
+                        true,
+                    )));
+                };
+                return Ok(agentos_domain::untrusted::Untrusted::new(tool_result(
+                    json!({ "name": "un-article.md", "sha": sha, "size": 512 }).to_string(),
+                    false,
                 )));
             }
             let said = if name == CREATE_PULL_REQUEST {
@@ -2245,7 +2775,7 @@ mod tests {
     /// pas dans cette boucle, c'est [`FauxGithub`] qui répond. Ce que la ligne
     /// sert ici est la clé étrangère de `0102` — un dépôt ne se pose pas sur un
     /// branchement qui n'existe pas.
-    async fn seed_repo(db: &Db, principal: &Principal) -> repos::Repo {
+    async fn seed_repo(db: &Db, principal: &Principal, site: Option<&str>) -> repos::Repo {
         let mut tx = db.tenant_tx(principal.tenant_id).await.expect("tenant tx");
         sqlx::query(
             "INSERT INTO mcp_servers (tenant_id, server, url, reach, connector) \
@@ -2263,6 +2793,7 @@ mod tests {
             "acme/site",
             "main",
             "content/blog",
+            site,
         )
         .await
         .expect("set repo")
@@ -2372,10 +2903,15 @@ mod tests {
         install_tool_policy(
             &db,
             principal.tenant_id,
-            &[CREATE_BRANCH, CREATE_OR_UPDATE_FILE, CREATE_PULL_REQUEST],
+            &[
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST,
+            ],
         )
         .await;
-        let repo = seed_repo(&db, &principal).await;
+        let repo = seed_repo(&db, &principal, None).await;
         let draft = seed_draft(&db, &principal, "Vérifier un visa par API").await;
 
         let github = FauxGithub::new("https://github.com/acme/site/pull/7");
@@ -2389,26 +2925,42 @@ mod tests {
             .await
             .expect("la proposition");
 
-        // Trois outils, dans cet ordre : sans branche il n'y a nulle part où
-        // écrire, et sans fichier la pull request serait vide.
+        // Quatre outils, dans cet ordre. La lecture vient **avant** la
+        // branche : ce qui peut manquer manque avant que rien soit créé.
         assert_eq!(
             github.tools(),
-            [CREATE_BRANCH, CREATE_OR_UPDATE_FILE, CREATE_PULL_REQUEST]
+            [
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST
+            ]
         );
 
-        // La branche part de celle qui sert le site, et porte le brouillon.
         let branch = format!("article/{}", draft.id.simple());
-        assert_eq!(github.args(0)["owner"], json!("acme"));
-        assert_eq!(github.args(0)["repo"], json!("site"));
-        assert_eq!(github.args(0)["branch"], json!(branch));
-        assert_eq!(github.args(0)["from_branch"], json!("main"));
+        let path = "content/blog/vérifier-un-visa-par-api.md";
+
+        // La lecture regarde le chemin de l'article sur la branche qui sert le
+        // site — la seule où un article fusionné peut être.
+        assert_eq!(github.args(0)["path"], json!(path));
+        assert_eq!(github.args(0)["ref"], json!("main"));
+
+        // La branche part de celle qui sert le site, et porte le brouillon.
+        assert_eq!(github.args(1)["owner"], json!("acme"));
+        assert_eq!(github.args(1)["repo"], json!("site"));
+        assert_eq!(github.args(1)["branch"], json!(branch));
+        assert_eq!(github.args(1)["from_branch"], json!("main"));
 
         // Le fichier va dans le dossier du dépôt, sur la branche de l'article,
-        // avec son en-tête.
-        let path = "content/blog/vérifier-un-visa-par-api.md";
-        assert_eq!(github.args(1)["path"], json!(path));
-        assert_eq!(github.args(1)["branch"], json!(branch));
-        let written = github.args(1)["content"]
+        // avec son en-tête — et **sans `sha`**, parce qu'il n'y avait rien à
+        // remplacer.
+        assert_eq!(github.args(2)["path"], json!(path));
+        assert_eq!(github.args(2)["branch"], json!(branch));
+        assert!(
+            github.args(2)["sha"].is_null(),
+            "rien n'était là à remplacer"
+        );
+        let written = github.args(2)["content"]
             .as_str()
             .expect("du texte")
             .to_owned();
@@ -2419,8 +2971,8 @@ mod tests {
         assert!(written.contains("Le corps de l'article."), "{written:?}");
 
         // La demande va de la branche de l'article vers celle qui sert le site.
-        assert_eq!(github.args(2)["head"], json!(branch));
-        assert_eq!(github.args(2)["base"], json!("main"));
+        assert_eq!(github.args(3)["head"], json!(branch));
+        assert_eq!(github.args(3)["base"], json!("main"));
 
         assert_eq!(proposal.branch, branch);
         assert_eq!(proposal.path, path);
@@ -2488,7 +3040,7 @@ mod tests {
             matches!(err, ProposeError::NotADraft(ref state) if state == "proposed"),
             "{err}"
         );
-        assert_eq!(github.tools().len(), 3, "rien n'est reparti");
+        assert_eq!(github.tools().len(), 4, "rien n'est reparti");
 
         drop_tenant(&db, principal.tenant_id).await;
     }
@@ -2496,15 +3048,15 @@ mod tests {
     /// **La Gate mord, et elle mord avant que quoi que ce soit parte.**
     ///
     /// Deux désarmements, parce qu'ils ne disent pas la même chose : sans aucun
-    /// outil, rien ne sort du tout ; avec les deux premiers seulement, la
+    /// outil, rien ne sort du tout ; avec les trois premiers seulement, la
     /// branche et le fichier existent chez le client et la demande ne s'ouvre
-    /// pas — ce qui est précisément pourquoi il y a trois verdicts et pas un.
+    /// pas — ce qui est précisément pourquoi il y a quatre verdicts et pas un.
     #[tokio::test]
     async fn un_siege_sans_loutil_nouvre_aucune_pull_request() {
         let Some(db) = db().await else { return };
         let (principal, _) = seed(&db).await;
         install_tool_policy(&db, principal.tenant_id, &[]).await;
-        let repo = seed_repo(&db, &principal).await;
+        let repo = seed_repo(&db, &principal, None).await;
         let draft = seed_draft(&db, &principal, "Un titre").await;
         let gate = PolicyGate::new(db.clone());
         let when = Utc::now();
@@ -2521,22 +3073,26 @@ mod tests {
             github.tools()
         );
 
-        // Armée à moitié : les deux premiers passent, le troisième est refusé.
+        // Armée à moitié : les trois premiers passent, le quatrième est refusé.
         install_tool_policy(
             &db,
             principal.tenant_id,
-            &[CREATE_BRANCH, CREATE_OR_UPDATE_FILE],
+            &[GET_FILE_CONTENTS, CREATE_BRANCH, CREATE_OR_UPDATE_FILE],
         )
         .await;
         let github = FauxGithub::new("https://github.com/acme/site/pull/7");
         let effects = Effects::new(db.clone(), ports_calling(github.clone()), principal.clone());
         let err = propose(&effects, &gate, &repo, &draft, when)
             .await
-            .expect_err("sans le troisième outil, la demande ne s'ouvre pas");
+            .expect_err("sans le quatrième outil, la demande ne s'ouvre pas");
         assert!(matches!(err, ProposeError::Denied(_)), "{err}");
-        assert_eq!(github.tools(), [CREATE_BRANCH, CREATE_OR_UPDATE_FILE]);
+        assert_eq!(
+            github.tools(),
+            [GET_FILE_CONTENTS, CREATE_BRANCH, CREATE_OR_UPDATE_FILE]
+        );
 
-        // Le désarmement du désarmement : avec les trois, ça passe.
+        // **Et le refus qui ne laisse rien** : sans la lecture, la Gate mord
+        // au premier appel, donc aucune branche n'est créée chez le client.
         install_tool_policy(
             &db,
             principal.tenant_id,
@@ -2545,9 +3101,33 @@ mod tests {
         .await;
         let github = FauxGithub::new("https://github.com/acme/site/pull/7");
         let effects = Effects::new(db.clone(), ports_calling(github.clone()), principal.clone());
+        let err = propose(&effects, &gate, &repo, &draft, when)
+            .await
+            .expect_err("sans la lecture, rien ne part");
+        assert!(matches!(err, ProposeError::Denied(_)), "{err}");
+        assert!(
+            github.calls().is_empty(),
+            "un refus sur la lecture ne doit rien laisser chez le client : {:?}",
+            github.tools()
+        );
+
+        // Le désarmement du désarmement : avec les quatre, ça passe.
+        install_tool_policy(
+            &db,
+            principal.tenant_id,
+            &[
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST,
+            ],
+        )
+        .await;
+        let github = FauxGithub::new("https://github.com/acme/site/pull/7");
+        let effects = Effects::new(db.clone(), ports_calling(github.clone()), principal.clone());
         propose(&effects, &gate, &repo, &draft, when)
             .await
-            .expect("avec les trois outils, la proposition passe");
+            .expect("avec les quatre outils, la proposition passe");
 
         drop_tenant(&db, principal.tenant_id).await;
     }
@@ -2561,10 +3141,15 @@ mod tests {
         install_tool_policy(
             &db,
             principal.tenant_id,
-            &[CREATE_BRANCH, CREATE_OR_UPDATE_FILE, CREATE_PULL_REQUEST],
+            &[
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST,
+            ],
         )
         .await;
-        let repo = seed_repo(&db, &principal).await;
+        let repo = seed_repo(&db, &principal, None).await;
         let draft = seed_draft(&db, &principal, "Un titre").await;
         let gate = PolicyGate::new(db.clone());
 
@@ -2574,9 +3159,107 @@ mod tests {
             .await
             .expect_err("la branche n'a pas été créée");
         assert!(matches!(err, ProposeError::Refused(CREATE_BRANCH)), "{err}");
-        assert_eq!(github.tools(), [CREATE_BRANCH], "rien n'a suivi");
+        assert_eq!(
+            github.tools(),
+            [GET_FILE_CONTENTS, CREATE_BRANCH],
+            "rien n'a suivi"
+        );
 
         drop_tenant(&db, principal.tenant_id).await;
+    }
+
+    /// **Republier un article corrigé.** Le trou du `docs/CONTENU.md` § 7, et
+    /// ses deux moitiés.
+    ///
+    /// Le chemin exact mesuré la veille : proposer, faire fusionner, puis
+    /// proposer un second brouillon **du même titre**. [`file_stem`] rend le
+    /// même chemin, la branche part de celle qui sert le site — qui porte
+    /// désormais le fichier — et `create-or-update-file` refusait faute de
+    /// `sha`, en laissant une branche orpheline chez le client.
+    ///
+    /// Ce que ce test tient : le `sha` du fichier en place part avec
+    /// l'écriture, la pull request s'ouvre, et **la lecture passe avant la
+    /// branche** — donc le cas qui échouait n'a plus rien à nettoyer.
+    #[tokio::test]
+    async fn republier_un_article_corrige_porte_le_sha_de_celui_quil_remplace() {
+        let Some(db) = db().await else { return };
+        let (principal, _) = seed(&db).await;
+        install_tool_policy(
+            &db,
+            principal.tenant_id,
+            &[
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST,
+            ],
+        )
+        .await;
+        let repo = seed_repo(&db, &principal, None).await;
+        // Le même titre que celui qui est déjà fusionné : c'est tout ce qu'il
+        // faut pour retomber sur le même chemin.
+        let second = seed_draft(&db, &principal, "Vérifier un visa par API").await;
+        let gate = PolicyGate::new(db.clone());
+        let when = Utc::now();
+
+        let github = FauxGithub::holding("https://github.com/acme/site/pull/9", HELD_SHA);
+        let effects = Effects::new(db.clone(), ports_calling(github.clone()), principal.clone());
+        let proposal = propose(&effects, &gate, &repo, &second, when)
+            .await
+            .expect("un article corrigé se repropose");
+
+        assert_eq!(
+            github.tools(),
+            [
+                GET_FILE_CONTENTS,
+                CREATE_BRANCH,
+                CREATE_OR_UPDATE_FILE,
+                CREATE_PULL_REQUEST
+            ]
+        );
+        // Le même chemin qu'avant, et le `sha` de ce qui est là.
+        assert_eq!(proposal.path, "content/blog/vérifier-un-visa-par-api.md");
+        assert_eq!(github.args(0)["path"], json!(proposal.path));
+        assert_eq!(github.args(2)["sha"], json!(HELD_SHA));
+        assert_eq!(proposal.review_url, "https://github.com/acme/site/pull/9");
+
+        drop_tenant(&db, principal.tenant_id).await;
+    }
+
+    /// **Un `sha` est la seule chose qu'on prenne d'un étranger, et sa forme
+    /// est le garde-fou.**
+    ///
+    /// Quarante chiffres hexadécimaux, ou rien. Ce qui est refusé ne fait pas
+    /// écrire ailleurs — le chemin et la branche viennent de nous — ça repart
+    /// en création, et GitHub refuse ce qu'il a à refuser.
+    #[test]
+    fn un_sha_qui_nen_est_pas_un_ne_sort_pas_de_la_reponse() {
+        let said = |value: serde_json::Value| tool_result(value.to_string(), false);
+
+        assert_eq!(
+            blob_sha(&said(json!({ "sha": HELD_SHA }))),
+            Some(HELD_SHA.to_owned())
+        );
+        // Trop court, trop long, pas hexadécimal, pas une chaîne, absent.
+        assert_eq!(blob_sha(&said(json!({ "sha": "9f1c0a7b" }))), None);
+        assert_eq!(
+            blob_sha(&said(json!({ "sha": format!("{HELD_SHA}0") }))),
+            None
+        );
+        assert_eq!(
+            blob_sha(&said(
+                json!({ "sha": "../../../etc/passwd zzzzzzzzzzzzzzzzzzzzzzz" })
+            )),
+            None
+        );
+        assert_eq!(blob_sha(&said(json!({ "sha": 7 }))), None);
+        assert_eq!(blob_sha(&said(json!({ "name": "un.md" }))), None);
+        // Et une réponse qui n'a pas la forme d'un `CallToolResult`.
+        assert_eq!(blob_sha(&json!({ "sha": HELD_SHA })), None);
+        assert_eq!(
+            blob_sha(&tool_result("pas du JSON".to_owned(), false)),
+            None
+        );
     }
 
     /// Un dépôt est une ressource **d'un siège**, et un voisin n'en voit rien.
@@ -2585,7 +3268,7 @@ mod tests {
         let Some(db) = db().await else { return };
         let (a, _) = seed(&db).await;
         let (b, _) = seed(&db).await;
-        let mine = seed_repo(&db, &a).await;
+        let mine = seed_repo(&db, &a, None).await;
         assert_eq!(mine.repo, "acme/site");
 
         let mut tx = db.tenant_tx(b.tenant_id).await.expect("tenant tx");
@@ -2606,6 +3289,7 @@ mod tests {
                 "autre/site",
                 "main",
                 "content",
+                None,
             )
             .await
             .expect("set")
@@ -2634,6 +3318,7 @@ mod tests {
             "voleur/site",
             "main",
             "content",
+            None,
         )
         .await;
         assert!(
@@ -2652,11 +3337,13 @@ mod tests {
             "acme/nouveau-site",
             "trunk",
             "src/pages/blog",
+            Some("blog.acme.example"),
         )
         .await
         .expect("set")
         .expect("le branchement existe");
         assert_eq!(moved.repo, "acme/nouveau-site");
+        assert_eq!(moved.site.as_deref(), Some("blog.acme.example"));
         assert_eq!(
             repos::list(&mut tx).await.expect("list").len(),
             1,
@@ -2671,6 +3358,7 @@ mod tests {
                 "acme/site",
                 "main",
                 "../../etc",
+                None,
             )
             .await
             .is_err(),

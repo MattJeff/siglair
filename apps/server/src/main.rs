@@ -374,10 +374,18 @@ async fn serve_until_signal(mut config: Config) -> Result<(), BootError> {
         proxies: browser_proxies.clone(),
         solver: config.captcha_solver(),
     };
+    // Le résolveur du système, **une** instance pour tout le processus : le
+    // cache DNS vit dedans, au TTL de chaque enregistrement, et c'est lui qui
+    // fait qu'une liste de mille adresses sur trois cents domaines ne pose que
+    // trois cents questions. Choisi dans `mocks` comme tous les autres ports —
+    // ce binaire n'a pas `agentos-providers` dans son manifeste, et c'est
+    // voulu.
+    let mail_domains = agentos_app::mocks::mail_domains();
     let ports = Arc::new(agentos_app::mocks::ports_for(
         &config.credentials,
         &config.public_host,
         browser_ports(),
+        mail_domains.clone(),
     ));
     // The same `Credentials`, one adapter further: `EMBEDDER_API_KEY` selects
     // the real client and its absence selects the SHA-256 hash. Not a field of
@@ -774,6 +782,14 @@ fn app(
             // thread — the same `messages` rows an employee already writes to a
             // colleague, with a person at one end.
             .merge(routes::desk::router(db.clone()))
+            // L'autre moitié de la même paire de tables, et le trou que la
+            // ligne au-dessus ne fermait pas : le bureau rend le canal
+            // interne, et rien ne rendait ce que des gens du DEHORS ont
+            // écrit. Une campagne partie était une campagne aveugle — des
+            // ouvertures, des clics, un compteur de fils qui ont répondu, et
+            // pas une phrase. Lecture seule : répondre est un acte d'employé,
+            // voir l'en-tête du module.
+            .merge(routes::conversations::router(db.clone()))
             // And beside them, closing the asymmetry the founder named: the
             // company could buy end to end and could not ask to be paid.
             // Read-and-settle only — issuing goes through the gate, from a seat,
@@ -785,7 +801,17 @@ fn app(
                 db.clone(),
                 gate.clone(),
                 ports.clone(),
+                // Approuver une signature l'envoie, chez le prestataire de ce
+                // locataire-là — voir `approvals::sign`.
+                fleets.clone(),
             ))
+            // À côté des approbations, parce que c'est là que la décision
+            // tombe : cette unité-ci prépare le pli et constate l'exemplaire
+            // exécuté, et n'envoie rien elle-même.
+            .merge(routes::signatures::router(routes::signatures::Signatures {
+                db: db.clone(),
+                gate: gate.clone(),
+            }))
             // Four routers written by four parallel units, each of which could
             // not mount itself because this file belonged to none of them. A
             // route nobody merged is a route nobody can call, and the
@@ -827,7 +853,17 @@ fn app(
                 // donc elle a besoin de la flotte de ce locataire-là.
                 fleets: fleets.clone(),
             }))
-            .merge(routes::prospects::router(db.clone()))
+            // Et juste après, parce que c'est la même table par les deux
+            // bouts : `import` verse la liste du fondateur,
+            // `POST /v1/prospects/discover` va en chercher une. Celle-là a
+            // besoin de la gate et du même `ports` que `content` — lire un
+            // annuaire est un `BrowserRead` sur lequel la Gate statue pour un
+            // siège.
+            .merge(routes::prospects::router(
+                db.clone(),
+                gate.clone(),
+                ports.clone(),
+            ))
             .merge(routes::sequences::router(db.clone()))
             .merge(routes::quotes::router(db.clone()))
             .merge(routes::pnl::router(db.clone()))
@@ -842,7 +878,7 @@ fn app(
             // taux de passage, la recette, le coût du modèle, et la cible que
             // le fondateur a posée — la seule lecture qui réponde à « est-ce
             // que j'y arrive ».
-            .merge(routes::growth::router(db.clone()))
+            .merge(routes::growth::router(db.clone(), credentials.clone()))
             .merge(routes::accounting::router(db.clone()))
             .merge(routes::teams::router(hiring.clone()))
             .merge(routes::companies::router(hiring.clone()))

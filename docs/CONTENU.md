@@ -1,6 +1,10 @@
 # Être cité : la boucle, sa mesure, et ce qu'elle ne mesure pas
 
-Écrit le 2026-09-11, en même temps que le code qu'il décrit.
+Écrit le 2026-09-11, en même temps que le code qu'il décrit ; repris le
+2026-09-12, quand deux des trois trous du § 7 ont été refermés et le troisième
+arbitré (§ 8) ; repris le 2026-09-13 pour **l'autre moitié du levier** — être
+cité davantage, et pas seulement savoir si on l'est (§ 9), qui range en trois
+tas ce que le mot « autorité » recouvre et dit lequel on prend.
 `docs/ROADMAP_CROISSANCE.md` § 2.1 dit **pourquoi** ce chantier passe devant les
 autres. Ce document dit **ce qui existe**, **ce qui est mesuré**, **ce qui ne
 peut pas l'être et pourquoi**, et **ce qui manque pour publier**.
@@ -112,6 +116,18 @@ Posée à la main, avant d'écrire une ligne de ce module, sur
 C'est le chiffre de départ, et c'est exactement ce que la boucle ci-dessous sert
 à faire bouger.
 
+### La même mesure, par la boucle, le 2026-09-12
+
+Rejouée le lendemain sur la même question et par le produit cette fois —
+`content_questions_measure`, un siège, le vrai moteur : `travel-buddy.ai`,
+`visadb.io`, puis **`visa.orizn.app` au rang 3**. Un cran plus bas qu'à la main
+la veille, sur une page qui bouge d'un jour à l'autre : c'est précisément
+pourquoi `content_citations` empile et ne réécrit pas, et pourquoi une mesure
+isolée ne dit rien.
+
+Et c'est cette marche-là qui a trouvé qu'une ligne d'hôte portant un espace dans
+son chemin faisait perdre un rang de plus — voir § 7.
+
 ---
 
 ## 3. La boucle, de bout en bout
@@ -124,6 +140,7 @@ C'est le chiffre de départ, et c'est exactement ce que la boucle ci-dessous ser
 
 | étape | ce qui la fait | où ça vit |
 |---|---|---|
+| **0. ce que « nous » veut dire** | `content_repos_set`, champ `site` | `content_repos.site` (`migrations/0105`) |
 | **1. la question** | `content_questions_add` / `POST /v1/content/questions` | `content_questions` |
 | **2. la mesure** | `content_questions_measure` / `POST /v1/content/questions/{id}/measure` — **nomme un siège** | `content_citations`, en ajout seul |
 | **3. le brief** | `content_briefs_get` / `GET /v1/content/briefs?question_id` | rien : une fonction pure de (1) et (2) |
@@ -159,6 +176,12 @@ côté prospection.
 ## 4. Ce que ça donne, en commandes
 
 ```bash
+# 0. ce que « nous » veut dire. SANS CETTE LIGNE, la mesure rend 409
+#    `no_domain_of_ours` — et c'est voulu : avant le 2026-09-12 elle lisait les
+#    domaines d'ENVOI D'E-MAIL du locataire et répondait faux sans le dire.
+PUT  /v1/content/repos/{employee_id}
+  { …, "site": "visa.orizn.app" }
+
 # 1. les questions qu'on veut gagner
 POST /v1/content/questions
   { "question": "how do I check visa requirements by API",
@@ -180,10 +203,35 @@ GET /v1/content/briefs?question_id={id}
 # 4. l'employé écrit, et le range
 POST /v1/content/drafts   { "question_id": "…", "title": "…", "body": "…" }
 
-# 4bis. le dépôt qui sert le site du client, attaché à un siège (une fois)
+# 4bis. ce qu'il faut avoir posé UNE FOIS avant la première proposition.
+#       Les trois premières lignes ne se devinent pas, et c'est ce qui a
+#       arrêté la première marche de bout en bout, le 2026-09-12.
+POST /v1/mcp/connect            { "connector": "github", "server": "github", … }
+POST /v1/mcp/servers/github/discover
+→ chaque outil avec son `digest` : c'est ce qu'un humain lit avant d'accorder.
+PUT  /v1/mcp/servers/github/tools/{get-file-contents|create-branch|create-or-update-file|create-pull-request}
+  { "risk": "write", "digest": "…" }
+→ SANS CES TROIS LIGNES, un outil est classé destructif (il n'est déclaré par
+  personne), la Gate le refuse avant le transport, et la proposition rend
+  409 `tool_unavailable`.
+
+# …et la politique du siège doit nommer les quatre outils. Ce n'est PAS
+# `policy_role_set` : ajouter un outil à une allowlist est un élargissement,
+# qu'une clé de locataire ne peut pas faire (409 `policy_widens`). C'est
+# l'opérateur, sur son propre DATABASE_URL :
+#   agentos-server policy install --tenant <uuid> --role <rôle> <couche.json>
+# et le plafond de la plateforme doit les nommer aussi — la Gate intersecte,
+# donc un outil absent de `docs/orizn-ceiling.json` est inatteignable même
+# nommé par le rôle.
+
+# 4ter. le dépôt qui sert le site du client, attaché à un siège (une fois)
 PUT  /v1/content/repos/{employee_id}
   { "server": "github", "repo": "orizn/site",
-    "branch": "main", "folder": "content/blog" }
+    "branch": "main", "folder": "content/blog",
+    "site": "visa.orizn.app" }
+→ `site` est l'hôte public où les articles ressortent, et c'est LUI que la
+  mesure cherche dans les résultats. Ce n'est pas un domaine d'envoi ;
+  `migrations/0105` argumente la séparation.
 
 # 5a. l'article part dans le dépôt, sur une branche à lui, et une pull request
 #     demande à une personne de le lire. Ça ne publie pas.
@@ -219,20 +267,31 @@ L'article devient un fichier Markdown poussé sur le dépôt qui sert le site du
 client (Jekyll, Hugo, Next, Astro — peu importe, ils lisent tous un dossier),
 sur une branche à lui, et une pull request demande à une personne de le lire.
 
-* **Le dépôt et la branche sont une ressource d'un siège** : `content_repos`
-  (`migrations/0102`), posée par `content_repos_set`. Deux clients ont deux
+* **Le dépôt, la branche et le site sont une ressource d'un siège** :
+  `content_repos` (`migrations/0102`, `site` par `migrations/0105`), posée par
+  `content_repos_set`. Deux clients ont deux
   dépôts ; rien ne vient d'une variable d'environnement. La table pend au
   branchement MCP par une clé étrangère, donc un dépôt ne se pose pas sur un
   GitHub que personne n'a branché. Ce n'est **pas** une ligne
   d'`employee_resources`, et 0102 dit pourquoi : `employee::load` exige de cette
   table-là une ligne par étape de provisionnement, exactement, et un dépôt n'est
   pas une étape — personne ne l'achète et rien ne le relâche.
-* **Trois appels d'outil, trois verdicts de la Gate** : `create-branch`,
-  `create-or-update-file`, `create-pull-request` sur le connecteur GitHub, qui
-  était déjà au catalogue. Un `McpCall` par geste, pas d'`ActionKind` nouveau —
-  la Gate savait déjà statuer là-dessus, pour un siège nommé, avec sa ligne
-  d'`audit_log`. Un siège dont la politique ne nomme pas les trois outils
-  n'ouvre rien, et le refus arrive avant que quoi que ce soit sorte.
+* **Quatre appels d'outil, quatre verdicts de la Gate, dans cet ordre** :
+  `get-file-contents`, `create-branch`, `create-or-update-file`,
+  `create-pull-request` sur le connecteur GitHub, qui était déjà au catalogue.
+  Un `McpCall` par geste, pas d'`ActionKind` nouveau — la Gate savait déjà
+  statuer là-dessus, pour un siège nommé, avec sa ligne d'`audit_log`. Un siège
+  dont la politique ne nomme pas les quatre outils n'ouvre rien, et le refus
+  arrive avant que quoi que ce soit sorte. **L'ordre est le mécanisme** : la
+  lecture passe avant la création de la branche, donc ce qui peut manquer manque
+  avant qu'il y ait quoi que ce soit à nettoyer chez le client — voir § 7.
+* **Et un quatrième verrou, qui n'est pas la Gate** : `agentos_app::mcp`
+  classe *destructif* tout outil qu'aucune déclaration ne couvre, et refuse un
+  destructif sans approbation — donc les quatre outils doivent avoir été
+  déclarés (`PUT /v1/mcp/servers/{server}/tools/{tool}`, § 4) même quand la
+  politique les nomme. Les deux verrous sont indépendants et se lisent
+  différemment : la politique manquante est un 403 `no_rule`, la déclaration
+  manquante un 409 `tool_unavailable`.
 * **La relecture humaine est la pull request**, et rien n'a été inventé à côté.
   Ce dépôt ne sait pas fusionner.
 * **`proposed` n'est pas `published`.** Le brouillon passe à `proposed` et porte
@@ -250,7 +309,7 @@ humain approuve sans que nous ayons à inventer un circuit d'approbation.
 fait contre le vrai serveur MCP de GitHub. Il demande un compte et un passage
 OAuth, et ce chantier n'avait pas le droit d'en ouvrir un. Les tests parlent à un
 faux GitHub monté à la main. Ce qui reste à prouver au premier vrai branchement
-est que GitHub épelle ces trois outils comme nous — et un nom faux sort en
+est que GitHub épelle ces quatre outils comme nous — et un nom faux sort en
 `unknown_tool` au premier appel, avant qu'un octet soit écrit.
 
 ### Chemin B — un domaine web à nous, pour le client : **pas codé**
@@ -271,6 +330,10 @@ Publier sur un domaine **à nous** (un blog `orizn-content.com` qui parle au nom
 de dix clients) : ce serait une ferme de contenu, les moteurs la classent comme
 telle, et le premier client à s'en apercevoir aurait raison de partir.
 
+Le § 9 applique la même épreuve à l'autre moitié du levier — se faire citer
+ailleurs — et en sort trois refus de plus, écrits pour être cités le jour où
+quelqu'un les repropose.
+
 ---
 
 ## 6. Où est quoi
@@ -279,7 +342,414 @@ telle, et le premier client à s'en apercevoir aurait raison de partir.
 |---|---|
 | `migrations/0100_une_question_merite_une_reponse.sql` | les trois tables, leur RLS, et l'argument de l'ajout seul |
 | `migrations/0102_une_pull_request_nest_pas_une_publication.sql` | le dépôt d'un siège, le troisième état, et pourquoi ce n'est pas `employee_resources` |
-| `crates/app/src/content.rs` | la mesure, le scan, le brief, la proposition, et les limites de chacun |
-| `apps/server/src/routes/content.rs` | les douze routes, et pourquoi la mesure comme la proposition nomment un siège |
-| `crates/app/src/mcp_tools/contenu.rs` | les douze outils, un par route |
+| `migrations/0106_un_site_nest_pas_un_expediteur.sql` | le site où l'on publie, et pourquoi ce n'est pas le domaine d'où l'on envoie |
+| `crates/app/src/content.rs` | la mesure, le scan, le brief, **les endroits** (`places`), la proposition, et les limites de chacun |
+| `apps/server/src/routes/content.rs` | les treize routes, et pourquoi la mesure comme la proposition nomment un siège |
+| `crates/app/src/mcp_tools/contenu.rs` | les treize outils, un par route |
 | `docs/ROADMAP_CROISSANCE.md` § 2.1 | pourquoi ce levier passe devant les autres |
+
+---
+
+## 7. La marche de bout en bout du 2026-09-12, et ce qu'elle a trouvé
+
+La boucle n'avait jamais été parcourue d'un bout à l'autre depuis un terminal.
+Elle l'a été ce jour-là, sur une instance locale, contre le **vrai**
+`lite.duckduckgo.com` pour la mesure et contre un **faux serveur MCP de GitHub**
+monté pour l'occasion — HTTP/1.1 sur le loopback, corps JSON-RPC, un dépôt en
+mémoire, `server/discover` répondu en `-32601` comme le font les SDK de
+référence. Aucun vrai dépôt n'a été touché et aucun compte n'a été créé.
+
+**Les sept étapes passent.** Question → mesure → citations → brief → brouillon →
+pull request chez le client → adresse constatée. Le fichier arrive au bon
+chemin, sur une branche à lui, avec son en-tête ; le brouillon sort `proposed`
+et pas `published`.
+
+### Ce qui a cassé, et qui est réparé
+
+* **La mesure inventait un concurrent et nous coûtait un rang.** Sur « how do I
+  check visa requirements by API », le moteur affichait un résultat comme
+  `zylalabs.com/api-marketplace/top-search/visa requirements` — la requête
+  affichée met un espace dans le chemin. `display_host` refusait toute ligne
+  portant un blanc, l'hôte n'était pas lu, le résultat se refermait sans nom, et
+  `visa.orizn.app` sortait **4ᵉ au lieu de 3ᵉ**, avec une chaîne vide en
+  troisième concurrent — qui remontait telle quelle dans l'`outrank` du brief.
+  Le blanc se cherche maintenant avant la première barre, pas sur la ligne
+  entière.
+* **Une déclaration d'outil manquante accusait GitHub.** Un outil que
+  `integrations_tools_declare` n'a pas classé est destructif par défaut et refusé
+  *avant le transport* ; la route rendait « the repository host did not answer ».
+  C'est maintenant un 409 `tool_unavailable` qui nomme les deux outils à
+  rejouer.
+* **`content_repos_set` renvoyait à `integrations_list`, qui n'existe pas** (la
+  vraie ligne est `integrations_servers_list`). Un test relit toute la table
+  d'outils et refuse un nom cité qui n'en est pas un ; il en a trouvé un second
+  tout seul, dans un autre domaine.
+* **La carte d'entrée (`INSTRUCTIONS`) ne parlait pas du contenu.** Elle portait
+  quatre enchaînements et aucun n'était celui-ci — donc un modèle qui lit
+  `tools/list` et rien d'autre ne pouvait pas mener la boucle. Il y en a cinq, et
+  un test refuse que la carte nomme un outil absent.
+
+### Ce que la marche a confirmé sans le réparer
+
+* **Le brief n'a pas de table, et ça tient.** `content_citations` porte tout ce
+  que `brief` lit (`excerpt`, `rank`, `competitors`), et `content_citations_list`
+  les rend — donc le brief d'une mesure de mars se recalcule en mars prochain.
+  Une seule nuance : `GET /v1/content/briefs` bâtit sur la **dernière** mesure et
+  ne sait pas viser une mesure précise. Recalculer un ancien brief se fait à la
+  main depuis la ligne, pas par la route. Une table serait toujours une
+  deuxième vérité ; un `citation_id` optionnel sur la route serait, lui, une
+  ligne — le jour où quelqu'un le demande.
+* **Republier un article corrigé échouait**, et c'est refermé le 2026-09-12 —
+  voir « Les deux trous refermés » ci-dessous.
+
+### Les deux trous refermés le 2026-09-12
+
+Ce sont, dans les mots de la veille, le **point 3** de « ce qui manque encore »
+et le deuxième tiret de « ce que la marche a confirmé sans le réparer » —
+`migrations/0105` cite le premier sous son ancien numéro, § 7.3.
+
+**1. `our_domains` lisait la table des domaines d'envoi.** C'était le plus court
+et le plus grave : `SELECT domain FROM tenant_domains` rend, pour Orizn,
+`agents.getorizn.com` et `agent.oriznapi.uk` — jamais `visa.orizn.app`. Le site
+du client pouvait sortir premier, la mesure annonçait qu'il n'était pas cité, et
+le brief, l'angle et « qui dépasser » sont tous bâtis sur ce booléen.
+
+Le chemin court aurait été de verser `visa.orizn.app` dans `tenant_domains`. Il
+est refusé, et pas pour la propreté : `tenant_domains` n'est pas une liste de
+noms, c'est **une rotation d'envoi**. `sending_domain::pick_from` choisit
+l'expéditeur d'un mail parmi « le domaine *vérifié* dont il reste le plus de
+plafond », donc une ligne en `verified` fait partir le premier mail de
+prospection d'un domaine sans DKIM ni SPF ; et en `pending`, un siège attendrait
+la vérification d'un domaine que personne n'a déclaré chez Resend. **L'asymétrie
+tranche** : un domaine d'envoi non vérifié interdit à un siège de s'y asseoir, un
+domaine de site n'a rien à vérifier — deux `status` qui ne veulent pas dire la
+même chose ne partagent pas une colonne.
+
+Donc `content_repos.site` (`migrations/0105`), et pas une table `tenant_sites` :
+0102 range déjà le dépôt qui sert le site du client, et l'adresse publique de ce
+site est le cinquième fait de la même phrase, sue par la même personne au même
+moment. Ce qu'une table à part aurait acheté — déclarer un site sans dépôt — n'est
+pas un besoin tant que le seul chemin de publication codé passe par ce dépôt. Un
+locataire sans `site` déclaré sort en 409 `no_domain_of_ours`, avec le geste à
+faire : un refus lisible remplace une mesure fausse.
+
+**2. Republier un article corrigé échouait, et laissait un déchet.** Proposer,
+faire fusionner, puis proposer un second brouillon **du même titre** :
+`file_stem` rend le même chemin, la nouvelle branche part de `main` qui porte
+désormais le fichier, et `create-or-update-file` répond `isError` faute de `sha`.
+Mesuré la veille : `github_refused` sur le deuxième des trois appels, **avec une
+branche orpheline laissée chez le client**.
+
+Le quatrième appel est `get-file-contents`, et **il passe en premier**. C'est ce
+qui referme les deux moitiés d'un coup : lu en quatrième position il aurait
+réparé l'échec en gardant la branche que le deuxième avait déjà créée ; lu en
+premier, ce qui peut manquer manque avant qu'une branche existe. Les deux refus
+ordinaires — une politique qui ne nomme pas l'outil, un `sha` qu'on n'a pas —
+tombent maintenant sur une lecture, et le dépôt du client est exactement comme
+avant.
+
+Le `sha` est **la seule valeur de tout ce module qui vienne vraiment d'un
+étranger** : `review_url` rebâtit son adresse à partir de nos propres chaînes, et
+ici c'est impossible — un `sha` *est* ce que GitHub a à en dire. Ce qui en tient
+lieu de garde-fou est sa forme, quarante chiffres hexadécimaux et rien d'autre.
+Un `sha` faux ne fait pas écrire ailleurs (le chemin et la branche viennent de
+nous), il fait refuser l'écriture.
+
+*Ce qui n'est pas fait, et pourquoi* : aucun nettoyage compensatoire pour le cas
+qui reste — le réseau qui meurt entre le deuxième et le quatrième appel.
+Supprimer une branche demanderait un cinquième outil, donc une ligne de plus dans
+la politique de chaque siège et dans le plafond de la plateforme, c'est-à-dire un
+`policy install` chez chaque client, pour rattraper un échec qui ne se produit
+plus par la voie qu'on sait nommer. Et le rappel de `propose` sur un brouillon
+dont la branche traîne sort en `github_refused` sur `create-branch` : GitHub
+refuse une référence qui existe, et distinguer ce refus-là d'un autre demanderait
+de lire sa prose.
+
+### Ce qui manque encore pour qu'un article du client soit réellement en ligne
+
+1. **Personne n'est prévenu quand un humain a fusionné.** C'est le trou nommé au
+   § 5, et il reste ouvert : entre `proposed` et `published`, il n'y a que
+   quelqu'un qui pense à regarder la pull request. Le chaînon évident est un
+   webhook GitHub `pull_request.closed` — **et le § 8 dit pourquoi il ne vaut pas
+   sa vague**, et ce qui vaudrait mieux pour le même prix.
+2. **La politique d'un siège ne s'élargit pas depuis le terminal.** Ajouter les
+   **quatre** outils de GitHub à une allowlist est un élargissement :
+   `policy_role_set` répond 409 `policy_widens`, et il faut
+   `agentos-server policy install` sur le `DATABASE_URL` de l'opérateur — **deux
+   fois**, parce que le plafond de la plateforme (`docs/orizn-ceiling.json`)
+   porte `allowed_mcp_tools: []` et que la Gate intersecte. Tant que c'est vrai,
+   aucun client ne peut ouvrir sa première pull request sans que l'opérateur
+   touche la base. Le fichier livré devrait nommer les quatre outils ; le changer
+   est un élargissement de plafond, et ça se décide, ça ne se glisse pas dans un
+   commit de code.
+
+---
+
+## 8. Le webhook de fusion : ce qu'il coûte, ce qu'il achète, et pourquoi non
+
+Le chaînon manquant du § 7.1, chiffré plutôt que supposé.
+
+**Ce qui existe déjà** : `POST /v1/webhooks/{path}` (`routes::webhooks`) lit le
+corps brut avant toute désérialisation, vérifie la signature dessus et écrit une
+ligne ; `webhook_endpoints` (`migrations/0053`) tient un secret par locataire et
+par fournisseur, derrière un chemin opaque ; `POST /v1/platform/webhooks` émet
+l'adresse à coller. GitHub signe `X-Hub-Signature-256: sha256=<hex>` en
+HMAC-SHA256 sur le corps brut — **exactement** le schéma de Smartlead, déjà
+compilé.
+
+**Ce qu'il faudrait** : une migration qui élargit
+`webhook_endpoints_provider_is_wired` à `'github'` (0081 est le modèle, six
+lignes) ; une branche de vérification dans `routes::webhooks` (une vingtaine) ;
+et — c'est la moitié qui coûte — **un lecteur**, parce que 0053 interdit de
+nommer un fournisseur dont aucun ingest ne lit les livraisons.
+
+**Et surtout, ce que le lecteur peut écrire, qui est moins qu'on ne croit.** Une
+pull request fusionnée ne dit pas à quelle adresse l'article est en ligne : le
+générateur du client décide de l'URL, et il la publie quand son déploiement
+passe. Donc le webhook **ne peut pas** remplir `content_drafts.url` — le § 5
+tient toujours, `url` est un constat. Ce qu'il peut faire est réveiller
+quelqu'un : une ligne de `work_items` (`migrations/0061`) sur le siège qui a
+proposé, « la demande est fusionnée, va constater l'adresse ». Et ça demande de
+retrouver le brouillon depuis la livraison, c'est-à-dire un `SELECT` sur
+`content_drafts.review_url` — qui est la colonne indexée pour ça, et la seule
+chose de tout ce chantier qui existe déjà telle quelle.
+
+**Verdict, arrêté le 2026-09-12 : non, et ce n'est pas un « pas maintenant ».**
+
+Quatre raisons, de la plus décisive à la plus circonstancielle.
+
+1. **Il n'achète pas la publication, il déplace le geste humain d'un cran.** Le
+   webhook ne peut pas remplir `url` — une pull request fusionnée ne dit pas à
+   quelle adresse l'article est en ligne. Ce qu'il achète est « va constater
+   l'adresse » au lieu de « va regarder la pull request ». La personne fait
+   toujours exactement un geste, au même endroit, un jour plus tard.
+2. **Le rappel qu'il achète existe déjà.** `content_drafts_list` rend l'état et
+   `review_url`, et le § 8 d'origine le dit lui-même en dernière ligne. Ce qui
+   manque n'est pas l'information, c'est l'attention — et une ligne de
+   `work_items` de plus est un deuxième endroit où ne pas regarder.
+3. **Son prix caché est chez le client.** `webhook_endpoints` tient un secret par
+   locataire et par fournisseur et `POST /v1/platform/webhooks` émet l'adresse à
+   coller : quelqu'un doit ouvrir les réglages du dépôt du client, créer le
+   webhook, coller l'adresse et le secret. C'est un geste manuel par client, du
+   même ordre que celui qu'on prétend supprimer, et il tombe sur celui qu'on
+   voulait épargner. Le compte honnête est donc : une vague de notre côté, un
+   geste de plus du sien, contre un rappel.
+4. **Il est attaché au chemin A.** Le jour du chemin B — un domaine servi par
+   nous — il ne dit plus rien : c'est nous qui publions, et nous connaissons
+   l'adresse sans que personne nous prévienne.
+
+### Ce qui vaudrait mieux pour le même prix : constater au lieu de demander
+
+« Publié » veut dire *quelqu'un a vu l'article à cette adresse* (§ 5). Or
+**voir une page est déjà une capacité de ce dépôt** : `Effects::read_page`,
+derrière la Policy Gate, avec son jeton, son contrôle de portée et sa ligne
+d'`audit_log` — c'est exactement ce que `content_questions_measure` fait tous
+les jours. Un siège qui relit l'adresse d'un article et y trouve son titre *a
+vu l'article*, au sens plein que le `CHECK` de `0100` protège.
+
+Ce qu'il manquait pour ça était l'hôte, et il est arrivé aujourd'hui :
+`content_repos.site`. Ce qui manque encore est la **forme du chemin**, qui est
+propre au générateur du client — `/blog/<stem>/` chez Hugo et Astro,
+`/blog/AAAA/MM/JJ/<stem>.html` chez Jekyll. C'est **une colonne de plus sur
+`content_repos`**, exactement ce que le commentaire `ponytail:` d'`article()`
+prévoit déjà pour l'en-tête YAML, plus une lecture qui écrit `url` et
+`published_at` quand elle trouve le titre.
+
+Le compte, en regard :
+
+| | le webhook | le constat |
+|---|---|---|
+| migration | une, sur `webhook_endpoints` | une colonne |
+| vérification de signature | une branche, un secret par locataire | rien |
+| geste chez le client | créer un webhook, coller un secret | rien |
+| ce que ça écrit | une ligne de `work_items` | `url`, `published_at`, `state = 'published'` |
+| survit au chemin B | non | oui |
+| ce qu'il reste à faire à un humain | constater l'adresse | rien |
+
+*Ce que la contre-proposition coûte, dit franchement* : un gabarit d'URL est une
+supposition sur le générateur du client, et une supposition fausse laisse un
+article en ligne en `proposed`. C'est le sens conservateur — on n'écrit jamais
+`published` à tort — c'est réparable par la personne qui corrige le gabarit une
+fois, et c'est un fait sur **un** client là où le webhook est une infrastructure
+pour **tous**. Reste le déclencheur : le moins cher est un outil que le siège
+appelle sur ses brouillons `proposed`, ce qu'un objectif de siège sait déjà
+réveiller — pas une boucle de plus.
+
+*Et pourquoi ce n'est pas codé ici* : la question posée était un avis avant du
+code, et l'avis est « non » pour le webhook. Coder la contre-proposition sans
+qu'elle soit arbitrée serait construire la deuxième vague du même jour.
+
+---
+
+## 9. L'autorité : les trois tas, l'arbitrage, et ce qu'on ne fera jamais
+
+Écrit le 2026-09-13. Un concurrent direct vend quatre leviers, et son deuxième
+agent s'appelle « autorité » : il cherche des endroits où faire citer le site du
+client, parce que des liens et des mentions depuis des sites sérieux sont ce qui
+fait qu'un moteur — et derrière lui un modèle — te classe devant. Le reproche
+est juste : **les § 1 à 8 mesurent le thermomètre et ne touchent pas au
+chauffage.**
+
+La question posée était un avis avant du code, comme au § 8. Voici l'avis.
+
+### Le tas 1 — le travail honnête
+
+Ce qui reste vrai si le client le raconte à haute voix, et qui aurait été fait
+par quelqu'un de compétent sans nous.
+
+* **Répondre là où la question est posée**, sur un forum public ou un site de
+  questions-réponses, **quand on a réellement la réponse** — et signé, sous
+  l'identité du client, pas sous un pseudonyme.
+* **Figurer dans un annuaire du métier** que des acheteurs consultent : celui
+  d'une association professionnelle, la place de marché d'une plateforme dont on
+  est une intégration, le répertoire d'un standard qu'on implémente.
+* **Être mentionné dans un comparatif qu'on n'a pas écrit.** Quelqu'un compare
+  cinq fournisseurs de données de visa ; nous sommes le cinquième, ou nous
+  n'y sommes pas. Lui demander de nous regarder est une demande, pas une
+  transaction.
+* **Savoir où la question vit déjà**, ce qui est la condition des trois
+  précédents : sans cette liste, « aller répondre » est une intuition.
+
+### Le tas 2 — la mécanique grise
+
+Ni illégal, ni interdit nulle part, et pourtant : ce qui n'existe que pour
+tromper un classement, et dont un acheteur informé se détournerait.
+
+* **Les échanges de liens.** Deux sites conviennent de se citer parce qu'ils se
+  citent, pas parce qu'ils se lisent.
+* **L'article invité au volume.** Un texte par site, trente sites, un lien dans
+  chacun. Ce n'est pas l'article invité qui est gris — c'en est le compteur.
+* **Les commentaires signés** laissés sous des billets pour le lien qu'ils
+  portent.
+* **Les répertoires qui n'existent que pour donner des liens** : un annuaire
+  sans lecteur est un panneau planté dans un champ.
+
+Le point commun se dit en une phrase : **le geste n'a de valeur que si personne
+ne regarde à quoi il sert.** C'est la même épreuve que le § 5 fait passer à la
+ferme de contenu, et elle donne le même résultat.
+
+### Le tas 3 — ce qu'on ne fera jamais
+
+Trois lignes, écrites pour être citées le jour où quelqu'un les repropose.
+
+* **Acheter un lien, ou louer un domaine pour en émettre.** *Un lien acheté est
+  un mensonge adressé à un classement, et le produit qui l'automatise vend à son
+  client une dette dont il ignore l'échéance.*
+* **Écrire sur un site tiers au nom du client sans qu'une personne l'ait relu.**
+  *Le chemin A passe par une pull request chez le client précisément parce que la
+  relecture humaine est la seule chose qui distingue une contribution d'un
+  publipostage, et un produit qui poste ailleurs sans elle a supprimé la moitié
+  qui valait quelque chose.*
+* **Inventer la voix de quelqu'un d'autre** — un avis, un témoignage, un compte
+  de forum qui n'est personne. *Un faux client est une fraude avant d'être une
+  tactique, et aucune formulation du besoin ne rend acceptable d'écrire au nom
+  d'une personne qui n'existe pas.*
+
+Et une quatrième, propre à ce dépôt : **on ne lit pas ce qui nous refuse, même
+pour chercher une cible.** Une source qui interdit sa lecture l'interdit aussi
+à qui vient y chercher une occasion de lien.
+
+### L'arbitrage : on prend le tas 1, et on n'en code que la quatrième ligne
+
+**Ce qui est codé aujourd'hui est un compte, pas une action.**
+`content_places_list` rend les hôtes qui reviennent dans les résultats de nos
+questions, et sur lesquelles de nos questions ils sont là où nous ne sommes pas.
+Rien n'écrit, rien ne sort, rien ne démarche. Ce que la liste devient est une
+décision humaine, et les trois tas ci-dessus sont là pour qu'elle se prenne les
+yeux ouverts.
+
+La raison de s'arrêter là n'est pas la prudence, c'est le compte. Les quatre
+gestes du tas 1 sont des **demandes adressées à des personnes** : on ne les
+automatise pas, on les prépare. Ce qui manquait pour les préparer était la
+liste ; elle existe maintenant, et elle n'a coûté ni source nouvelle, ni clé, ni
+migration.
+
+### Les deux hypothèses du fondateur, jugées
+
+**« Mesurer où la question vit est peut-être plus utile que d'inventer des
+liens. » — confirmée, et c'est ce qui est codé.** Mieux : ça ne demandait
+aucune lecture de plus. La page de résultats qu'on lit déjà porte, pour chaque
+question, les hôtes qui répondent à notre place. Ce qui manquait n'était pas une
+donnée, c'était de les additionner **d'une question à l'autre** : un hôte vu une
+fois est un concurrent, le même vu sur huit de nos questions est un endroit où
+la conversation a lieu sans nous.
+
+**« L'écart entre qui cite mon concurrent et qui me cite se tire de données
+qu'on a déjà. » — infirmée, et il faut le dire clairement.**
+`content_citations.competitors` n'est **pas** la liste de qui cite qui : c'est la
+liste des hôtes que le moteur **classe** sur notre question. « Qui cite
+`visadb.io` » est un graphe de liens entrants, et un graphe de liens entrants ne
+se lit dans aucune page de résultats — il se construit en explorant le web
+entier, ce que quatre sociétés font et vendent.
+
+Elles sont donc **nommées et pas appelées**, comme les API de recherche payantes
+du § 2 : **Ahrefs**, **Majestic**, **Moz** et **Semrush** vendent chacune une API
+de liens entrants, entre quelques dizaines et quelques centaines de dollars par
+mois. L'une d'elles rendrait cette question mesurable ; aucune n'est branchée,
+aucun compte n'est ouvert, et rien dans ce dépôt n'expose de moyen de le faire.
+**Treg**, la passerelle d'outils au crédit consommé, mettrait la même donnée
+derrière un seul compte au lieu de quatre : c'est une entrée au catalogue le
+jour où quelqu'un décide de payer pour un lien entrant, et ce jour n'est pas
+arrivé.
+
+Ce que ça coûte de ne pas les avoir, dit franchement : on sait *où la question
+vit*, on ne sait pas *qui parle déjà de notre concurrent*. La première liste
+suffit pour aller répondre ; la seconde aurait servi à aller demander.
+
+### Ce qu'on a vérifié avant de ne pas le lire — le 2026-09-13
+
+La règle du § 2 s'applique à toute source qu'on approche, et l'hypothèse
+« allons lire les forums où la question est posée » a été instruite avant d'être
+écartée. Quatre `curl`, le 2026-09-13 :
+
+| source | `robots.txt` | ce qu'on en fait |
+|---|---|---|
+| `stackoverflow.com` | **le fichier lui-même ne se lit pas** : un défi Cloudflare répond à sa place | On ne lit pas. Un site qui refuse jusqu'à sa propre déclaration refuse tout le reste. |
+| `www.reddit.com` | `User-agent: *` / `Disallow: /`, avec un lien vers sa *Public Content Policy* | On ne lit pas. Le refus est écrit, complet, et il vaut aussi pour qui vient chercher une cible. |
+| `www.quora.com` | `User-agent: *` / `Disallow: /`, avec une poignée d'`Allow` qui ne couvrent que l'accueil, « à propos » et l'inscription — aucune page de question. Et deux blocs plus haut, `Claude-User` et `Claude-SearchBot` sont nommés avec `Disallow: /` | On ne lit pas, et deux fois plutôt qu'une : la règle générique refuse, et notre nom est écrit dans le fichier. |
+| `news.ycombinator.com` | `Crawl-delay: 30`, et seuls les chemins d'action (`/vote?`, `/reply?`, `/login`…) sont interdits — les pages d'articles sont ouvertes | **Lisible**, à trente secondes par page. Pas lu quand même : voir ci-dessous. |
+
+Donc les trois plus gros endroits où une question se pose nous sont **fermés par
+écrit** — et Quora prend la peine de nommer nos agents un par un —, tandis que
+le seul qui reste ouvert l'est à un rythme qui interdit l'exploration. Le chemin
+« aller lire les forums pour y trouver nos questions » est mort avant d'avoir
+coûté une ligne — ce qui est exactement à quoi sert de vérifier d'abord.
+
+Et le détour est inutile : `lite.duckduckgo.com`, qui nous autorise, **indexe
+déjà ces sites**. Un fil de forum qui répond à notre question sort dans les
+résultats de notre question, avec son hôte, et c'est cet hôte que
+`content_places_list` compte. Nous lisons une page qui nous accueille plutôt que
+cent qui nous refusent, et nous en tirons la même information.
+
+### Ce qui n'est pas codé, et ce qu'il faudrait pour l'être
+
+* **Distinguer un forum d'un concurrent.** La liste rend des hôtes ; elle ne dit
+  pas lequel est un endroit où répondre et lequel est un rival. Le faire
+  demanderait soit une liste fermée écrite à la main (qui vieillit), soit de
+  lire chaque hôte (un appel réseau par hôte), soit de le demander à un modèle
+  (qui laisserait la page choisir ses catégories — ce que le brief refuse déjà
+  de faire, et pour la même raison). Un humain qui lit trente noms de domaine
+  fait ce tri en dix secondes et ne se trompe pas. **Il le fait.**
+* **Suivre ce qu'on a demandé à qui.** Le jour où un employé écrit à un
+  comparatif pour lui demander de nous regarder, ce qui manque est une trace —
+  et cette trace existe déjà ailleurs : c'est un fil de `contacts` et de
+  `messages`, exactement la prospection, avec un autre objet. Rien de neuf à
+  bâtir, une décision à prendre.
+* **Le graphe des liens entrants.** Nommé ci-dessus, non appelé.
+
+### Ce que ça donne, en une commande
+
+```bash
+# après au moins une mesure — une question jamais mesurée n'a pas d'endroit
+GET /v1/content/places
+→ { "places": [
+      { "host": "stackoverflow.com", "questions": 6, "best_rank": 1,
+        "without_us": ["how do I check visa requirements by API", …] },
+      { "host": "rapidapi.com",      "questions": 4, "best_rank": 2,
+        "without_us": [] } ] }
+```
+
+`without_us` est la seule colonne actionnable : l'hôte y est, nous n'y sommes
+pas, et la question est celle qu'on voulait gagner. `questions` dit si l'endroit
+compte ou s'il est passé une fois. `best_rank` dit à quelle hauteur il est vu.
+Ce que ça ne dit pas — qui nous cite — est dit plus haut, et c'est volontaire.

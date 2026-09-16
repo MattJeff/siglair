@@ -141,17 +141,28 @@ async fn run(args: &[String]) -> Result<String, String> {
         .await
         .map_err(|err| store_error("could not open a transaction", &err))?;
 
-    let list = List {
-        segment: &parsed.segment,
-        country: &parsed.country,
-        employee_id: None,
-    };
+    // Le résolveur, une fois pour toute la commande : c'est lui qui porte le
+    // cache, et cinq fichiers qui partagent des domaines ne posent la question
+    // qu'une fois par domaine. Voir `agentos_app::mocks::mail_domains` pour ce
+    // qu'une machine sans DNS obtient.
+    let mx = agentos_app::mocks::mail_domains();
+
     let now = Utc::now();
     let mut out = String::new();
     let mut total = Report::default();
 
     for (path, text) in &files {
-        let report = prospects::import(&mut tx, &list, text, now)
+        // Une liste par fichier, et pas une pour tous : `source` est le nom que
+        // portera chaque contact créé (`0107`), et un seul `List` pour cinq
+        // fichiers rendrait les cinq listes indiscernables — ce qui est
+        // exactement le trou que 0107 bouche.
+        let list = List {
+            segment: &parsed.segment,
+            country: &parsed.country,
+            employee_id: None,
+            source: Some(path),
+        };
+        let report = prospects::import(&mut tx, &list, mx.as_ref(), text, now)
             .await
             .map_err(|err| import_error(path, &err))?;
         out.push_str(&format!("{path}\n{}\n\n", indent(&report.summary())));

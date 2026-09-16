@@ -2,14 +2,20 @@
 //! modèle comment faire ce que nous vendons.**
 //!
 //! `agentos_app::content` porte la thèse et les limites de la mesure,
-//! `docs/CONTENU.md` la boucle entière. Douze lignes, une par route montée par
+//! `docs/CONTENU.md` la boucle entière. Treize lignes, une par route montée par
 //! `apps/server/src/routes/content.rs`.
 //!
 //! # Ce que les descriptions portent, et pourquoi
 //!
-//! Un modèle choisit un outil sur sa `description` seule, et les trois pièges
+//! Un modèle choisit un outil sur sa `description` seule, et les quatre pièges
 //! d'ici ne se devinent pas depuis un nom de route :
 //!
+//! * **`content_drafts_propose` a trois préalables, dont deux invisibles.** Un
+//!   dépôt (`content_repos_set`), une politique qui nomme les trois outils de
+//!   GitHub, et — celui que la boucle marchée le 2026-09-12 a trouvé —
+//!   `integrations_tools_declare` sur chacun des trois. Un outil qu'aucune
+//!   déclaration ne classe est traité comme destructif, donc refusé avant le
+//!   transport ; la description le dit parce qu'aucun schéma ne le porte.
 //! * **`content_questions_measure` nomme un siège.** La mesure est une lecture de page
 //!   publique, donc une action sur laquelle la Policy Gate statue pour un
 //!   employé. Un siège sans `web` ne mesure pas, et le refus est un 403 avec
@@ -155,7 +161,10 @@ pub fn tools() -> Vec<ToolDef> {
              est refusé, avec la raison. Un seul moteur est lisible par ce déploiement, `duckduckgo_lite` : \
              les réponses de ChatGPT, de Claude ou de Gemini demandent un compte et ne sont pas mesurables \
              ici, et Google, Bing, Brave, Mojeek et Startpage refusent leurs pages de résultats dans leur \
-             `robots.txt`. À appeler régulièrement : une mesure isolée ne dit rien, c'est la série qui parle.",
+             `robots.txt`. **Un préalable qui ne se devine pas** : « nous » est le `site` déclaré par \
+             `content_repos_set`, et pas un domaine d'envoi d'e-mail — un locataire dont aucun dépôt ne \
+             porte de `site` rend 409 `no_domain_of_ours` plutôt qu'une mesure. À appeler régulièrement : \
+             une mesure isolée ne dit rien, c'est la série qui parle.",
             Method::Post,
             "/v1/content/questions/{id}/measure",
             schema(
@@ -249,9 +258,13 @@ pub fn tools() -> Vec<ToolDef> {
             "Remplace le titre et le texte — **ce qui est omis est perdu**, envoyer les deux à chaque fois. \
              Passer une `url` marque le brouillon comme publié à cette adresse ; ne la passer que si \
              l'article y est réellement, parce que cette colonne est un constat — `content_drafts_propose` \
-             ouvre une pull request et ne remplit jamais celle-ci. La date de publication est posée la \
-             première fois et ne bouge plus : corriger une typo ne republie pas. Corriger un brouillon déjà \
-             proposé le laisse `proposed` et ne repousse rien dans la pull request ouverte.",
+             ouvre une pull request et ne remplit jamais celle-ci. **`url` est omise comme le reste : la \
+             réenvoyer à chaque correction.** Un article publié qu'on corrige sans elle retombe à \
+             `proposed` (ou à `draft`), perd son adresse **et sa date de publication** — et une adresse \
+             remise ensuite porte une date neuve, donc la série de citations n'a plus rien à quoi comparer \
+             un avant et un après. Avec elle, la date de la première publication ne bouge pas : corriger \
+             une typo ne republie pas. Corriger un brouillon proposé mais non publié le laisse `proposed` \
+             et ne repousse rien dans la pull request ouverte.",
             Method::Put,
             "/v1/content/drafts/{id}",
             schema(
@@ -265,7 +278,7 @@ pub fn tools() -> Vec<ToolDef> {
                     "body": { "type": "string", "description": "Le texte, en entier." },
                     "url": {
                         "type": "string",
-                        "description": "L'adresse où l'article a été publié. Omise, le brouillon redevient un brouillon."
+                        "description": "L'adresse où l'article a été publié. **Omise, elle est effacée** : le brouillon cesse d'être publié et perd sa date. La réenvoyer à chaque correction d'un article en ligne."
                     }
                 }),
                 &["id", "title", "body"],
@@ -286,13 +299,35 @@ pub fn tools() -> Vec<ToolDef> {
             Risk::Read,
         ),
         t(
+            "content_places_list",
+            "Où nos questions vivent déjà",
+            "Les hôtes qui reviennent dans les résultats de toutes nos questions, et sur lesquelles de \
+             ces questions nous ne sommes nulle part. Ne lit rien de neuf : c'est un compte sur les \
+             mesures déjà prises par `content_questions_measure`, donc une question jamais mesurée n'y \
+             est pas, et un locataire qui n'a rien mesuré rend une liste vide. **Ce n'est pas une liste \
+             de liens à aller chercher, et ce n'est pas non plus qui nous cite** : un lien entrant ne se \
+             lit pas dans une page de résultats, et rien ici ne le mesure. Ce que ça nomme est l'endroit \
+             où la question est déjà posée — un forum, un comparatif, un annuaire, ou un concurrent — \
+             pour qu'une personne décide si notre réponse y a sa place. Rien dans ce produit ne publie \
+             ailleurs que dans le dépôt du client, et `content_drafts_propose` est le seul chemin.",
+            Method::Get,
+            "/v1/content/places",
+            nothing(),
+            &[],
+            Risk::Read,
+        ),
+        t(
             "content_repos_set",
             "Attacher un dépôt à un siège, ou remplacer le sien",
-            "Dit où ce siège pousse ses articles. **Remplace la ligne en entier** : les quatre champs sont \
-             obligatoires à chaque appel. `server` est le handle du branchement, celui qu'`integrations_list` \
+            "Dit où ce siège pousse ses articles, et où ils ressortent. **Remplace la ligne en entier** : les \
+             quatre premiers champs sont obligatoires à chaque appel, et `site` omis est `site` effacé. `server` \
+             est le handle du branchement, celui qu'`integrations_servers_list` \
              rend — pas le nom du connecteur — et rien n'est écrit si aucun branchement ne porte ce handle. \
              `branch` est la branche **qui sert le site**, c'est-à-dire la cible de la pull request : celle \
-             qui porte l'article est créée par `content_drafts_propose` et n'a pas à être configurée.",
+             qui porte l'article est créée par `content_drafts_propose` et n'a pas à être configurée. \
+             **`site` est ce que « nous » veut dire pour `content_questions_measure`** : sans lui, la mesure \
+             ne sait pas reconnaître le client dans les résultats et rend 409 `no_domain_of_ours`. C'est \
+             l'hôte public du site, pas un domaine d'envoi d'e-mail — ceux-là sont une autre liste.",
             Method::Put,
             "/v1/content/repos/{employee_id}",
             schema(
@@ -304,7 +339,7 @@ pub fn tools() -> Vec<ToolDef> {
                     },
                     "server": {
                         "type": "string",
-                        "description": "Le handle du branchement GitHub de ce locataire, tel qu'`integrations_list` le rend."
+                        "description": "Le handle du branchement GitHub de ce locataire, tel qu'`integrations_servers_list` le rend."
                     },
                     "repo": {
                         "type": "string",
@@ -317,6 +352,10 @@ pub fn tools() -> Vec<ToolDef> {
                     "folder": {
                         "type": "string",
                         "description": "Le dossier que le générateur lit, p. ex. `content/blog` ou `_posts`. Relatif, sans `..` ni barre de tête."
+                    },
+                    "site": {
+                        "type": "string",
+                        "description": "L'hôte public où les articles de ce dépôt ressortent, p. ex. `visa.orizn.app`. L'hôte seul, en minuscules, sans `https://` ni chemin. C'est lui que la mesure de citation cherche dans les résultats."
                     }
                 }),
                 &["employee_id", "server", "repo", "branch", "folder"],
@@ -330,11 +369,17 @@ pub fn tools() -> Vec<ToolDef> {
             "Pousse l'article dans le dépôt du siège, sur une branche à lui, et ouvre une pull request vers \
              la branche qui sert le site. **Ça ne publie pas** : le brouillon passe à `proposed`, pas à \
              `published`, et ce qui met l'article en ligne est une personne qui fusionne la demande — c'est \
-             elle, la relecture. Le siège nommé doit avoir un dépôt (`content_repos_set`) et une politique \
-             qui l'autorise à appeler `create-branch`, `create-or-update-file` et `create-pull-request` sur \
-             son branchement GitHub ; chacun des trois est un verdict de la Policy Gate, et un refus est un \
-             403 avec sa raison. Seul un brouillon se propose : rappeler cet outil sur un brouillon déjà \
-             proposé rend `not_a_draft` plutôt qu'une deuxième pull request.",
+             elle, la relecture. **Trois choses doivent être en place avant le premier appel, et deux ne se \
+             devinent pas** : le siège a un dépôt (`content_repos_set`) ; sa politique l'autorise à appeler \
+             `create-branch`, `create-or-update-file` et `create-pull-request` — chacun des trois est un \
+             verdict de la Policy Gate, et un refus est un 403 `no_rule` ; et ces trois outils ont été \
+             **déclarés** sur le branchement GitHub par `integrations_tools_declare`, avec le `digest` que \
+             rend `integrations_discover`. Un outil non déclaré est traité comme destructif, donc refusé \
+             avant qu'un octet parte, et la réponse est un 409 `tool_unavailable` — pas une panne chez le \
+             client. Seul un brouillon se propose : rappeler cet outil sur un brouillon déjà proposé rend \
+             `not_a_draft` plutôt qu'une deuxième pull request. Et un article déjà fusionné sous le même \
+             titre rend `github_refused` sur `create-or-update-file` : le chemin existe, et republier \
+             demanderait le `sha` de la version remplacée, que rien ici ne lit.",
             Method::Post,
             "/v1/content/drafts/{id}/propose",
             schema(
@@ -365,9 +410,9 @@ mod tests {
     /// Une ligne par route montée, et le chemin de chacune est bien un chemin de
     /// ce domaine. Le test de couverture de `mod.rs` prouve l'autre sens.
     #[test]
-    fn douze_lignes_pour_douze_routes() {
+    fn treize_lignes_pour_treize_routes() {
         let all = tools();
-        assert_eq!(all.len(), 12, "une route montée n'a pas sa ligne");
+        assert_eq!(all.len(), 13, "une route montée n'a pas sa ligne");
         for tool in &all {
             assert!(
                 tool.path.starts_with("/v1/content/"),

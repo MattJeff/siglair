@@ -52,8 +52,10 @@ pub mod rolepack_service; // customer success, growth, finance
 pub mod secrets; // U22
 pub mod sending_domain; // les domaines d'envoi sont au locataire, vérifiés chez le fournisseur, chacun sous un plafond ; l'expéditeur est choisi à l'envoi
 pub mod sequence; // la séquence: several promises in a row, branching on what the provider saw, and never a second send path
+pub mod signature; // la signature d'un document : le pli qu'on envoie, la décision humaine qui le libère, et l'exemplaire exécuté
 pub mod sourcing;
 pub mod stripe; // une livraison Stripe encaisse une facture : le quatrième schéma de webhook
+pub mod stripe_subscriptions; // lire chez Stripe le revenu d'abonnement qu'aucune facture d'ici ne porte — et ne rien lui écrire
 pub mod turn; // U25
 pub mod vertical; // le fil du pack de rôle vers une verticale
 pub mod webhooks; // wave M: whose provider callback this is, when there is more than one customer

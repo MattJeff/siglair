@@ -11,6 +11,11 @@ colonnes et pas une de plus : **couvert**, **à moitié**, **pas du tout**. Il s
 termine par un ordre — pas des priorités, un ordre, avec la raison de chaque
 place.
 
+**Relu le 2026-09-12**, en parcourant `point-du-jour` sur une instance locale.
+Les trois premières places de § 7 sont bâties ; § 3.3 et § 3.4 portent ce qui
+leur reste, § 7 porte les dates et une sixième place. Rien d'autre n'a été
+revérifié : ce qui n'est pas daté du 2026-09-12 date toujours du 2026-09-11.
+
 ---
 
 ## 0. Comment il a été établi, et ce qu'il ne prétend pas
@@ -62,7 +67,7 @@ cannot be re-run*.
 
 | ce qu'il a dit | verdict | où ça s'arrête, en un mot |
 |---|---|---|
-| recherche de lead | **à moitié** | l'effet existe, aucun outil ne l'expose |
+| recherche de lead | **à moitié** | exposée le 2026-09-12 ; rien n'enrichit ce qu'elle trouve |
 | relève du courrier | **couvert** | — |
 | lancement de campagne | **à moitié** | la séquence promet, elle n'envoie pas elle-même |
 | publicité Google | **pas du tout** | pas une ligne |
@@ -118,6 +123,17 @@ La livraison sortante laisse aussi ses traces depuis `0091` : `delivered`,
 `opened`, `clicked` lus de Resend, en plus de `bounced` et `complained` qui
 finissent dans `suppressions`.
 
+Et depuis le 2026-09-13, **le fondateur peut lire ce qui est arrivé**. Ça
+paraît acquis et ça ne l'était pas : tout ce qui précède marchait, et aucune
+route ne rendait un `messages.body` — le seul `SELECT` d'un corps dans l'arbre
+était celui du bureau interne. Une campagne partie était donc une campagne
+aveugle : des ouvertures, des clics, un compteur de fils qui ont répondu, et
+pas une phrase. `GET /v1/conversations` (`conversations_list`) rend les fils où
+quelqu'un du dehors a écrit, avec un extrait ; `GET /v1/conversations/{id}`
+(`conversations_get`) rend le fil dans les deux sens. Lecture seule des deux
+côtés : répondre reste un acte d'employé, derrière la Gate, pour la raison que
+`routes::quotes` écrit sur son propre refus d'une route d'opérateur.
+
 ### 2.3 Les statistiques de tout
 
 C'est, à ma lecture, la partie la mieux faite du produit, et celle qu'un
@@ -127,7 +143,9 @@ acheteur voit en premier. Sept lectures qui ne se contredisent pas :
   colonne (`contacts.created_at`, `outreach_buckets.contacts_taken`,
   `messages`, `sales_quotes.issued_at` / `.accepted_at`, `invoices.issued_at` /
   `.paid_at`), plus `mrr_minor` défini comme *trente jours glissants
-  d'encaissé* et non comme une projection ;
+  d'encaissé* et non comme une projection, plus `attribution` depuis
+  `0107` — d'où vient chaque facture réglée, remontée jusqu'à la porte par
+  laquelle la personne est entrée, `origins: []` quand on ne sait pas ;
 * `GET /v1/pnl` — par siège : tours, jetons, `cost_usd` avec son `cost_source` ;
 * `GET /v1/forecast` — le point mort, une division avec ses opérandes nommés ;
 * `GET /v1/usage` et `/v1/usage/models` — les jetons du client, sur son propre
@@ -188,19 +206,139 @@ sortie par le proxy du locataire (`0098`), vue en direct en SSE. Outils
 C'est la section qui vaut le document. Chaque ligne nomme l'endroit exact où ça
 s'arrête.
 
-### 3.1 La recherche de lead — l'effet existe, aucun outil ne l'expose
+### 3.1 La recherche de lead — exposée le 2026-09-12, et rien n'enrichit encore
 
 `Effects::discover_prospects` (`crates/app/src/effects.rs:2249`) lit un annuaire
 au navigateur, sous `max_new_contacts_per_day` relu dans les quatre couches de
 politique, et écrit des `contacts`. Le verbe existe côté modèle :
 `find_prospects`, l'un des treize de `turn.rs`.
 
-**Où ça s'arrête :** aucun des 136 outils MCP ne l'expose. Les deux seules
-lignes du domaine prospect sont `prospects_segments_list` et `prospects_import`
-— un CSV. Un humain au terminal peut donc *verser* une liste, jamais *en
-chercher une*. Et rien n'enrichit : pas de vérification d'adresse, pas de
-données firmographiques, `prospects.rs` pose `UNKNOWN_COUNTRY` (`ZZ`) parce
-qu'*une page ne dit pas où une société est immatriculée et ceci ne devine pas*.
+**Fait le 2026-09-12** : `POST /v1/prospects/discover` et l'outil
+`prospects_discover` exposent cet effet et rien d'autre — un siège nommé, la
+Gate qui statue sur un `BrowserRead`, le plafond relu par l'effet, et le même
+`prospects::discover` qui écrit, donc pas de second chemin d'écriture. Un humain
+au terminal peut désormais *chercher* une liste et plus seulement en *verser*
+une.
+
+**Où ça s'arrête toujours :** **rien n'enrichit.** Pas de vérification
+d'adresse, pas de données firmographiques, `prospects.rs` pose
+`UNKNOWN_COUNTRY` (`ZZ`) parce qu'*une page ne dit pas où une société est
+immatriculée et ceci ne devine pas*. Une liste découverte est donc une liste
+qu'on ne peut pas segmenter par pays. Les trois chemins possibles et celui qui
+est recommandé sont en § 3.1 bis ; aucun n'est codé.
+
+### 3.1 bis L'enrichissement — trois chemins, un recommandé, aucun codé
+
+Écrit le 2026-09-12, en ouvrant la recherche de lead. La question est : *une
+liste de prospects sans pays ni vérification est une liste qu'on ne peut pas
+segmenter et dont la moitié rebondit* — alors est-ce qu'enrichir est un
+chantier à part, un effet de plus, ou quelque chose que la recherche doit faire
+en même temps ?
+
+**Réponse : un chantier à part, et ce n'est pas le prochain.** Voici les
+chemins mesurés, dans l'ordre où ils se présentent.
+
+#### Chemin A — enrichir en Rust, pendant la recherche, depuis la page
+
+Déduire le pays du ccTLD (`.at` → `AT`), le site du domaine de l'adresse, le
+rôle de la partie locale (`sales@`, `ceo@`).
+
+**Rejeté, et c'est une mesure qui le rejette, pas un goût.** `prospects.rs` a
+compté sur les vraies listes du fondateur : **338 des 1 552 lignes qui portent
+les deux ont un site et une boîte sur deux domaines différents** — une
+association dont le site est `reisehaus.at` et la boîte chez `wkv.at`. Donc
+« le domaine de la boîte est le site » est faux à 22 % sur les seules données
+qu'on ait. Le ccTLD est pire : il est muet sur tout `.com`, c'est-à-dire sur la
+majorité. Et les deux contredisent frontalement la ligne la plus structurante du
+module — *« la page n'a pas le droit d'être lue **à propos** »* — qui est ce qui
+fait qu'une recherche **ne salit pas le tour** là où une lecture de page le
+salit. Un enrichisseur qui lit une fiche pour en tirer une taille d'entreprise
+rouvre ce contrat-là, et le rendement est une devinette.
+
+#### Chemin B — vérifier plutôt qu'enrichir
+
+Un MX sur le domaine de chaque adresse, avant l'écriture ou en lot après.
+
+C'est **du logiciel, pas une ressource** : une dépendance (`hickory-resolver`,
+qui serait la première du dépôt à parler DNS — aujourd'hui la seule résolution
+est `tokio::net::lookup_host` dans `mcp::resolve_and_vet`, un contrôle SSRF qui
+ne rend que des `IpAddr`, et `sending_domain` délègue toute lecture DNS au
+fournisseur). Zéro dépense, zéro compte.
+
+Et c'est le seul des trois qui vise le vrai coût : une liste qui rebondit ne
+coûte pas des contacts perdus, elle brûle **le domaine d'envoi**, et
+`outreach_health_get` ne le voit qu'après.
+
+**Recommandé — et pas maintenant**, disait ce paragraphe le 2026-09-12, parce
+qu'on n'avait aucun taux de rebond d'une semaine réelle. Ce qui a changé le
+2026-09-13 : le fondateur commence à prospecter sur sa propre entreprise avec
+**deux domaines vérifiés chez Resend** qu'il ne peut pas se permettre de
+brûler. Attendre le nombre aurait voulu dire l'obtenir en brûlant ce qu'il
+mesure.
+
+**Bâti**, et voici ce que ça fait et ne fait pas.
+
+`crates/providers/src/mail_domain.rs` pose **une** question au résolveur du
+système : ce domaine publie-t-il une destination de courrier ? Trois verdicts —
+le domaine n'existe pas (NXDOMAIN), il existe et ne veut pas de courrier (aucun
+MX, aucune adresse à la place, ou le MX nul de la RFC 7505), il en accepte — et
+une quatrième réponse qui n'est pas un verdict : *le résolveur n'a pas
+répondu*, qui n'écarte jamais personne. La dépendance est `hickory-resolver`
+sans ses features par défaut ; `tokio::net::lookup_host` ne pouvait pas servir,
+`getaddrinfo` n'a pas de type d'enregistrement.
+
+**Pas de SMTP.** Savoir si la *boîte* existe demande un `RCPT TO` chez
+l'hébergeur du destinataire : une sollicitation, à laquelle Google et Microsoft
+répondent « oui » de toute façon, et qui fait lister l'IP qui la pose. Le
+module en porte l'argument entier.
+
+**À l'import et à la découverte, pas à l'envoi.** `deliverability::check` est
+au fil parce que le corps qu'il juge *n'existe pas* avant l'envoi ; une adresse
+existe à l'import, et la règle est de juger au plus tôt. Conséquence assumée :
+le verdict vieillit — un domaine peut perdre son MX entre l'import et l'envoi,
+et rien ne le verra. La suite est un appel au même port à côté de
+`deliverability::check`, et **ce qui dira s'il faut la faire est le taux de
+rebond réel**, celui que ce paragraphe attendait : si les rebonds tombent sur
+des domaines qui ont bien un MX, ce n'est pas là qu'il faut regarder.
+
+**Le refus est nommé, pas silencieux.** L'adresse n'est pas écrite et le
+rapport la cite avec sa raison (`Report::no_mail_domain`), sur le modèle des
+compteurs que `prospects_import` avait déjà ; un résolveur muet écrit la ligne
+et le dit (`Report::mx_unknown`), pour qu'« cette liste est propre » ne se
+confonde pas avec « rien n'a été vérifié ».
+
+**Pas de cache écrit à la main.** Celui de hickory, au TTL que chaque autorité
+publie, dans une instance partagée par tout le processus.
+
+#### Chemin C — acheter
+
+Deux entrées du catalogue le font déjà, et **elles sont nommées ici sans être
+appelées** : `lumail` porte un outil `verify_email`, `exa` sait lire le web
+public. Les deux demandent une clé, donc un compte, donc une dépense — et le
+plancher de `lumail` est `Destructive`, ce qui veut dire qu'un humain approuve
+chaque appel de toute façon. Hors catalogue, les fournisseurs de firmographie
+sont déjà refusés et argumentés (`docs/CATALOGUE.md` : Apollo pour ses envois
+sans lecture des désabonnements, HubSpot et ZoomInfo pour un OAuth qui ne dit
+pas s'il vaut pour leur serveur MCP). **Le jour où B ne suffit pas, pas avant.**
+
+#### Le chemin zéro, qui est ce que je bâtirais en premier
+
+`import` laisse l'opérateur **affirmer** un pays (`--country PH` sur la liste
+DMW) ; la recherche ne le laisse pas — `scan_directory` écrit `ZZ` en dur. Or un
+annuaire est presque toujours national : la chambre de commerce autrichienne
+liste des sociétés autrichiennes. Laisser passer un `country` à la recherche
+comme on le passe à l'import, c'est **une demi-journée**, ça ne devine rien —
+c'est un opérateur qui affirme, exactement comme à l'import — et ça règle la
+moitié du problème de segmentation sans une ligne d'enrichissement.
+
+**Pourquoi ce n'est pas fait aujourd'hui :** ça élargit
+`Effects::discover_prospects`, que le **modèle** appelle aussi par
+`find_prospects`. Un opérateur qui affirme un pays est une affirmation ; un
+modèle qui en choisit un est une devinette, et c'est précisément ce que `0033`
+refuse. Le chantier n'est donc pas une plomberie, c'est une décision sur *qui a
+le droit d'affirmer quoi* — vraisemblablement : le champ existe sur la route,
+pas dans le catalogue de tour. Elle se prend, elle ne se glisse pas dans un
+chantier qui livre autre chose.
 
 ### 3.2 La campagne — la séquence promet, elle n'envoie pas
 
@@ -223,36 +361,80 @@ défendable — un seul chemin d'envoi, un seul endroit où les refus s'applique
 `crates/app/src/quote_document.rs`, les outils `quotes_list`, `quotes_accept`,
 `quotes_decline`.
 
-**Où ça s'arrête, et c'est la ligne la plus coûteuse du document :** il n'y a
-pas de `POST /v1/quotes` et **il n'y a pas non plus d'effet**.
-`apps/server/src/routes/quotes.rs` l'écrit en toutes lettres : *« tant que
-l'effet n'est pas écrit, le registre ne se remplit que depuis Rust »*. La
-liste des méthodes publiques d'`Effects` contient `issue_invoice` et aucun
-`issue_quote`.
+**Bâti le 2026-09-11, et ce paragraphe est ce qu'il disait** : il n'y avait
+pas de `POST /v1/quotes` et **pas d'effet non plus** ;
+`apps/server/src/routes/quotes.rs` l'écrivait en toutes lettres, et les deux
+étapes `quotes_issued` / `quotes_accepted` de `GET /v1/growth` étaient
+structurellement à zéro quoi que fasse l'entreprise.
 
-Pourquoi c'est cher : `GET /v1/growth` compte `quotes_issued` et
-`quotes_accepted` sur `sales_quotes`. **Deux des sept étapes de l'entonnoir de
-croissance sont donc structurellement à zéro**, et les taux de passage autour
-d'elles sont indéfinis. Le tableau de bord qui doit prouver le ×10 a un trou au
-milieu, et le trou n'est pas dans la mesure — il est dans le fait que personne
-ne peut produire la ligne.
+`Effects::propose_quote` (`14d7b32`) est la moitié qui manquait, écrite sur le
+modèle d'`issue_invoice` : la Gate statue pour un siège nommé sur un
+`ActionKind::QuoteIssue` neuf — et non `InvoiceIssue` réutilisé, parce
+qu'`rolepack_sales` refuse celui-là en toutes lettres et qu'emprunter le verbe
+de facturation ferait du vendeur le seul siège capable d'accorder un prix *et*
+d'en exiger le paiement. La ligne et son PDF commitent ensemble ; l'audit part
+dans une seconde transaction. Il n'y a toujours **aucune route d'opérateur**, et
+c'est le refus argumenté de `routes::quotes`, pas un manque.
+
+**Ce qui reste, et c'est une ligne, pas une vague :** aucune ligne de catalogue
+de tour, donc aucun siège ne se voit encore offrir le schéma — `turn::UNSERVED`
+porte l'entrée `QuoteIssue` avec sa raison (une ligne de catalogue déplace
+`cost::DIGEST`, dont la remesure demande un appel de modèle réel) et la
+procédure. Et **aucun pack ne le propose** : `rolepack_sales` est le porteur
+évident, et élargir l'ensemble `proposable` d'un pack est une décision qui
+appartient au commit qui livre l'outil. Tant que ces deux lignes n'existent pas,
+l'entonnoir reste à zéro au milieu **en production**, mais plus par construction
+— `Effects::propose_quote` a ses tests et la table se remplit.
+
+Le module `routes::quotes` n'a pas été relu depuis : son en-tête dit encore
+*« tant que l'effet n'est pas écrit »* et *« la forme exacte est dans le rapport
+de cette vague, à poser dans `agentos_app::effects` »*. C'est faux depuis le
+2026-09-11, et c'est le genre de prose qu'un lecteur croit.
 
 ### 3.4 Les articles — rien ne publie
 
 `content_questions`, `content_citations` en ajout seul, `content_drafts`
-(`0100`), neuf outils `content_*`, la mesure sur `duckduckgo_lite` par un siège
+(`0100`), treize outils `content_*`, la mesure sur `duckduckgo_lite` par un siège
 qui porte `Channel::Web`.
 
-**Où ça s'arrête :** `docs/CONTENU.md` § 5 le dit mieux que je ne le ferais —
-`content_drafts.url` est une adresse **constatée** et le `CHECK` de `0100`
-refuse un `published` sans adresse ni date, pour que le mot ne puisse pas être
-menti. Les deux chemins pour lever ça (dépôt GitHub du client ; sous-domaine
-servi par nous) sont écrits et **aucun des deux n'est codé**.
+**Le chemin A a été codé le 2026-09-11** (`0043dde`), et le titre de cette
+section reste vrai au mot près : **rien ne publie**, parce que proposer n'est
+pas publier. `content_repos` (`0102`) tient un dépôt par siège ;
+`POST /v1/content/drafts/{id}/propose` et l'outil `content_drafts_propose`
+poussent l'article dans le dépôt qui sert le site du client et ouvrent une pull
+request, par trois `Action::McpCall` sur le connecteur GitHub déjà au catalogue
+(`create-branch`, `create-or-update-file`, `create-pull-request`), chacun avec
+son verdict de Gate et sa ligne d'audit. Un troisième état, `proposed`, et une
+colonne `review_url` — dont l'adresse est **rebâtie** à partir de nos chaînes et
+d'un entier lu chez GitHub, pour qu'un serveur compromis n'envoie pas le
+relecteur ailleurs.
+
+`content_drafts.url` reste une adresse **constatée** et le `CHECK` de `0100`
+refuse toujours un `published` sans adresse ni date : c'est un humain qui fusionne
+la pull request, et c'est lui qui constate. Le chemin B (sous-domaine servi par
+nous) n'est toujours pas codé, et `docs/CONTENU.md` § 5 dit pourquoi il ne
+devrait pas l'être avant le chemin A. **Aucun appel n'a été fait contre le vrai
+serveur de GitHub** — les tests parlent à un faux monté au port —, donc le
+premier article proposé pour de bon reste à voir.
 
 Et la mesure a son propre plafond, nommé : un seul moteur lisible, parce que
 tous les autres exigent un compte ou le refusent dans leur `robots.txt`
 (vérifié le 2026-09-11 sur cinq). Une mesure sur un moteur n'est pas la
 citation par un modèle ; c'en est le meilleur indicateur gratuit.
+
+**La moitié qui manquait à cette section, et qui n'y était pas nommée.** Tout ce
+qui précède *mesure* si l'on est cité ; rien n'agit pour qu'on le soit davantage
+ailleurs que sur notre propre site. C'est ce qu'un concurrent direct vend sous
+le nom d'« autorité », et le trou était réel. Il est **arbitré le 2026-09-13**,
+pas comblé : `docs/CONTENU.md` § 9 range en trois tas ce que ce mot recouvre,
+prend le premier — savoir où la question vit déjà — et refuse les deux autres
+en toutes lettres (§ 6 ci-dessous les reprend). Ce qui est codé est
+`content_places_list` : les hôtes qui reviennent dans les résultats de nos
+questions, et celles de nos questions où ils sont sans nous. Un compte sur des
+mesures déjà prises — **aucune source nouvelle, aucune clé, aucune migration**.
+Ce qui reste hors de portée est le graphe des liens entrants (qui cite un
+concurrent et pas nous) : il ne se lit dans aucune page de résultats, quatre
+sociétés le vendent, elles sont nommées au § 9 et aucune n'est appelée.
 
 ### 3.5 Les réseaux sociaux — le câblage est fait, les comptes ne le sont pas
 
@@ -352,18 +534,44 @@ une session Checkout payée et règle la facture qu'elle nomme. Rien dans ce
 dépôt ne *crée* une session Checkout ni un lien de paiement. Le client est donc
 facturé par PDF et paie par un lien fabriqué ailleurs.
 
-### 3.9 Signer — la gate escalade, il n'y a rien à signer
+**Et depuis le 2026-09-13, une deuxième porte vers Stripe, qui ne fait que
+lire.** `agentos_app::stripe_subscriptions` interroge `GET /v1/subscriptions` et
+`GET /v1/events` avec une clé restreinte rangée par locataire (`0108`), et
+`GET /v1/growth` rend le résultat sous `subscriptions`, **à côté** du registre
+de factures et jamais dedans. C'est la moitié du revenu qu'aucune table d'ici ne
+pouvait porter : `invoices.opportunity_id` est `NOT NULL` et une affaire
+`closed_won` exige une approbation humaine, donc un abonnement pris en
+libre-service à 3 h du matin n'entrait nulle part. Ce module n'écrit rien chez
+Stripe et ne le peut pas — une seule fonction y touche le réseau, elle fait un
+`GET`, et un test lit le fichier pour refuser les verbes d'écriture.
+
+### 3.9 Signer — joint le 2026-09-12, sans qu'aucun appel réel ait été fait
 
 `ActionKind::ContractSign` existe, l'acheteur le propose, la gate en fait
 toujours une décision humaine (`ApprovalReason::ContractSignature`) et ne la
 refuse jamais.
 
-**Où ça s'arrête,** dans les mots de `UNSERVED` : *« there is no effect behind
-it. What is missing is not authority — it is a signing surface, a document to
-sign and somewhere to put the executed copy »*. Les trois moitiés existent
-séparément : DocuSign est au catalogue, `quote_document` et `invoice_document`
-savent écrire un PDF, et `files` (`0067`) est l'endroit où ranger l'exemplaire
-signé. Personne ne les a jointes.
+**Ce qui manquait est là depuis le 2026-09-12** : `0105` porte
+`signature_envelopes`, `Effects::send_for_signature` parle au connecteur MCP du
+locataire, et `POST /v1/approvals/{id}/approve` a un **second bras avec un
+exécuteur** — le premier était le paiement. Trois routes (`/v1/signatures`, en
+préparation, registre et constat) et trois outils MCP
+(`signatures_propose`, `signatures_list`, `signatures_record`).
+
+**Ce que la table interdit :** `signed_at` ne s'écrit que si `executed_name`
+nomme un fichier du classeur, et cet exemplaire ne peut pas être le document
+qu'on a envoyé. Le mot « signé » ne peut donc pas mentir — c'est la discipline
+de `content_drafts.url`, tenue par un CHECK.
+
+**Où ça s'arrête maintenant,** et ce n'est plus la même phrase : *aucun appel
+n'a jamais été fait contre le vrai serveur de DocuSign.* `mcp.docusign.com/mcp`
+répond `403` à un appelant sans jeton, aucun compte n'existe ici, donc
+`tools/list` n'a jamais été lu : `effects::SEND_ENVELOPE` et les cinq noms
+d'arguments du pli sont **inventés**, et ce que les tests prouvent est le
+câblage, contre un faux serveur monté ici. Le webhook de complétion n'est pas là
+non plus, pour la raison de `SMARTLEAD_SIGNATURE_HEADER` : le nom de l'en-tête
+où DocuSign signe n'a jamais été lu sur une livraison réelle. Le constat est
+donc un geste d'opérateur, comme `POST /v1/invoices/{id}/paid`.
 
 ### 3.10 Le classeur et la connaissance — lisibles, pas écrivables par un siège
 
@@ -536,6 +744,19 @@ sa raison plutôt qu'un goût.
   vaut par-delà le contenu : tout ce qui publierait au nom de dix clients
   depuis un domaine à nous est un produit qui meurt le jour où un client s'en
   aperçoit.
+* **Une machine à liens**, sous le nom d'« autorité » ou sous un autre. Trois
+  refus, arbitrés le 2026-09-13 et argumentés dans `docs/CONTENU.md` § 9, qui
+  est aussi l'endroit où le tas qu'on prend est nommé. **Acheter un lien, ou
+  louer un domaine pour en émettre** : *un lien acheté est un mensonge adressé
+  à un classement, et le produit qui l'automatise vend à son client une dette
+  dont il ignore l'échéance.* **Écrire sur un site tiers au nom du client sans
+  qu'une personne l'ait relu** : *le chemin A passe par une pull request chez le
+  client précisément parce que la relecture humaine est la seule chose qui
+  distingue une contribution d'un publipostage.* **Inventer la voix de
+  quelqu'un d'autre** — un avis, un témoignage, un compte de forum qui n'est
+  personne : *un faux client est une fraude avant d'être une tactique.* Ce qui
+  est codé à la place est un compte sur les mesures qu'on a déjà,
+  `content_places_list`, qui n'écrit rien et ne démarche personne.
 
 ---
 
@@ -544,6 +765,13 @@ sa raison plutôt qu'un goût.
 Pas des priorités : un ordre. La question à chaque place est celle de
 `docs/ROADMAP_CROISSANCE.md` — *190 $/mois vers 1 900 $ en trois à quatre
 mois* — et **rien ne rapporte tant que rien ne tourne**.
+
+> **Relu le 2026-09-12.** Les **trois premières places sont bâties**, toutes les
+> trois dans les vingt-quatre heures qui ont suivi l'écriture de ce document, et
+> chacune porte ci-dessous sa date et ce qui lui reste. La quatrième
+> (signature), la cinquième (recherche de lead) et la suite sont intactes. Ce
+> qui s'est ajouté à la liste entre-temps est en fin de section, sous
+> *Sixième*.
 
 ### Zéro — allumer ce qui existe
 
@@ -568,6 +796,14 @@ un client conclut qu'il pourrait le faire sans nous.
 passe par là ; et c'est la seule ligne de ce document qui rend les six autres
 mesurables.
 
+**Fait le 2026-09-11** (`14d7b32`), et § 3.3 dit comment : `Effects::propose_quote`
+existe, gaté et audité, sur un `ActionKind::QuoteIssue` neuf. **Ce qui reste est
+une ligne, pas une vague** : aucune ligne de catalogue de tour (elle déplace
+`cost::DIGEST`, dont la remesure demande un appel de modèle réel — `turn::UNSERVED`
+porte la procédure) et aucun pack ne le propose. Donc l'entonnoir est toujours à
+zéro au milieu *en production*, et il ne l'est plus *par construction* : la seule
+chose qui manque est mesurable en une vague, et elle est nommée.
+
 ### Deuxième — publier un article, par le chemin A
 
 **Une vague.** Le chemin A de `docs/CONTENU.md` § 5 : une ligne
@@ -586,6 +822,13 @@ produit à tenir : un site public qui tombe est une panne client.
 sur `visa requirements api` est le chiffre de départ, et c'est lui qu'on fait
 bouger. C'est aussi la démonstration la plus vendable aux cinq SaaS suivants,
 parce que c'est un résultat qu'ils peuvent lire sans nous croire sur parole.
+
+**Fait le 2026-09-11** (`0043dde`), et § 3.4 dit comment : `content_repos`
+(`0102`), `POST /v1/content/drafts/{id}/propose`, l'outil
+`content_drafts_propose`, un état `proposed` et une `review_url` rebâtie.
+**La boucle ne tourne plus à vide** — elle s'arrête sur une pull request ouverte,
+qui est un humain, pas un trou. Ce qui reste : le chemin B, toujours refusé ; et
+le fait qu'aucun appel n'a jamais été fait contre le vrai serveur de GitHub.
 
 ### Troisième — un rôle sur `console_accounts`
 
@@ -621,16 +864,55 @@ première chose qu'un SaaS B2B demandera après le devis. Il passe après le rô
 de console parce qu'une signature sans rôles est une signature que n'importe
 qui peut déclencher.
 
+**Fait le 2026-09-12**, et § 3.9 dit comment : `0105`,
+`Effects::send_for_signature`, un second bras d'exécuteur sur
+`POST /v1/approvals/{id}/approve`, trois routes et trois outils. **Ce qui reste
+n'est pas du code, c'est un compte** : aucun appel n'a jamais été fait contre le
+vrai DocuSign, donc le nom de l'outil et les noms d'arguments sont des
+suppositions, et le webhook de complétion attend qu'une livraison réelle ait été
+lue une fois. Ce qui est tenu par la base — qu'on ne puisse pas écrire « signé »
+sans l'exemplaire exécuté — ne dépend d'aucun compte.
+
 ### Cinquième — exposer la recherche de lead
 
-**Un jour d'agent.** Un outil MCP sur `discover_prospects`, sous le plafond
-`max_new_contacts_per_day` que l'effet relit déjà.
+**Fait le 2026-09-12.** `POST /v1/prospects/discover` et `prospects_discover`,
+sur l'effet existant, sous le plafond `max_new_contacts_per_day` que l'effet
+relit déjà. **Ce qui reste n'est pas du code, c'est la semaine** : l'argument
+ci-dessous ne disait pas de ne pas construire l'outil, il disait de ne pas
+*ouvrir le robinet* avant d'avoir mesuré. Le robinet a maintenant une poignée ;
+le pack de vente la livre à zéro, et c'est un opérateur qui la tourne.
 
 *Pourquoi cinquième :* le travail est fait à quatre-vingt-dix pour cent, mais
 `ROADMAP_CROISSANCE` § 2.2 a raison — la prospection existe de bout en bout et
 **n'a jamais tourné une semaine**. Ouvrir le robinet d'entrée avant d'avoir
 mesuré le taux d'ouverture, de réponse et de rendez-vous, c'est ajouter avant
 de mesurer. Cette place est celle de « après la première semaine réelle ».
+
+### Sixième — un siège qui ne travaille plus doit être nommé sans qu'on le cherche
+
+**Ajouté le 2026-09-12**, après avoir parcouru `point-du-jour` pour la première
+fois (`plugin/skills/point-du-jour/SKILL.md`) sur trois sociétés montées à la
+main. Deux tiers de la place ont été pris dans la même marche et sont déjà là :
+`GET /v1/health/company` rend désormais `last_failure_employee_slug`, et les deux
+taux de `GET /v1/outreach/health` valent `null` tant qu'aucune trace n'est
+revenue au lieu d'annoncer une livraison parfaite sur quarante envois muets.
+
+*Ce qui reste, et c'est la place :* **rien ne dit pourquoi une société qui
+travaille n'avance pas.** Le fondateur lit `contacted: 120` d'un côté et
+`sent: 40` de l'autre, et aucune lecture ne joint les deux — le geste doit lui
+apprendre que l'une compte des créneaux dans `outreach_buckets` et l'autre des
+lignes de `messages`, et que l'écart est un fichier exporté et jamais chargé
+chez le prestataire. C'est l'état d'Orizn aujourd'hui, c'est la phrase qui
+déciderait de sa journée, et le produit ne sait pas la dire : il sait rendre les
+deux nombres.
+
+*Pourquoi ici et pas plus haut :* parce que ce n'est **peut-être pas une route**.
+Une huitième étape à l'entonnoir (`outreach_buckets` réservés moins `messages`
+écrits) est un chantier de mesure sur une surface que la console lit déjà, et
+`GET /v1/growth` argumente à sept. La décision à prendre est celle-là, et elle
+demande une semaine de prospection réelle pour savoir si l'écart est une panne
+ou une méthode. Elle passe donc après la cinquième place, qui est la même
+semaine.
 
 ### Et ensuite, dans l'ordre décroissant de ce qu'on en sait
 
