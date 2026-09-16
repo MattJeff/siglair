@@ -98,6 +98,7 @@ pub fn router(state: Content) -> Router {
         .route("/v1/content/questions/{id}", delete(remove_question))
         .route("/v1/content/questions/{id}/measure", post(measure))
         .route("/v1/content/citations", get(list_citations))
+        .route("/v1/content/places", get(list_places))
         .route("/v1/content/briefs", get(get_brief))
         .route("/v1/content/drafts", get(list_drafts))
         .route("/v1/content/drafts", post(add_draft))
@@ -250,7 +251,12 @@ fn measure_failed(err: MeasureError) -> ApiError {
         MeasureError::Store(err) => err.into(),
         MeasureError::NoDomainOfOurs => ApiError::conflict(
             NO_DOMAIN_OF_OURS,
-            "this tenant has no domain of its own, so there is nothing to look for",
+            "this tenant declares no site of its own, so there is nothing to look for",
+        )
+        .with_detail(
+            "« nous » est le champ `site` d'un dépôt (`content_repos_set`) : l'hôte public \
+             où les articles ressortent, p. ex. `visa.orizn.app`. Ce n'est pas un domaine \
+             d'envoi d'e-mail — `domains_list` en rend d'autres, et ce ne sont pas ceux-là.",
         ),
         // Le mot du port, comme `routes::approvals` le rend pour un paiement :
         // un opérateur qui lit ce 502 et un opérateur qui lit le journal lisent
@@ -299,6 +305,31 @@ async fn list_citations(
     let rows = citations::list(&mut tx, window.question_id, days).await?;
     tx.commit().await?;
     Ok(Json(json!({ "citations": rows })))
+}
+
+/// **Où nos questions vivent déjà**, d'après les mesures qu'on a déjà prises.
+///
+/// Une lecture, et la plus pauvre en droits de tout ce module : pas de siège,
+/// pas de Policy Gate, pas de réseau. Elle ne sort pas — elle relit la dernière
+/// mesure de chaque question et compte les hôtes. Tout ce qu'elle rend a été
+/// payé par un `content_questions_measure` passé.
+///
+/// Elle ne nomme **pas** qui nous cite : `agentos_app::content::places` dit
+/// pourquoi, et `docs/CONTENU.md` § 9 dit ce qu'on a le droit de faire de cette
+/// liste — et ce qu'on n'a pas le droit d'en faire.
+///
+/// Une liste vide quand rien n'a été mesuré, et pas un 409 : contrairement au
+/// brief, « aucun endroit connu » est une réponse juste, et c'est celle d'un
+/// locataire qui n'a encore rien mesuré.
+async fn list_places(
+    State(state): State<Content>,
+    principal: Principal,
+) -> Result<Json<Value>, ApiError> {
+    let mut tx = state.db.tenant_tx(principal.tenant_id).await?;
+    let seen = citations::last_seen(&mut tx).await?;
+    let ours = content::our_domains(&mut tx).await?;
+    tx.commit().await?;
+    Ok(Json(json!({ "places": content::places(&seen, &ours) })))
 }
 
 /// De quelle question on veut le brief.
@@ -434,7 +465,7 @@ async fn list_repos(
 #[derive(Debug, Deserialize)]
 struct NewRepo {
     /// Le handle sous lequel ce locataire a branché son GitHub — celui
-    /// qu'`integrations_list` rend, pas le nom du connecteur.
+    /// qu'`integrations_servers_list` rend, pas le nom du connecteur.
     server: String,
     /// `propriétaire/nom`.
     repo: String,
@@ -442,6 +473,13 @@ struct NewRepo {
     branch: String,
     /// Le dossier que le générateur lit.
     folder: String,
+    /// L'hôte public où les articles ressortent, p. ex. `visa.orizn.app`.
+    /// Facultatif, et **remplacé comme le reste** : la ligne entière est
+    /// réécrite à chaque appel, donc l'omettre l'efface. C'est lui que
+    /// `content::our_domains` lit pour savoir ce que « nous » veut dire dans
+    /// une mesure de citation — `migrations/0106`.
+    #[serde(default)]
+    site: Option<String>,
 }
 
 /// Poser ou remplacer le dépôt d'un siège.
@@ -467,6 +505,7 @@ async fn set_repo(
         &body.repo,
         &body.branch,
         &body.folder,
+        body.site.as_deref(),
     )
     .await
     // Un siège qui n'est pas à ce locataire n'existe pas dans cette
@@ -481,7 +520,7 @@ async fn set_repo(
         )
         .with_detail(
             "branchez GitHub d'abord avec `integrations_connect`, puis reprenez le handle \
-             que `integrations_list` rend.",
+             que `integrations_servers_list` rend.",
         ));
     };
     Ok(Json(json!({ "repo": row })))
@@ -624,6 +663,28 @@ fn propose_failed(err: ProposeError) -> ApiError {
             "no_review_url",
             "the pull request may be open, but the answer carried no address inside this repository",
         ),
+        // **Ces deux-là ne sont pas une panne chez le client : c'est nous qui
+        // n'avons pas appelé.** `agentos_app::mcp` refuse avant le transport un
+        // outil que personne n'a déclaré — un outil non déclaré est classé
+        // destructif, donc il réclame un humain — et un outil qu'aucun
+        // branchement ne sert. Les deux remontaient en 502 « the repository host
+        // did not answer », qui envoie chercher une panne réseau chez GitHub
+        // pour une ligne de configuration qui manque ici. Mesuré le 2026-09-12
+        // en marchant la boucle : la Gate laissait passer, la déclaration
+        // manquait, et la réponse accusait GitHub.
+        ProposeError::Effect(err) if matches!(err.code(), TOOL_REFUSED | TOOL_UNKNOWN) => {
+            ApiError::conflict(
+                "tool_unavailable",
+                "one of the three GitHub tools cannot be called from this binding",
+            )
+            .with_extension("tool_error", json!(err.code()))
+            .with_detail(
+                "rien n'est parti chez le client. `integrations_discover` sur ce branchement \
+                 rend les trois outils avec leur `digest` ; un outil que \
+                 `integrations_tools_declare` n'a pas classé est traité comme destructif et \
+                 refusé ici, et un outil absent de cette liste n'est pas servi sous ce nom.",
+            )
+        }
         ProposeError::Effect(err) => ApiError::new(
             StatusCode::BAD_GATEWAY,
             "repo_unreachable",
@@ -632,6 +693,12 @@ fn propose_failed(err: ProposeError) -> ApiError {
         .with_extension("tool_error", json!(err.code())),
     }
 }
+
+/// Ce que `agentos_app::mcp` rend quand la classe d'un outil réclame un humain —
+/// c'est-à-dire, en pratique, quand personne ne l'a déclaré.
+const TOOL_REFUSED: &str = "refused";
+/// Ce qu'il rend quand aucun branchement ne sert ce nom.
+const TOOL_UNKNOWN: &str = "unknown_tool";
 
 #[cfg(test)]
 mod tests {
@@ -993,12 +1060,34 @@ mod tests {
                     "server": "github",
                     "repo": "acme/site",
                     "branch": "main",
-                    "folder": "content/blog"
+                    "folder": "content/blog",
+                    "site": "blog.acme.example"
                 })),
             )
             .await;
         assert_eq!(status, StatusCode::OK, "{body}");
         assert_eq!(body["repo"]["repo"], "acme/site");
+        // `site` est ce que « nous » veut dire dans une mesure — voir
+        // `migrations/0106`, et le test de `agentos_app::content` qui tient
+        // qu'un domaine d'envoi n'y entre pas.
+        assert_eq!(body["repo"]["site"], "blog.acme.example");
+
+        // Un hôte mal formé est une faute de l'appelant, comme le dossier.
+        let (status, _) = h
+            .call(
+                "PUT",
+                &format!("/v1/content/repos/{employee}"),
+                SECRET_A,
+                Some(json!({
+                    "server": "github",
+                    "repo": "acme/site",
+                    "branch": "main",
+                    "folder": "content/blog",
+                    "site": "https://blog.acme.example/"
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
 
         // Le voisin ne voit pas le dépôt d'à côté.
         let (_, body) = h.call("GET", "/v1/content/repos", SECRET_B, None).await;
@@ -1074,6 +1163,60 @@ mod tests {
         assert_eq!(
             body["code"], "no_rule",
             "le refus doit venir de l'allowlist d'outils : {body}"
+        );
+
+        // **Et la Gate passée, un outil que personne n'a déclaré n'est pas une
+        // panne chez le client.** La politique nomme maintenant les quatre
+        // outils, donc le refus ne peut plus venir d'elle ; ce qui refuse est
+        // `agentos_app::mcp`, avant le transport, parce que la flotte de ce
+        // harnais ne sert rien sous ce handle. Jusqu'au 2026-09-12 la réponse
+        // était un 502 « the repository host did not answer », qui envoie
+        // chercher une panne réseau pour une ligne de configuration absente.
+        agentos_store::policy::install(
+            &h.db,
+            h.a,
+            agentos_store::policy::Scope::Tenant,
+            &agentos_domain::policy::PolicyLimits {
+                allowed_mcp_tools: [
+                    "get-file-contents",
+                    "create-branch",
+                    "create-or-update-file",
+                    "create-pull-request",
+                ]
+                .into_iter()
+                .map(|tool| {
+                    agentos_domain::action::McpTool::new(
+                        agentos_domain::ids::Slug::parse("github").expect("slug"),
+                        agentos_domain::ids::Slug::parse(tool).expect("slug"),
+                    )
+                })
+                .collect(),
+                max_turns_per_day: 10,
+                ..agentos_domain::policy::PolicyLimits::default()
+            },
+        )
+        .await
+        .expect("install policy");
+
+        let (status, body) = h
+            .call(
+                "POST",
+                &format!("/v1/content/drafts/{draft_id}/propose"),
+                SECRET_A,
+                Some(json!({ "employee_id": employee })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{body}");
+        assert_eq!(
+            body["code"], "tool_unavailable",
+            "un outil non servi n'est pas un hôte qui ne répond pas : {body}"
+        );
+        assert_eq!(body["tool_error"], "unknown_tool", "{body}");
+        assert!(
+            body["detail"]
+                .as_str()
+                .is_some_and(|detail| detail.contains("integrations_tools_declare")),
+            "le détail doit nommer ce qui répare : {body}"
         );
 
         // Le brouillon n'a pas bougé : ni proposé, ni publié.

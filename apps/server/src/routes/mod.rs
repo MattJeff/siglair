@@ -27,6 +27,10 @@ pub mod companies; // a whole company, standing, from one call
 // vendre — d'où l'`employee_id` dans le corps de la mesure.
 pub mod content;
 pub mod controls; // tâche K: ce qui borne chaque siège et le bouton d'arrêt, en une lecture
+// les échanges avec le dehors : qui a répondu, quoi, et où en est le fil. Le
+// pendant de `desk`, qui est le canal interne — aucune ligne des deux ne se
+// recouvre, `channel <> 'internal'` est le seul filtre.
+pub mod conversations;
 // le fil: the person reads what landed on a seat's desk and writes back from it.
 // No table and no port — `0028`'s internal channel already is the thread; see
 // `agentos_app::inbound`'s desk section and `migrations/0065`.
@@ -87,6 +91,7 @@ pub mod pnl; // the seat's P&L: tokens at the declared tariff against the money 
 pub mod policy;
 pub mod pool;
 pub mod sequences;
+pub mod signatures; // la signature d'un document : préparer le pli, et constater l'exemplaire exécuté
 // le social : `apps/social` est un agrégateur abouti et séparé ; ces quatre
 // chemins sont tout ce qu'il fallait pour qu'un locataire qui l'a branché
 // publie depuis le produit. Aucun octet de plateforme ne passe par ici — le
