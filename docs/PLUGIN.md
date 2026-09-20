@@ -1,7 +1,7 @@
-# Le plugin Claude Code — l'interface par-dessus les 148 outils
+# Le plugin Claude Code — l'interface par-dessus les 149 outils
 
-Le serveur MCP (`docs/MCP_SERVEUR.md`) rend 148 outils. Brancher une URL et une
-clé donne 148 verbes bruts et aucun mode d'emploi : le modèle doit deviner
+Le serveur MCP (`docs/MCP_SERVEUR.md`) rend 149 outils. Brancher une URL et une
+clé donne 149 verbes bruts et aucun mode d'emploi : le modèle doit deviner
 qu'on lit `company_health_get` avant de croire un chiffre, qu'un import se fait à
 blanc d'abord, qu'une action d'approbation se recopie octet par octet.
 
@@ -24,6 +24,16 @@ commands*) les cinq gestes sous le préfixe `siglair:`.
 
 Le dépôt est privé : `/plugin marketplace add` sur une source GitHub privée
 suppose un `gh` authentifié sur la machine du fondateur.
+
+## 1 bis. La règle sur la version, apprise en la ratant
+
+**Tout changement dans `plugin/` fait monter `version` dans
+`plugin/.claude-plugin/plugin.json`, sinon personne ne le reçoit.** Mesuré le
+2026-09-17 : le cinquième geste fusionné, le marché rafraîchi, et
+`claude plugin update` répond « already at the latest version (0.1.0) » — la
+machine du fondateur garde quatre gestes. L'installateur compare des versions,
+pas des contenus ; un plugin dont la version ne bouge pas est un plugin figé
+chez tous ceux qui l'ont installé. `0.1.0` → `0.2.0` ce jour-là.
 
 ## 2. La règle sur la clé — et pourquoi c'est celle-là
 
@@ -214,7 +224,7 @@ existe encore dans `crates/app/src/mcp_tools/`**, aucun fichier ne contient
 la `source` du marketplace mène à un manifeste dont le nom correspond.
 
 La troisième ligne est la seule qui mérite un script plutôt qu'une relecture :
-les 148 lignes du registre sont éditées par d'autres chantiers, et un outil
+les 149 lignes du registre sont éditées par d'autres chantiers, et un outil
 renommé rend un geste faux **sans rien casser d'autre**. Le script a été vu
 rougir — renommer `company_health_get` dans `point-du-jour` le fait échouer — parce
 qu'une vérification qui n'a jamais échoué ne prouve rien.
