@@ -102,9 +102,10 @@ pub fn tools() -> Vec<ToolDef> {
                  400 `bad_segment`, et c'est la seule façon de connaître l'orthographe exacte \
                  attendue. C'est exactement la valeur qu'attend le champ `segment` de \
                  `prospects_import`. **Ce n'est pas la même liste que le `segment` d'un objectif \
-                 `sales-development`** posé par `initiatives_set` : celle-là en admet cinq \
-                 (`airline`, `ota`, `corporate_travel`, `insurer`, `cruise_line`), n'a ni `tmc`, \
-                 ni `relocation`, ni `other`, et épelle la croisière `cruise_line`. Prendre une \
+                 `sales-development`** posé par `initiatives_set` : celle-là en admet six \
+                 (`airline`, `ota`, `corporate_travel`, `insurer`, `cruise_line`, `partner`), \
+                 n'a ni `tmc`, ni `relocation`, ni `other`, et épelle la croisière \
+                 `cruise_line`. Prendre une \
                  valeur d'ici pour un objectif est un 400 `objective_field`.",
             method: Method::Get,
             path: "/v1/prospects/segments",
@@ -801,6 +802,32 @@ pub fn tools() -> Vec<ToolDef> {
             query: &[],
             raw_body: None,
             risk: Risk::Read,
+        },
+        ToolDef {
+            name: "sequences_enrollment_remove",
+            title: "Retirer un contact d'une séquence",
+            description: "Arrête le run actif de ce contact dans cette séquence — `stopped`, raison \
+                 `unenrolled` — et annule la promesse qui n'a pas encore sonné, pour que le siège \
+                 ne soit pas réveillé pour rien. C'est le geste d'un opérateur qui retire une \
+                 personne mal ciblée (« pas de tunnel de réservation chez eux ») : le contact \
+                 reste joignable et peut être inscrit ailleurs ; pour qu'on ne lui écrive plus \
+                 jamais, c'est la suppression. 404 s'il n'y a pas de run actif — jamais inscrit, \
+                 déjà fini, déjà retiré — et rien n'est écrit. `sequences_archive` ferme une \
+                 séquence entière sans arrêter ses runs ; ce geste-ci arrête un run sans fermer \
+                 la séquence. L'`id` vient de `sequences_list`, le `contact_id` de \
+                 `contacts_list` ou de `sequences_runs_list`.",
+            method: Method::Delete,
+            path: "/v1/sequences/{id}/enroll/{contact_id}",
+            schema: schema(
+                json!({
+                    "id": { "type": "string", "format": "uuid", "description": "La séquence." },
+                    "contact_id": { "type": "string", "format": "uuid", "description": "Le contact à retirer." }
+                }),
+                &["id", "contact_id"],
+            ),
+            query: &[],
+            raw_body: None,
+            risk: Risk::Destructive,
         },
         ToolDef {
             name: "sequences_archive",
